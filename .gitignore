@@ -1,0 +1,49 @@
+# Python env / cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Top-level build
+build/
+CMakeFiles/
+CMakeCache.txt
+*.pdb
+*.obj
+*.ilk
+*.idb
+*.log
+
+# Visual Studio / IDE
+.vscode/
+.idea/
+*.user
+*.suo
+*.vcxproj*
+*.code-workspace
+.vs/
+
+# GigaLearnCPP builds and heavy stuff
+GigaLearnCPP/build/
+GigaLearnCPP/GigaLearnCPP/build/
+GigaLearnCPP/GigaLearnCPP/libtorch/
+GigaLearnCPP/GigaLearnCPP/checkpoints/
+
+# RLBot / RocketSim builds
+GigaLearnCPP/RLBotCPP/build/
+RLBotCPP/build/
+
+# Checkpoints / training artifacts
+checkpoints/
+wandb/
+*.pt
+*.pth
+*.onnx
+*.npz
+
+# Misc
+*.tmp
+*.log
+
+# Local debug files
+tree_small.txt
