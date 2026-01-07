@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.8)
+cmake_minimum_required (VERSION 3.10)
 
 project("GigaLearnBot")
 
@@ -21,3 +21,7 @@ target_link_libraries(GigaLearnBot GigaLearnCPP)
 # Include RLBot
 add_subdirectory(RLBotCPP)
 target_link_libraries(GigaLearnBot RLBotCPP)
+
+add_executable(test_lowboost_opp_half_fifty_punish
+    tools/test_lowboost_opp_half_fifty_punish.cpp
+)

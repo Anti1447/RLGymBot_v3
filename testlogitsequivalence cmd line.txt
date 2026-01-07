@@ -1,0 +1,7 @@
+cl /W4 /EHsc /std:c++17 ^
+   /I"C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include" ^
+   TestLogitsEquivalence.cpp ^
+   /link ^
+   "C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\lib\torch.lib" ^
+   "C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\lib\torch_cpu.lib" ^
+   /OUT:TestLogitsEquivalence.exe
