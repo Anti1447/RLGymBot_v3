@@ -217,7 +217,7 @@ torch::Tensor ComputeEntropy(torch::Tensor probs, torch::Tensor actionMasks, boo
 	return entropy.mean();
 }
 
-void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration) {
+void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets = nullptr) {
 	auto mseLoss = torch::nn::MSELoss();
 
 	MutAvgTracker
@@ -321,6 +321,56 @@ void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool i
 					avgCriticLoss += criticLoss.detach().cpu().item<float>();
 				}
 
+				// ===== ADD REANALYSIS LOSS HERE =====
+				// Phase 6: Add reanalysis loss if targets available
+				if (reanalysisTargets && reanalysisTargets->hasTargets) {
+					// Move reanalysis targets to device
+					auto reanalysisObs = reanalysisTargets->observations.to(device);
+					auto mctsValueTargets = reanalysisTargets->mctsValueTargets.to(device);
+					auto mctsPolicyTargets = reanalysisTargets->mctsPolicyTargets.to(device);
+
+					// Get current policy and value predictions for reanalysis states
+					torch::Tensor reanalysisActionMasks = torch::ones({ reanalysisObs.size(0), actionCount }, device);
+
+					// Policy reanalysis loss
+					torch::Tensor policyReanalysisLoss;
+					if (trainPolicy) {
+						auto reanalysisPolicyProbs = InferPolicyProbsFromModels(models, reanalysisObs, reanalysisActionMasks, config.policyTemperature, false);
+
+						// KL divergence: KL(MCTS || Policy) = sum(MCTS * log(MCTS / Policy))
+						auto logPolicyProbs = torch::log(reanalysisPolicyProbs + 1e-8f);
+						auto logMCTSProbs = torch::log(mctsPolicyTargets + 1e-8f);
+						policyReanalysisLoss = torch::sum(
+							mctsPolicyTargets * (logMCTSProbs - logPolicyProbs),
+							-1
+						).mean() * batchSizeRatio;
+					}
+
+					// Value reanalysis loss
+					torch::Tensor valueReanalysisLoss;
+					if (trainCritic) {
+						auto reanalysisValuePreds = InferCritic(reanalysisObs).squeeze(-1);
+						valueReanalysisLoss = torch::mse_loss(reanalysisValuePreds, mctsValueTargets) * batchSizeRatio;
+					}
+
+					// Add weighted reanalysis losses
+					if (trainPolicy && policyReanalysisLoss.defined()) {
+						ppoLoss = ppoLoss + config.policyReanalysisWeight * policyReanalysisLoss;
+					}
+					if (trainCritic && valueReanalysisLoss.defined()) {
+						criticLoss = criticLoss + config.valueReanalysisWeight * valueReanalysisLoss;
+					}
+
+					// Track metrics (only once per epoch, not per minibatch)
+					if (start == 0) {
+						if (policyReanalysisLoss.defined())
+							report["Reanalysis/Policy Loss"] = policyReanalysisLoss.detach().cpu().item<float>();
+						if (valueReanalysisLoss.defined())
+							report["Reanalysis/Value Loss"] = valueReanalysisLoss.detach().cpu().item<float>();
+					}
+				}
+				// ===== END REANALYSIS LOSS =====
+
 				if (trainPolicy) {
 					// Compute KL divergence & clip fraction using SB3 method for reporting;
 					{
@@ -336,9 +386,10 @@ void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool i
 				}
 
 				if (trainPolicy && trainCritic) {
-					auto combinedLoss = ppoLoss + criticLoss;
+					auto combinedLoss = ppoLoss + criticLoss;  // This now includes reanalysis!
 					combinedLoss.backward();
-				} else {
+				}
+				else {
 					if (trainPolicy)
 						ppoLoss.backward();
 					if (trainCritic)

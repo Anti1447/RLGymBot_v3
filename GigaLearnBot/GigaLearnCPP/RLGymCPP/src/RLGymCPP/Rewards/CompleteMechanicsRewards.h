@@ -2530,14 +2530,14 @@ private:
         float maxShotDistance = 8000.0f;           // Max reasonable distance
 
         // Velocity thresholds (UU/s)
-        float minBallVelocity = 1500.0f;           // Minimum shot speed
-        float goodBallVelocity = 2000.0f;          // Good shot speed
-        float greatBallVelocity = 2500.0f;         // Great shot speed
-        float insaneBallVelocity = 3200.0f;        // Insane shot speed
+        float minBallVelocity = 1000.0f;           // Minimum shot speed
+        float goodBallVelocity = 1500.0f;          // Good shot speed
+        float greatBallVelocity = 2000.0f;         // Great shot speed
+        float insaneBallVelocity = 2500.0f;        // Insane shot speed
 
         // Accuracy thresholds
-        float maxAngleToGoal = 0.5236f;            // ±30 degrees to center of goal
-        float goodAngleToGoal = 0.2618f;           // ±15 degrees (tighter)
+        float maxAngleToGoal = 0.2f;            // ±30 degrees to center of goal
+        float goodAngleToGoal = 0.1f;           // ±15 degrees (tighter)
 
         // Goal dimensions (Rocket League)
         float goalWidth = 1792.0f;                 // Total goal width
@@ -2792,15 +2792,74 @@ public:
 };
 
 // ============================================================================
-// OpenNetShotReward - NEW
+// OpenNetShotReward - UPDATED
 // Massively rewards shooting when net is open (no defenders in way)
-// This encourages immediate shooting over dribbling when opportunity exists
-// 2025-12-23 | Rev 1.0
+// Now also checks positioning: player and ball should be closer to opponent goal
+// Adds bonus for opponents being out of position
+// 2025-01-10 | Rev 2.0 (NJH)
 // ============================================================================
 class OpenNetShotReward : public Reward {
 private:
     float baseReward = 25.0f;  // HUGE reward for open net shots
     float defenderCheckRadius = 2500.0f;  // How far to check for defenders
+    float outOfPositionBonus = 15.0f;  // Extra reward when opponent is out of position
+    float velocityToGoalBonus = 10.0f;  // Extra reward for ball velocity toward goal when opponent out of position
+
+    // Check if player is closer to opponent goal than all opponents
+    bool IsPlayerCloserToGoalThanOpponents(const Player& player, const GameState& state, const Vec& oppGoal) const {
+        float playerDistToGoal = (player.pos - oppGoal).Length();
+
+        for (const Player& p : state.players) {
+            if (p.team == player.team) continue;  // Skip teammates
+
+            float oppDistToGoal = (p.pos - oppGoal).Length();
+
+            // If any opponent is closer to goal than us, we're not in ideal position
+            if (oppDistToGoal < playerDistToGoal - 300.0f) {  // 300 unit margin
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Check if ball is closer to opponent goal than all opponents
+    bool IsBallCloserToGoalThanOpponents(const GameState& state, const Vec& oppGoal, Team playerTeam) const {
+        float ballDistToGoal = (state.ball.pos - oppGoal).Length();
+
+        for (const Player& p : state.players) {
+            if (p.team == playerTeam) continue;  // Skip our team
+
+            float oppDistToGoal = (p.pos - oppGoal).Length();
+
+            // If any opponent is closer to goal than ball, they're defending well
+            if (oppDistToGoal < ballDistToGoal - 300.0f) {  // 300 unit margin
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Check if opponent is out of position (we're closer to both goal and ball)
+    bool IsOpponentOutOfPosition(const Player& player, const GameState& state, const Vec& oppGoal) const {
+        float playerDistToBall = (player.pos - state.ball.pos).Length();
+        float playerDistToGoal = (player.pos - oppGoal).Length();
+
+        for (const Player& p : state.players) {
+            if (p.team == player.team) continue;  // Skip teammates
+
+            float oppDistToBall = (p.pos - state.ball.pos).Length();
+            float oppDistToGoal = (p.pos - oppGoal).Length();
+
+            // Opponent is in good position if they're closer to ball OR closer to goal
+            if (oppDistToBall < playerDistToBall - 200.0f || oppDistToGoal < playerDistToGoal - 300.0f) {
+                return false;
+            }
+        }
+
+        return true;  // We're closer to both ball and goal than all opponents
+    }
 
     bool IsNetOpen(const Player& player, const GameState& state) const {
         Vec oppGoal = (player.team == Team::BLUE)
@@ -2851,16 +2910,25 @@ public:
             return 0.0f;
         }
 
+        Vec oppGoal = (player.team == Team::BLUE)
+            ? CommonValues::ORANGE_GOAL_BACK
+            : CommonValues::BLUE_GOAL_BACK;
+
+        // NEW: Check positioning - both player and ball should be closer to goal than opponents
+        bool playerCloserToGoal = IsPlayerCloserToGoalThanOpponents(player, state, oppGoal);
+        bool ballCloserToGoal = IsBallCloserToGoalThanOpponents(state, oppGoal, player.team);
+
+        // Require at least one positioning advantage
+        if (!playerCloserToGoal && !ballCloserToGoal) {
+            return 0.0f;  // Not in advantageous position
+        }
+
         // Check if net is open
         if (!IsNetOpen(player, state)) {
             return 0.0f;
         }
 
-        // MASSIVE reward for open net shots
-        Vec oppGoal = (player.team == Team::BLUE)
-            ? CommonValues::ORANGE_GOAL_BACK
-            : CommonValues::BLUE_GOAL_BACK;
-
+        float totalReward = baseReward;
         float distToGoal = (state.ball.pos - oppGoal).Length();
 
         // Bonus for close range open nets
@@ -2873,7 +2941,21 @@ public:
         float kph = state.ball.vel.Length() * 0.036f;
         float speedBonus = RS_CLAMP(kph / 80.0f, 0.5f, 1.5f);
 
-        return baseReward * distanceBonus * speedBonus;
+        totalReward *= distanceBonus * speedBonus;
+
+        // NEW: Out of position bonus - opponent is further from both goal and ball
+        if (IsOpponentOutOfPosition(player, state, oppGoal)) {
+            totalReward += outOfPositionBonus;
+
+            // Additional bonus for ball velocity toward goal when opponent is out of position
+            Vec dirToGoal = (oppGoal - state.ball.pos).Normalized();
+            float velTowardGoal = RS_MAX(0.0f, state.ball.vel.Dot(dirToGoal));
+            float velBonus = RS_CLAMP(velTowardGoal / 2300.0f, 0.0f, 1.0f);  // Normalize by max speed
+
+            totalReward += velocityToGoalBonus * velBonus;
+        }
+
+        return totalReward;
     }
 };
 
@@ -3902,37 +3984,368 @@ public:
     }
 };
 
-// Wall pinch clears - pinching ball on wall
+// ============================================================================
+// WALL PINCH REWARD
+// Rewards pinching ball against side/back wall to create speed.
+// Key: matching ball velocity + sending ball outward + directional control
+// ============================================================================
 class WallPinchReward : public Reward {
-public:
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (!player.ballTouchedStep) return 0.0f;
-        if (!state.prev) return 0.0f;
+private:
+    mutable std::map<uint32_t, float> prevBallSpeed;
 
-        // Check if ball is near wall
+    static constexpr float WALL_DISTANCE_THRESHOLD = 200.0f;  // More lenient
+    static constexpr float MIN_PINCH_SPEED_GAIN = 500.0f;     // Speed increase needed
+    static constexpr float MIN_RESULT_SPEED = 2000.0f;        // Minimum ball speed after
+    static constexpr float VELOCITY_MATCH_BONUS = 0.15f;      // Reward for matching ball speed
+    static constexpr float BASE_PINCH_REWARD = 0.4f;
+    static constexpr float DODGE_BONUS = 0.3f;
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        prevBallSpeed.clear();
+    }
+
+    bool is_near_wall(const Vec& ballPos) const {
         float distToWallX = RS_MIN(
-            abs(state.ball.pos.x - CommonValues::SIDE_WALL_X),
-            abs(state.ball.pos.x + CommonValues::SIDE_WALL_X)
+            abs(ballPos.x - CommonValues::SIDE_WALL_X),
+            abs(ballPos.x + CommonValues::SIDE_WALL_X)
         );
         float distToWallY = RS_MIN(
-            abs(state.ball.pos.y - CommonValues::BACK_WALL_Y),
-            abs(state.ball.pos.y + CommonValues::BACK_WALL_Y)
+            abs(ballPos.y - CommonValues::BACK_WALL_Y),
+            abs(ballPos.y + CommonValues::BACK_WALL_Y)
         );
-        
+
         float minWallDist = RS_MIN(distToWallX, distToWallY);
-        
-        if (minWallDist < 100.0f) {
-            // Very close to wall
-            float prevSpeed = state.prev->ball.vel.Length();
-            float curSpeed = state.ball.vel.Length();
-            
-            // Pinch = massive speed increase
-            if (curSpeed > prevSpeed + 1000.0f && curSpeed > 2500.0f) {
-                return 25.0f; // Wall pinch!
-            }
+        return minWallDist < WALL_DISTANCE_THRESHOLD;
+    }
+
+    bool is_ball_moving_away_from_wall(const Vec& ballPos, const Vec& ballVel) const {
+        // Check X direction (side walls)
+        float distToLeftWall = abs(ballPos.x + CommonValues::SIDE_WALL_X);
+        float distToRightWall = abs(ballPos.x - CommonValues::SIDE_WALL_X);
+
+        if (distToLeftWall < distToRightWall) {
+            // Closer to left wall, should move right (positive X)
+            if (ballVel.x < -100.0f) return false;  // Moving wrong direction
         }
-        
+        else {
+            // Closer to right wall, should move left (negative X)
+            if (ballVel.x > 100.0f) return false;
+        }
+
+        // Check Y direction (back walls)
+        float distToBackY = abs(ballPos.y - CommonValues::BACK_WALL_Y);
+        float distToOwnY = abs(ballPos.y + CommonValues::BACK_WALL_Y);
+
+        if (distToBackY < distToOwnY) {
+            // Near back wall, should move toward own goal
+            if (ballVel.y > 100.0f) return false;
+        }
+        else {
+            // Near own goal line, should move toward back wall
+            if (ballVel.y < -100.0f) return false;
+        }
+
+        return true;
+    }
+
+    float compute_velocity_match_bonus(const Player& player, const GameState& state) const {
+        // Reward matching ball velocity (critical for pinch setup)
+        float playerSpeed = player.vel.Length();
+        float ballSpeed = state.ball.vel.Length();
+
+        // Perfect match = 5% of ball speed as bonus
+        float speedDiff = abs(playerSpeed - ballSpeed);
+        if (speedDiff < 200.0f) {
+            // Close match
+            return VELOCITY_MATCH_BONUS;
+        }
+        else if (speedDiff < 500.0f) {
+            // Partial match
+            return VELOCITY_MATCH_BONUS * 0.5f;
+        }
+
         return 0.0f;
+    }
+
+    float compute_goal_direction_multiplier(const Player& player, const GameState& state) const {
+        // Get opponent goal position
+        Vec opponentGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_LINE_CENTER :
+            CommonValues::BLUE_GOAL_LINE_CENTER;
+
+        // Direction from ball to opponent goal
+        Vec toGoal = opponentGoal - state.ball.pos;
+        Vec goalDir = toGoal.Normalized();
+
+        // Ball velocity direction
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < 100.0f) return 1.0f;  // Stationary, no multiplier
+
+        Vec ballDir = state.ball.vel / ballSpeed;
+
+        // Dot product: how aligned is ball velocity with goal direction?
+        float alignment = ballDir.Dot(goalDir);
+
+        // 2.0x if directly toward goal (alignment > 0.7)
+        if (alignment > 0.7f) {
+            return 2.0f;
+        }
+        // 1.5x if general direction toward goal (alignment > 0.3)
+        else if (alignment > 0.3f) {
+            return 1.5f;
+        }
+        // 1.0x if neutral or wrong direction
+        else {
+            return 1.0f;
+        }
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep || !state.prev) return 0.0f;
+
+        // Check if ball is near wall
+        if (!is_near_wall(state.ball.pos)) {
+            prevBallSpeed[player.carId] = state.ball.vel.Length();
+            return 0.0f;
+        }
+
+        float prevSpeed = prevBallSpeed[player.carId];
+        float curSpeed = state.ball.vel.Length();
+        float speedGain = curSpeed - prevSpeed;
+
+        // Detect pinch: significant speed increase
+        if (speedGain < MIN_PINCH_SPEED_GAIN || curSpeed < MIN_RESULT_SPEED) {
+            prevBallSpeed[player.carId] = curSpeed;
+            return 0.0f;
+        }
+
+        // Validate ball is moving AWAY from wall
+        if (!is_ball_moving_away_from_wall(state.ball.pos, state.ball.vel)) {
+            prevBallSpeed[player.carId] = curSpeed;
+            return 0.0f;
+        }
+
+        // Successful wall pinch
+        float reward = BASE_PINCH_REWARD;
+
+        // Bonus for velocity matching
+        reward += compute_velocity_match_bonus(player, state);
+
+        // Bonus for using dodge/flip
+        if (player.isFlipping) {
+            reward += DODGE_BONUS;
+        }
+
+        // Multiplier for shooting toward opponent goal
+        float goalMultiplier = compute_goal_direction_multiplier(player, state);
+        reward *= goalMultiplier;
+
+        prevBallSpeed[player.carId] = curSpeed;
+        return reward;
+    }
+};
+
+// ============================================================================
+// GROUND PINCH REWARD
+// Rewards pinching ball on ground between car and opponent/wall.
+// Requires: low car, matching speed, directional control, explosive power
+// ============================================================================
+class GroundPinchReward : public Reward {
+private:
+    mutable std::map<uint32_t, float> prevBallSpeed;
+
+    static constexpr float GROUND_HEIGHT_THRESHOLD = 150.0f;    // Ball near ground
+    static constexpr float MIN_PINCH_SPEED_GAIN = 600.0f;       // Need good speed
+    static constexpr float MIN_RESULT_SPEED = 2200.0f;
+    static constexpr float VELOCITY_MATCH_BONUS = 0.15f;
+    static constexpr float BASE_PINCH_REWARD = 0.5f;
+    static constexpr float DODGE_BONUS = 0.35f;
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        prevBallSpeed.clear();
+    }
+
+    bool is_ball_on_ground(const Vec& ballPos) const {
+        return ballPos.z < GROUND_HEIGHT_THRESHOLD;
+    }
+
+    float compute_velocity_match_bonus(const Player& player, const GameState& state) const {
+        float playerSpeed = player.vel.Length();
+        float ballSpeed = state.ball.vel.Length();
+        float speedDiff = abs(playerSpeed - ballSpeed);
+
+        if (speedDiff < 200.0f) {
+            return VELOCITY_MATCH_BONUS;
+        }
+        else if (speedDiff < 500.0f) {
+            return VELOCITY_MATCH_BONUS * 0.5f;
+        }
+
+        return 0.0f;
+    }
+
+    float compute_goal_direction_multiplier(const Player& player, const GameState& state) const {
+        Vec opponentGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_LINE_CENTER :
+            CommonValues::BLUE_GOAL_LINE_CENTER;
+
+        Vec toGoal = opponentGoal - state.ball.pos;
+        Vec goalDir = toGoal.Normalized();
+
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < 100.0f) return 1.0f;
+
+        Vec ballDir = state.ball.vel / ballSpeed;
+        float alignment = ballDir.Dot(goalDir);
+
+        if (alignment > 0.7f) {
+            return 2.0f;
+        }
+        else if (alignment > 0.3f) {
+            return 1.5f;
+        }
+        else {
+            return 1.0f;
+        }
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep || !state.prev) return 0.0f;
+
+        if (!is_ball_on_ground(state.ball.pos)) {
+            prevBallSpeed[player.carId] = state.ball.vel.Length();
+            return 0.0f;
+        }
+
+        float prevSpeed = prevBallSpeed[player.carId];
+        float curSpeed = state.ball.vel.Length();
+        float speedGain = curSpeed - prevSpeed;
+
+        // Detect pinch
+        if (speedGain < MIN_PINCH_SPEED_GAIN || curSpeed < MIN_RESULT_SPEED) {
+            prevBallSpeed[player.carId] = curSpeed;
+            return 0.0f;
+        }
+
+        // Successful ground pinch
+        float reward = BASE_PINCH_REWARD;
+
+        reward += compute_velocity_match_bonus(player, state);
+
+        if (player.isFlipping) {
+            reward += DODGE_BONUS;
+        }
+
+        // Multiplier for shooting toward opponent goal
+        float goalMultiplier = compute_goal_direction_multiplier(player, state);
+        reward *= goalMultiplier;
+
+        prevBallSpeed[player.carId] = curSpeed;
+        return reward;
+    }
+};
+
+// ============================================================================
+// CEILING PINCH REWARD
+// Rewards pinching ball against ceiling for aerial plays.
+// Hardest pinch - requires ceiling control + matching speed + flip
+// ============================================================================
+class CeilingPinchReward : public Reward {
+private:
+    mutable std::map<uint32_t, float> prevBallSpeed;
+
+    static constexpr float CEILING_HEIGHT_THRESHOLD = 4050.0f;  // Near ceiling
+    static constexpr float MIN_PINCH_SPEED_GAIN = 700.0f;       // Highest bar
+    static constexpr float MIN_RESULT_SPEED = 2400.0f;
+    static constexpr float VELOCITY_MATCH_BONUS = 0.2f;         // Higher bonus for aerial
+    static constexpr float BASE_PINCH_REWARD = 0.6f;            // Higher base
+    static constexpr float DODGE_BONUS = 0.4f;                  // Higher dodge bonus
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        prevBallSpeed.clear();
+    }
+
+    bool is_ball_on_ceiling(const Vec& ballPos) const {
+        return ballPos.z > CEILING_HEIGHT_THRESHOLD;
+    }
+
+    float compute_velocity_match_bonus(const Player& player, const GameState& state) const {
+        float playerSpeed = player.vel.Length();
+        float ballSpeed = state.ball.vel.Length();
+        float speedDiff = abs(playerSpeed - ballSpeed);
+
+        if (speedDiff < 150.0f) {
+            // Tight match needed for ceiling
+            return VELOCITY_MATCH_BONUS;
+        }
+        else if (speedDiff < 400.0f) {
+            return VELOCITY_MATCH_BONUS * 0.5f;
+        }
+
+        return 0.0f;
+    }
+
+    float compute_goal_direction_multiplier(const Player& player, const GameState& state) const {
+        Vec opponentGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_LINE_CENTER :
+            CommonValues::BLUE_GOAL_LINE_CENTER;
+
+        Vec toGoal = opponentGoal - state.ball.pos;
+        Vec goalDir = toGoal.Normalized();
+
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < 100.0f) return 1.0f;
+
+        Vec ballDir = state.ball.vel / ballSpeed;
+        float alignment = ballDir.Dot(goalDir);
+
+        if (alignment > 0.7f) {
+            return 2.0f;
+        }
+        else if (alignment > 0.3f) {
+            return 1.5f;
+        }
+        else {
+            return 1.0f;
+        }
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep || !state.prev) return 0.0f;
+
+        if (!is_ball_on_ceiling(state.ball.pos)) {
+            prevBallSpeed[player.carId] = state.ball.vel.Length();
+            return 0.0f;
+        }
+
+        float prevSpeed = prevBallSpeed[player.carId];
+        float curSpeed = state.ball.vel.Length();
+        float speedGain = curSpeed - prevSpeed;
+
+        // Detect pinch
+        if (speedGain < MIN_PINCH_SPEED_GAIN || curSpeed < MIN_RESULT_SPEED) {
+            prevBallSpeed[player.carId] = curSpeed;
+            return 0.0f;
+        }
+
+        // Successful ceiling pinch
+        float reward = BASE_PINCH_REWARD;
+
+        reward += compute_velocity_match_bonus(player, state);
+
+        if (player.isFlipping) {
+            reward += DODGE_BONUS;
+        }
+
+        // Multiplier for shooting toward opponent goal
+        float goalMultiplier = compute_goal_direction_multiplier(player, state);
+        reward *= goalMultiplier;
+
+        prevBallSpeed[player.carId] = curSpeed;
+        return reward;
     }
 };
 
@@ -3983,7 +4396,211 @@ public:
 
 
 
-// NOTE: REMOVED AIRDRIBBLEBUMP -- too situational, unreliable detection!
+// ============================================================================
+// AirDribbleBumpReward
+// ============================================================================
+// Rewards a specific sequence:
+// 1. Start air dribbling (multiple air touches with ball control)
+// 2. Bump or demo opponent while maintaining air dribble
+// 3. Get in front of the ball (between ball and opponent goal)
+//
+// This teaches aggressive air dribble plays where you remove defenders
+// ============================================================================
+class AirDribbleBumpReward : public Reward {
+private:
+    struct PlayerState {
+        bool isAirDribbling = false;
+        int airTouchCount = 0;
+        float airDribbleStartTime = 0.0f;
+        bool hasBumpedDuringDribble = false;
+        bool hasPositionedInFront = false;
+        bool rewardPaid = false;
+        float lastTouchTime = 0.0f;
+    };
+
+    mutable std::map<uint32_t, PlayerState> playerStates;
+    mutable float gameTime = 0.0f;
+
+    struct Config {
+        // Air dribble detection
+        float minAirTouchCount = 2.0f;              // Need at least 2 air touches to qualify
+        float minBallHeight = 200.0f;               // Ball must be this high
+        float maxDistToBall = 300.0f;               // Max distance to ball during air dribble
+        float touchTimeout = 1.5f;                  // Max time between touches
+
+        // Bump/demo detection
+        float bumpProximity = 250.0f;               // Distance to opponent for bump detection
+        float minBumpSpeed = 1800.0f;               // Minimum speed for bump to count
+
+        // Positioning detection (in front of ball)
+        float inFrontThreshold = 200.0f;            // Must be this far in front of ball
+        float maxLateralDistance = 800.0f;          // Max distance to ball's path to goal
+
+        // Rewards
+        float airDribbleStartReward = 1.0f;         // Starting air dribble
+        float bumpDuringDribbleReward = 15.0f;      // Bump during air dribble
+        float demoDuringDribbleReward = 25.0f;      // Demo during air dribble (even better)
+        float positionInFrontReward = 5.0f;         // Getting in front after bump
+
+        // Timeouts
+        float maxSequenceDuration = 5.0f;           // Max time for entire sequence
+    };
+
+    Config config;
+
+    /**
+     * Check if player is air dribbling
+     */
+    bool IsAirDribbling(const Player& player, const GameState& state, PlayerState& ps) const {
+        // Must be airborne
+        if (player.isOnGround) return false;
+
+        // Ball must be airborne and at minimum height
+        if (state.ball.pos.z < config.minBallHeight) return false;
+
+        // Must be close to ball
+        float distToBall = (player.pos - state.ball.pos).Length();
+        if (distToBall > config.maxDistToBall) return false;
+
+        return true;
+    }
+
+    /**
+     * Check if player bumped or demoed an opponent
+     */
+    float CheckBumpOrDemo(const Player& player, const GameState& state) const {
+        // Check if we demoed someone this frame
+        if (player.eventState.demo) {
+            return config.demoDuringDribbleReward;
+        }
+
+        // Check if we bumped someone this frame
+        if (player.eventState.bump) {
+            return config.bumpDuringDribbleReward;
+        }
+
+        return 0.0f;
+    }
+
+    /**
+     * Check if player is positioned in front of ball (between ball and opponent goal)
+     */
+    bool IsPositionedInFrontOfBall(const Player& player, const GameState& state) const {
+        Vec oppGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+        // Calculate distances to goal
+        float playerDistToGoal = (player.pos - oppGoal).Length();
+        float ballDistToGoal = (state.ball.pos - oppGoal).Length();
+
+        // Player must be closer to goal than ball
+        if (playerDistToGoal > ballDistToGoal - config.inFrontThreshold) {
+            return false;
+        }
+
+        // Check lateral distance to ball-to-goal path
+        Vec ballToGoal = (oppGoal - state.ball.pos).Normalized();
+        Vec ballToPlayer = player.pos - state.ball.pos;
+        float lateralDist = fabsf(ballToPlayer.Dot(Vec(-ballToGoal.y, ballToGoal.x, 0.0f)));
+
+        if (lateralDist > config.maxLateralDistance) {
+            return false;
+        }
+
+        return true;
+    }
+
+public:
+    AirDribbleBumpReward() : config() {}
+    explicit AirDribbleBumpReward(const Config& cfg) : config(cfg) {}
+
+    virtual void Reset(const GameState& initialState) override {
+        playerStates.clear();
+        gameTime = 0.0f;
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        gameTime += state.deltaTime;
+        uint32_t id = player.carId;
+
+        // Initialize player state
+        if (playerStates.find(id) == playerStates.end()) {
+            playerStates[id] = PlayerState();
+        }
+
+        PlayerState& ps = playerStates[id];
+        float reward = 0.0f;
+
+        // Check for sequence timeout
+        if (ps.isAirDribbling) {
+            float sequenceDuration = gameTime - ps.airDribbleStartTime;
+            if (sequenceDuration > config.maxSequenceDuration) {
+                // Timeout - reset state
+                ps = PlayerState();
+                return 0.0f;
+            }
+        }
+
+        // Reset if on ground and no active sequence
+        if (player.isOnGround && !ps.hasBumpedDuringDribble) {
+            ps = PlayerState();
+            return 0.0f;
+        }
+
+        // PHASE 1: Detect air dribble start
+        if (!ps.isAirDribbling && IsAirDribbling(player, state, ps)) {
+            if (player.ballTouchedStep) {
+                ps.airTouchCount++;
+                ps.lastTouchTime = gameTime;
+
+                if (ps.airTouchCount >= config.minAirTouchCount) {
+                    // Air dribble started!
+                    ps.isAirDribbling = true;
+                    ps.airDribbleStartTime = gameTime;
+                    reward += config.airDribbleStartReward;
+                }
+            }
+        }
+
+        // PHASE 2: During air dribble - maintain touches and look for bump/demo
+        if (ps.isAirDribbling && !ps.hasBumpedDuringDribble) {
+            // Update touch count
+            if (player.ballTouchedStep) {
+                ps.lastTouchTime = gameTime;
+            }
+
+            // Check for touch timeout
+            if (gameTime - ps.lastTouchTime > config.touchTimeout) {
+                // Lost air dribble
+                ps = PlayerState();
+                return 0.0f;
+            }
+
+            // Check for bump or demo
+            float bumpReward = CheckBumpOrDemo(player, state);
+            if (bumpReward > 0.0f) {
+                ps.hasBumpedDuringDribble = true;
+                reward += bumpReward;
+            }
+        }
+
+        // PHASE 3: After bump - reward getting in front of ball
+        if (ps.hasBumpedDuringDribble && !ps.hasPositionedInFront && !ps.rewardPaid) {
+            if (IsPositionedInFrontOfBall(player, state)) {
+                ps.hasPositionedInFront = true;
+                ps.rewardPaid = true;
+                reward += config.positionInFrontReward;
+
+                // Sequence complete - reset for next one
+                ps = PlayerState();
+            }
+        }
+
+        return reward;
+    }
+};
+
+// NOTE: REMOVED OLD AIRDRIBBLEBUMP -- too situational, unreliable detection!
 // Air bump / demo reward - more general-purpose
 // - Renamed to AirBumpDemoReward
 // - Require >= 1s airborne before counting

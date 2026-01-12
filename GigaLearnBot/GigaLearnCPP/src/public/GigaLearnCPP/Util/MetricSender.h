@@ -2,6 +2,13 @@
 #include "Report.h"
 #include <pybind11/pybind11.h>
 
+// Suppress C4251 warnings about STL types needing DLL interface
+// These are safe to ignore when building everything together
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4251)
+#endif
+
 namespace GGL {
 	struct RG_IMEXPORT MetricSender {
 		std::string curRunID;
@@ -17,3 +24,7 @@ namespace GGL {
 		~MetricSender();
 	};
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif

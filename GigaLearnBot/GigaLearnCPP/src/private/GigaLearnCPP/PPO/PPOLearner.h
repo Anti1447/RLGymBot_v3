@@ -4,6 +4,8 @@
 #include <GigaLearnCPP/Util/Timer.h>
 #include <GigaLearnCPP/PPO/PPOLearnerConfig.h>
 #include <GigaLearnCPP/PPO/TransferLearnConfig.h>
+#include <GigaLearnCPP/Learner.h>
+
 
 #include "../Util/Models.h"
 
@@ -53,7 +55,7 @@ namespace GGL {
 			torch::Tensor* outActions, torch::Tensor* outLogProbs
 		);
 
-		void Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration);
+		void Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets = nullptr);
 
 		void TransferLearn(
 			ModelSet& oldModels, 

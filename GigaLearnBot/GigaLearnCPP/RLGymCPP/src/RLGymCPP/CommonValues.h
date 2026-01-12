@@ -7,7 +7,9 @@ namespace RLGC {
 	namespace CommonValues {
 		// Could just use RocketSim's RLConst but I'll just copy to stay faithful
 
-		constexpr float TICK_TIME = 1 / 120.f;
+		//constexpr float TICK_TIME = 1 / 120.f; // 1.0x speed
+		constexpr float TICK_TIME = 1 / 120.f; // 0.5x speed to try out
+
 
 		// 2025-12-18 | Rev 2.0 | NJH
 		// - Major revision based on RLBot wiki reference

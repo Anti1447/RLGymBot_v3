@@ -28,7 +28,7 @@ namespace GGL {
 
 		// Use half-precision models for inference
 		// This is much faster on GPU, not so much for CPU
-		bool useHalfPrecision = false;
+		bool useHalfPrecision = true;
 
 		PartialModelConfig policy, critic, sharedHead;
 
@@ -55,6 +55,12 @@ namespace GGL {
 		bool useGuidingPolicy = false;
 		std::filesystem::path guidingPolicyPath = "guiding_policy/"; // Path of the guiding policy model(s)
 		float guidingStrength = 0.03f;
+
+		// MuZero Setups
+		// Reanalysis loss weights (Phase 6)
+		float policyReanalysisWeight = 0.0f;  // Will be set from LearnerConfig
+		float valueReanalysisWeight = 0.0f;   // Will be set from LearnerConfig
+
 
 		PPOLearnerConfig() {
 			policy = {};

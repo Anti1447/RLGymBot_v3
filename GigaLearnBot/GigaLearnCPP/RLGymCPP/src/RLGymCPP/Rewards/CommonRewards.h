@@ -368,33 +368,92 @@ namespace RLGC {
 		}
 	};
 
-	// Mostly based on the classic Necto rewards
-	// Rev 2 (2025-12-15, NJH): reward impulse magnitude while still requiring net speed-up.
+	// Rev 3 (2025-01-10): Direction-aware touch acceleration
+	// - Rewards touches that increase ball speed toward opponent goal
+	// - Distinguishes offensive vs neutral vs defensive touches
+	// - Better reward scaling for training signal strength
 	class TouchAccelReward : public Reward {
 	public:
-		constexpr static float MAX_REWARDED_BALL_SPEED = RLGC::Math::KPHToVel(110);
-		constexpr static float MAX_REWARDED_IMPULSE = RLGC::Math::KPHToVel(80); // tuning knob
+		// Tuning parameters
+		float maxRewardedBallSpeed;
+		float maxRewardedImpulse;
+		float directionWeight;      // How much to weight goal-direction vs raw speed
+		bool rewardRedirects;       // Whether to reward speed-maintaining redirects toward goal
+
+		TouchAccelReward(
+			float maxBallSpeed = RLGC::Math::KPHToVel(110),
+			float maxImpulse = RLGC::Math::KPHToVel(80),
+			float dirWeight = 0.3f,
+			bool allowRedirects = true
+		) : maxRewardedBallSpeed(maxBallSpeed),
+			maxRewardedImpulse(maxImpulse),
+			directionWeight(dirWeight),
+			rewardRedirects(allowRedirects) {
+		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.prev) return 0.0f;
 			if (!player.ballTouchedStep) return 0.0f;
 
-			const float prevSpeed = state.prev->ball.vel.Length();
-			const float curSpeed = state.ball.vel.Length();
+			const Vec& ballPos = state.ball.pos;
+			const Vec& ballVel = state.ball.vel;
+			const Vec& prevBallVel = state.prev->ball.vel;
 
-			// Must actually speed the ball up (original intent)
-			if (curSpeed <= prevSpeed) return 0.0f;
+			const float prevSpeed = prevBallVel.Length();
+			const float curSpeed = ballVel.Length();
 
-			// Impulse from the touch (vector change)
-			const float impulse = (state.ball.vel - state.prev->ball.vel).Length();
+			// Get goal positions based on player team
+			const Vec& oppGoal = (player.team == Team::BLUE)
+				? RLGC::CommonValues::ORANGE_GOAL_CENTER
+				: RLGC::CommonValues::BLUE_GOAL_CENTER;
 
-			const float impulseFrac = RS_CLAMP(impulse / MAX_REWARDED_IMPULSE, 0.0f, 1.0f);
-			const float prevSpeedFrac = RS_CLAMP(prevSpeed / MAX_REWARDED_BALL_SPEED, 0.0f, 1.0f);
-			const float curSpeedFrac = RS_CLAMP(curSpeed / MAX_REWARDED_BALL_SPEED, 0.0f, 1.0f);
+			// Direction to opponent goal (normalized)
+			Vec toGoal = (oppGoal - ballPos).Normalized();
 
-			// Keep original delta, but scale by "how real" the hit was
-			const float delta = (curSpeedFrac - prevSpeedFrac);
-			return delta * impulseFrac;
+			// Speed toward goal (before and after)
+			float prevGoalSpeed = prevBallVel.Dot(toGoal);
+			float curGoalSpeed = ballVel.Dot(toGoal);
+			float goalSpeedDelta = curGoalSpeed - prevGoalSpeed;
+
+			// Raw speed delta
+			float speedDelta = curSpeed - prevSpeed;
+
+			// Impulse magnitude
+			float impulse = (ballVel - prevBallVel).Length();
+			float impulseFrac = RS_CLAMP(impulse / maxRewardedImpulse, 0.0f, 1.0f);
+
+			// Base reward: speed increase
+			float baseReward = 0.0f;
+
+			if (speedDelta > 0) {
+				// Ball sped up - original behavior
+				float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+				float curSpeedFrac = RS_CLAMP(curSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+				baseReward = (curSpeedFrac - prevSpeedFrac);
+			}
+			else if (rewardRedirects && goalSpeedDelta > 0) {
+				// Ball didn't speed up overall, but IS going more toward goal
+				// Give partial credit for good redirects
+				float redirectBonus = RS_CLAMP(goalSpeedDelta / maxRewardedBallSpeed, 0.0f, 0.5f);
+				baseReward = redirectBonus * 0.5f;  // Half credit for redirects
+			}
+			else {
+				return 0.0f;  // Neither sped up nor redirected toward goal
+			}
+
+			// Direction bonus: extra reward if ball is now heading toward goal
+			float directionBonus = 0.0f;
+			if (curGoalSpeed > 0) {
+				// Ball heading toward opponent goal
+				float goalSpeedFrac = RS_CLAMP(curGoalSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+				directionBonus = goalSpeedFrac * directionWeight;
+			}
+
+			// Combine: base reward scaled by impulse quality, plus direction bonus
+			float reward = (baseReward * impulseFrac) + (directionBonus * impulseFrac);
+
+			// Scale up for better training signal (optional)
+			return reward * 2.0f;  // Doubles effective magnitude
 		}
 	};
 

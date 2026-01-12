@@ -13,6 +13,8 @@
 #include <private/GigaLearnCPP/PPO/ExperienceBuffer.h>
 #include <private/GigaLearnCPP/PPO/GAE.h>
 #include <private/GigaLearnCPP/PolicyVersionManager.h>
+#include <private/GigaLearnCPP/MCTS/ReanalysisBuffer.h>
+#include <private/GigaLearnCPP/MCTS/MCTSSearch.h>
 
 #include "Util/KeyPressDetector.h"
 #include <private/GigaLearnCPP/Util/WelfordStat.h>
@@ -110,6 +112,9 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 	try {
 		RG_LOG("\tMaking PPO learner...");
 		ppo = new PPOLearner(obsSize, numActions, config.ppo, device);
+		// Set reanalysis weights from config
+		ppo->config.policyReanalysisWeight = config.reanalysis.policyReanalysisWeight;
+		ppo->config.valueReanalysisWeight = config.reanalysis.valueReanalysisWeight;
 	} catch (std::exception& e) {
 		RG_ERR_CLOSE("Failed to create PPO learner: " << e.what());
 	}
@@ -150,6 +155,15 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		metricSender = new MetricSender(config.metricsProjectName, config.metricsGroupName, config.metricsRunName, runID);
 	} else {
 		metricSender = NULL;
+	}
+
+	// Initialize reanalysis buffer if enabled
+	if (config.reanalysis.enabled) {
+		RG_LOG("\tInitializing reanalysis buffer (size: " << config.reanalysis.bufferSize << ")...");
+		ReanalysisBufferConfig bufferConfig;
+		bufferConfig.maxSize = config.reanalysis.bufferSize;
+		bufferConfig.minSizeToSample = config.reanalysis.minBufferSize;
+		reanalysisBuffer = new ReanalysisBuffer(bufferConfig);
 	}
 
 	RG_LOG(RG_DIVIDER);
@@ -619,6 +633,13 @@ void GGL::Learner::Start() {
 
 						Timer inferTimer = {};
 
+						// Get value predictions for reanalysis buffer (if enabled)
+						torch::Tensor tValuePreds;
+						if (config.reanalysis.enabled && !render) {
+							torch::Tensor tdStates = tStates.to(ppo->device, true);
+							tValuePreds = ppo->InferCritic(tdStates).cpu();
+						}
+
 						if (oldVersion) {
 							torch::Tensor tdNewStates = tStates.index_select(0, tNewPlayerIndices).to(ppo->device, true);
 							torch::Tensor tdOldStates = tStates.index_select(0, tOldPlayerIndices).to(ppo->device, true);
@@ -687,6 +708,46 @@ void GGL::Learner::Start() {
 							i++;
 						}
 
+						// Collect experience for reanalysis buffer
+						if (config.reanalysis.enabled && tValuePreds.defined()) {
+							// Collect experience for each new player
+							for (size_t i = 0; i < newPlayerIndices.size(); i++) {
+								int playerIdx = newPlayerIndices[i];
+
+								// Find which arena this player is in
+								int arenaIdx = -1;
+								for (size_t a = 0; a < envSet->state.arenaPlayerStartIdx.size(); a++) {
+									int startIdx = envSet->state.arenaPlayerStartIdx[a];
+									int playersInArena = envSet->state.gameStates[a].players.size();
+									if (playerIdx >= startIdx && playerIdx < startIdx + playersInArena) {
+										arenaIdx = a;
+										break;
+									}
+								}
+
+								if (arenaIdx >= 0) {
+									ExperienceSample sample;
+									sample.state = envSet->state.gameStates[arenaIdx];
+									sample.playerIndex = playerIdx - envSet->state.arenaPlayerStartIdx[arenaIdx];
+									sample.action = curActions[playerIdx];
+									sample.reward = envSet->state.rewards[playerIdx];
+									sample.value = tValuePreds[playerIdx].item<float>();
+
+									// Get policy logits (use log probs as approximation for now)
+									sample.policy = std::vector<float>(numActions, 0.0f);
+									if (i < newLogProbs.size()) {
+										// This is a simplification - we'd ideally want the full policy logits
+										// For now, store zeros as placeholder
+									}
+
+									sample.timestep = totalTimesteps + stepsCollected;
+									sample.episodeId = arenaIdx; // Use arena as episode ID for now
+
+									tempExperienceBuffer.push_back(sample);
+								}
+							}
+						}
+
 						auto curTerminals = std::vector<uint8_t>(numPlayers, 0);
 						for (int idx = 0; idx < envSet->arenas.size(); idx++) {
 							uint8_t terminalType = envSet->state.terminals[idx];
@@ -726,6 +787,14 @@ void GGL::Learner::Start() {
 					report["Inference Time"] = inferTime;
 					report["Env Step Time"] = envStepTime;
 				}
+
+				// Add collected experience to reanalysis buffer
+				if (config.reanalysis.enabled && !tempExperienceBuffer.empty()) {
+					reanalysisBuffer->Add(tempExperienceBuffer);
+					RG_LOG("Added " << tempExperienceBuffer.size() << " samples to reanalysis buffer (total: " << reanalysisBuffer->Size() << ")");
+					tempExperienceBuffer.clear();
+				}
+
 				float collectionTime = collectionTimer.Elapsed();
 
 				Timer consumptionTimer = {};
@@ -822,8 +891,34 @@ void GGL::Learner::Start() {
 
 				// Learn
 				Timer learnTimer = {};
-				ppo->Learn(experience, report, isFirstIteration);
+				// Pass reanalysis targets if available
+				Learner::ReanalysisTargets* targetsPtr = latestReanalysisTargets.hasTargets ? &latestReanalysisTargets : nullptr;
+				ppo->Learn(experience, report, isFirstIteration, targetsPtr);
+
+				// Clear reanalysis targets after use
+				latestReanalysisTargets.hasTargets = false;
 				report["PPO Learn Time"] = learnTimer.Elapsed();
+
+				// Run reanalysis if enabled and interval reached
+				if (config.reanalysis.enabled &&
+					totalIterations % config.reanalysis.reanalysisInterval == 0) {
+					Timer reanalysisTimer = {};
+
+					// Add buffer metrics to report
+					report["Reanalysis/Buffer Size"] = (double)reanalysisBuffer->Size();
+					report["Reanalysis/Buffer Fill %"] = (double)reanalysisBuffer->Size() / config.reanalysis.bufferSize * 100.0;
+
+					auto reanalysisMetrics = RunReanalysis();
+					report["Reanalysis Time"] = reanalysisTimer.Elapsed();
+
+					// Add reanalysis metrics to report
+					if (reanalysisMetrics.samplesProcessed > 0) {
+						report["Reanalysis/MCTS Value"] = reanalysisMetrics.meanMCTSValue;
+						report["Reanalysis/PPO Value"] = reanalysisMetrics.meanPPOValue;
+						report["Reanalysis/Value Difference"] = reanalysisMetrics.valueDifference;
+						report["Reanalysis/Samples Processed"] = (double)reanalysisMetrics.samplesProcessed;
+					}
+				}
 
 				// Set metrics
 				float consumptionTime = consumptionTimer.Elapsed();
@@ -895,10 +990,200 @@ void GGL::Learner::Start() {
 	}
 }
 
+// MuZero reanalysis: Batch evaluate states for MCTS
+std::vector<std::pair<std::vector<float>, float>> GGL::Learner::BatchEvaluate(
+	const std::vector<RLGC::GameState>& states,
+	const std::vector<int>& playerIndices
+) {
+	if (states.empty()) return {};
+
+	// Build observations for all states
+	std::vector<RLGC::FList> allObs;
+	allObs.reserve(states.size());
+
+	for (size_t i = 0; i < states.size(); i++) {
+		const auto& state = states[i];
+		int playerIdx = playerIndices[i];
+
+		// Build observation for this player in this state
+		RLGC::FList obs = envSet->obsBuilders[0]->BuildObs(
+			state.players[playerIdx], state
+		);
+		allObs.push_back(obs);
+	}
+
+	// Convert to torch tensor
+	size_t obsSize = allObs[0].size();
+	torch::Tensor obsTensor = torch::zeros({ (int64_t)allObs.size(), (int64_t)obsSize });
+
+	for (size_t i = 0; i < allObs.size(); i++) {
+		for (size_t j = 0; j < allObs[i].size(); j++) {
+			obsTensor[i][j] = allObs[i][j];
+		}
+	}
+
+	// Move to GPU if available
+	obsTensor = obsTensor.to(ppo->device);
+
+	// Get policy and value predictions
+	torch::NoGradGuard noGrad;
+
+	// Create action masks (all actions available for now)
+	torch::Tensor actionMasks = torch::ones({ (int64_t)states.size(), (int64_t)numActions }, ppo->device);
+
+	// Get policy logits
+	torch::Tensor policyLogits = PPOLearner::InferPolicyProbsFromModels(
+		ppo->models, obsTensor, actionMasks, 1.0f, false
+	);
+
+	// Get value estimates
+	torch::Tensor valueEst = ppo->InferCritic(obsTensor);
+
+	// Convert back to CPU and extract results
+	policyLogits = policyLogits.cpu();
+	valueEst = valueEst.cpu();
+
+	std::vector<std::pair<std::vector<float>, float>> results;
+	results.reserve(states.size());
+
+	for (size_t i = 0; i < states.size(); i++) {
+		std::vector<float> policy;
+		policy.reserve(numActions);
+
+		for (size_t j = 0; j < numActions; j++) {
+			policy.push_back(policyLogits[i][j].item<float>());
+		}
+
+		float value = valueEst[i].item<float>();
+		results.push_back({ policy, value });
+	}
+
+	return results;
+}
+
+// MuZero reanalysis: Run MCTS on sampled states
+GGL::Learner::ReanalysisMetrics GGL::Learner::RunReanalysis() {
+	ReanalysisMetrics metrics;
+	if (!reanalysisBuffer || !config.reanalysis.enabled) return metrics;
+
+	// Check if buffer has enough samples
+	if (!reanalysisBuffer->CanSample()) {
+		return metrics;
+	}
+
+	// Sample from buffer
+	auto samples = reanalysisBuffer->Sample(config.reanalysis.samplesPerReanalysis);
+	if (samples.empty()) return metrics;
+
+	RG_LOG("Running reanalysis on " << samples.size() << " samples...");
+
+	// Extract states and player indices
+	std::vector<RLGC::GameState> states;
+	std::vector<int> playerIndices;
+	states.reserve(samples.size());
+	playerIndices.reserve(samples.size());
+
+	for (const auto& sample : samples) {
+		states.push_back(sample.state);
+		playerIndices.push_back(sample.playerIndex);
+	}
+
+	// Create MCTS evaluator that uses our policy/value networks
+	auto evaluator = [this](const std::vector<RLGC::GameState>& states,
+	                       const std::vector<int>& indices) {
+		return this->BatchEvaluate(states, indices);
+	};
+
+	// Configure MCTS
+	MCTSConfig mctsConfig;
+	mctsConfig.numSimulations = config.reanalysis.mctsSimulations;
+	mctsConfig.cPuct = config.reanalysis.mctsCPuct;
+	mctsConfig.addRootNoise = config.reanalysis.mctsAddNoise;
+
+	// Run batched MCTS search
+	BatchedMCTSSearch searcher(mctsConfig);
+	auto results = searcher.SearchBatch(states, playerIndices, evaluator);
+
+	// Calculate mean metrics for logging
+	if (!results.empty()) {
+		float meanMCTSValue = 0.0f;
+		float meanPPOValue = 0.0f;
+		float meanSimulations = 0.0f;
+
+		for (size_t i = 0; i < results.size(); i++) {
+			meanMCTSValue += results[i].valueEstimate;
+			meanPPOValue += samples[i].value;  // This is the PPO critic prediction we stored
+			meanSimulations += results[i].totalSimulations;
+		}
+		meanMCTSValue /= results.size();
+		meanPPOValue /= results.size();
+		meanSimulations /= results.size();
+
+		RG_LOG("Reanalysis complete: " << results.size() << " samples, "
+			<< "mean MCTS value: " << meanMCTSValue << ", "
+			<< "mean PPO value: " << meanPPOValue << ", "
+			<< "mean sims: " << meanSimulations);
+
+		// Populate metrics to return
+		metrics.meanMCTSValue = meanMCTSValue;
+		metrics.meanPPOValue = meanPPOValue;
+		metrics.valueDifference = std::abs(meanMCTSValue - meanPPOValue);
+		metrics.samplesProcessed = results.size();
+	}
+
+	// Phase 6: Store MCTS targets for PPO loss integration
+	if (!results.empty()) {
+		// Build observations for all sampled states
+		std::vector<RLGC::FList> allObs;
+		allObs.reserve(samples.size());
+
+		for (size_t i = 0; i < samples.size(); i++) {
+			RLGC::FList obs = envSet->obsBuilders[0]->BuildObs(
+				samples[i].state.players[samples[i].playerIndex],
+				samples[i].state
+			);
+			allObs.push_back(obs);
+		}
+
+		// Convert observations to tensor
+		torch::Tensor obsTensor = torch::zeros({ (int64_t)allObs.size(), (int64_t)obsSize });
+		for (size_t i = 0; i < allObs.size(); i++) {
+			for (size_t j = 0; j < allObs[i].size(); j++) {
+				obsTensor[i][j] = allObs[i][j];
+			}
+		}
+
+		// Convert MCTS results to tensors
+		torch::Tensor valueTargets = torch::zeros({ (int64_t)results.size() });
+		torch::Tensor policyTargets = torch::zeros({ (int64_t)results.size(), (int64_t)numActions });
+
+		for (size_t i = 0; i < results.size(); i++) {
+			// Value target from MCTS
+			valueTargets[i] = results[i].valueEstimate;
+
+			// Policy target from MCTS visit distribution (already normalized)
+			for (size_t a = 0; a < results[i].visitDistribution.size(); a++) {
+				policyTargets[i][a] = results[i].visitDistribution[a];
+			}
+		}
+
+		// Store in member variable for PPO to use
+		latestReanalysisTargets.observations = obsTensor;
+		latestReanalysisTargets.mctsValueTargets = valueTargets;
+		latestReanalysisTargets.mctsPolicyTargets = policyTargets;
+		latestReanalysisTargets.hasTargets = true;
+
+		RG_LOG("Stored " << results.size() << " reanalysis targets for PPO loss integration");
+	}
+
+	return metrics;
+}
+
 GGL::Learner::~Learner() {
 	delete ppo;
 	delete versionMgr;
 	delete metricSender;
 	delete renderSender;
+	delete reanalysisBuffer;
 	pybind11::finalize_interpreter();
 }

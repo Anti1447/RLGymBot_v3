@@ -77,11 +77,11 @@ namespace RLGC {
         // More aggressive: 1.2-1.5 | More conservative: 0.4-0.6
 
         // --- SCORING ZONE REWARDS ---
-        const float SCORING_ZONE_MIN_HEIGHT = 200.0f;
+        const float SCORING_ZONE_MIN_HEIGHT = 150.0f;
         // Minimum ball height for scoring zone
         // Conservative: 300-350
 
-        const float SCORING_ZONE_MAX_HEIGHT = 650.0f;
+        const float SCORING_ZONE_MAX_HEIGHT = 640.0f;
         // Maximum ball height for scoring zone
         // Conservative: 640-680 (just above goal rim at 642.775)
 
@@ -100,7 +100,7 @@ namespace RLGC {
         // Blue goal at y=5120, Orange at y=-5120
 
         // --- HEIGHT CONSTRAINT FOR FINISHING ZONE ---
-        const float MAX_BALL_Z_FOR_GOAL = 642.775f;
+        const float MAX_BALL_Z_FOR_GOAL = 630.f;
         // Maximum ball center z-height when in finishing zone
         // = Goal height (642.775) + tolerance (75)
         // Prevents overshooting

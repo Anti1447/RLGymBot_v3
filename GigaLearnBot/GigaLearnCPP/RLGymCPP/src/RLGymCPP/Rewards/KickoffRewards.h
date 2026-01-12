@@ -24,7 +24,7 @@ namespace RLGC {
         explicit KickoffSpeedReward(
             float centerRadiusIn = 300.0f,
             float maxBallSpeedIn = 500.0f,
-            float minSpeedThresholdIn = 800.0f)  // Require decent speed
+            float minSpeedThresholdIn = 1800.0f)  // Require near-supersonic speed
             : centerRadius(centerRadiusIn),
             maxBallSpeed(maxBallSpeedIn),
             minSpeedThreshold(minSpeedThresholdIn) {
@@ -269,11 +269,11 @@ namespace RLGC {
         float kickoffDetectBallPos = 280.0f;
         float kickoffDetectBallVel = 200.0f;
 
-        float idealFlipTimeSec = 0.65f;      // Flip around this time
-        float flipWindowSec = 0.95f;         // Must flip before this
-        float touchDeadlineSec = 1.9f;       // Must touch before this
+        float idealFlipTimeSec = 0.60f;      // Flip earlier for faster approach
+        float flipWindowSec = 0.90f;         // Must flip before this (tighter window)
+        float touchDeadlineSec = 1.7f;       // Must touch faster (was 1.9f)
 
-        float minCarSpeedAtTouch = 1200.0f;  // Require high speed on contact
+        float minCarSpeedAtTouch = 2000.0f;  // Require near-supersonic speed (was 1200.0f)
         float ballCenterRadius = 100.0f;     // How close to dead center
 
     public:
@@ -374,7 +374,32 @@ namespace RLGC {
                     }
                 }
 
-                // B) Power and direction - fast hit toward opponent goal
+                // B) Contact height quality - reward hitting middle-to-lower part of ball
+                // Ball radius is ~93 units, so relative Z from -93 to +93
+                // We want to hit at or below the center (negative relative Z is good)
+                float contactHeightQuality = 1.0f;  // Default multiplier
+
+                if (player.prev && player.prev->ballHitInfo.isValid) {
+                    // Get relative contact position on ball (normalized to ball radius)
+                    float relativeContactZ = player.prev->ballHitInfo.relativePosOnBall.z;
+
+                    // Map contact height to quality multiplier:
+                    // - Bottom half (z < 0): Best - multiplier 1.2-1.0
+                    // - Middle (z = 0): Good - multiplier 1.0
+                    // - Upper half (z > 0): Worse - multiplier 1.0-0.6
+                    // - Top (z > 60): Bad - multiplier 0.6-0.3
+
+                    if (relativeContactZ <= 0.0f) {
+                        // Bottom half: linear bonus from 1.0 (center) to 1.2 (bottom)
+                        contactHeightQuality = 1.0f + (-relativeContactZ / CommonValues::BALL_RADIUS) * 0.2f;
+                    } else {
+                        // Upper half: linear penalty from 1.0 (center) to 0.3 (top)
+                        float topnessFactor = RS_CLAMP(relativeContactZ / CommonValues::BALL_RADIUS, 0.0f, 1.0f);
+                        contactHeightQuality = 1.0f - (topnessFactor * 0.7f);
+                    }
+                }
+
+                // C) Power and direction - fast hit toward opponent goal
                 float ballSpeed = state.ball.vel.Length();
                 float speedQuality = RS_CLAMP((ballSpeed - 1000.0f) / 1500.0f, 0.0f, 1.0f);
 
@@ -386,14 +411,22 @@ namespace RLGC {
                     );
                 }
 
-                // Car speed requirement
+                // Car speed requirement with supersonic bonus
                 float carSpeedQuality = RS_CLAMP(
                     (s.carSpeedAtTouch - minCarSpeedAtTouch) / 800.0f,
                     0.0f, 1.0f
                 );
 
+                // Supersonic bonus multiplier (>2200 units/s)
+                float supersonicBonus = 1.0f;
+                if (s.carSpeedAtTouch >= 2200.0f) {
+                    supersonicBonus = 2.5f;  // Huge bonus for supersonic contact
+                } else if (s.carSpeedAtTouch >= 2000.0f) {
+                    supersonicBonus = 1.5f;  // Partial bonus approaching supersonic
+                }
+
                 if (speedQuality > 0.1f && directionQuality > 0.3f && carSpeedQuality > 0.0f) {
-                    float powerReward = 2.0f * speedQuality * directionQuality * (0.5f + 0.5f * carSpeedQuality);
+                    float powerReward = 2.0f * speedQuality * directionQuality * (0.5f + 0.5f * carSpeedQuality) * supersonicBonus * contactHeightQuality;
                     r += powerReward;
 
                     if (!s.powerHitCounted) {
@@ -1045,5 +1078,167 @@ namespace RLGC {
         // Accessors for configuration
         KickoffContactPunishmentReward* GetContactReward() { return &contactReward; }
         KickoffBallPositionReward* GetPositionReward() { return &positionReward; }
+    };
+
+    class FlipDuringKickoffReward : public Reward {
+    private:
+        float speed_threshold = 300.0f; // Minimum speed delta to detect a flip
+        float angle_threshold = 0.3f; // Cosine threshold for "towards ball" direction (~73 degrees)
+        float diagonal_threshold = 0.5f; // Cosine threshold for diagonal detection
+
+        mutable std::map<uint32_t, Vec> prev_velocity;
+        mutable std::map<uint32_t, bool> was_on_ground;
+        mutable float kickoff_start_time = 0.0f;
+        mutable bool kickoff_active = false;
+
+        float kickoff_detect_ball_pos = 280.0f;
+        float kickoff_detect_ball_vel = 200.0f;
+        float kickoff_max_duration = 3.5f;
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            prev_velocity.clear();
+            was_on_ground.clear();
+            kickoff_start_time = 0.0f;
+            kickoff_active = false;
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+            bool is_kickoff_now = (state.ball.pos.Length() < kickoff_detect_ball_pos &&
+                state.ball.vel.Length() < kickoff_detect_ball_vel);
+
+            // Kickoff start
+            if (is_kickoff_now && !kickoff_active) {
+                kickoff_active = true;
+                kickoff_start_time = 0.0f;
+                prev_velocity.clear();
+                was_on_ground.clear();
+                for (const auto& player : state.players) {
+                    was_on_ground[player.carId] = true;
+                }
+            }
+
+            if (kickoff_active) {
+                kickoff_start_time += dt;
+                if (!is_kickoff_now || kickoff_start_time >= kickoff_max_duration) {
+                    kickoff_active = false;
+                }
+            }
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Only reward during kickoff
+            if (!kickoff_active) {
+                return 0.0f;
+            }
+
+            // Must be in the air to perform a flip
+            if (player.isOnGround) {
+                was_on_ground[player.carId] = true;
+                return 0.0f;
+            }
+
+            // Only detect flip in the first frame after leaving ground
+            bool just_left_ground = was_on_ground[player.carId];
+            was_on_ground[player.carId] = false;
+
+            if (!just_left_ground) {
+                // Already in air from previous frame, don't count as flip
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            // Get previous velocity
+            if (prev_velocity.find(player.carId) == prev_velocity.end()) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            Vec prev_vel = prev_velocity[player.carId];
+            float speed_delta = player.vel.Length() - prev_vel.Length();
+
+            // Check if flip occurred (significant speed increase)
+            if (speed_delta < speed_threshold) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            // Direction from car to ball
+            Vec car_to_ball = state.ball.pos - player.pos;
+            float dist = car_to_ball.Length();
+            if (dist < 1e-3f) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+            car_to_ball = car_to_ball / dist;
+
+            // Get flip direction from velocity change
+            Vec vel_delta = player.vel - prev_vel;
+            float vel_delta_mag = vel_delta.Length();
+            if (vel_delta_mag < 1e-3f) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+            Vec flip_direction = vel_delta / vel_delta_mag;
+
+            // Dot products
+            float forward_dot = flip_direction.Dot(car_to_ball);
+            float right_dot = flip_direction.Dot(player.rotMat.right);
+
+            prev_velocity[player.carId] = player.vel;
+
+            // Check for speed flip first (highest priority)
+            if (IsSpeedFlip(player, state)) {
+                return 1.0f;
+            }
+            // Check for diagonal flip towards ball
+            else if (IsDiagonalFlip(forward_dot, right_dot) && forward_dot > angle_threshold) {
+                return 0.66f;
+            }
+            // Check for front flip towards ball
+            else if (IsFrontFlip(forward_dot, right_dot) && forward_dot > angle_threshold) {
+                return 0.33f;
+            }
+
+            return 0.0f;
+        }
+
+    private:
+        bool IsFrontFlip(float forward_dot, float right_dot) const {
+            // Front flip: high forward component, minimal right component
+            return forward_dot > diagonal_threshold && std::abs(right_dot) < 0.2f;
+        }
+
+        bool IsDiagonalFlip(float forward_dot, float right_dot) const {
+            // Diagonal flip: both forward and right components significant
+            return forward_dot > angle_threshold && std::abs(right_dot) > 0.3f && std::abs(right_dot) < 0.9f;
+        }
+
+        bool IsSpeedFlip(const Player& player, const GameState& state) const {
+            // Speed flip detection:
+            // 1. Diagonal flip input (forward + right/left velocity components)
+            // 2. Negative pitch applied (car tilted back)
+            // 3. Boost and air roll active
+
+            // Check if car has negative pitch (tilted back)
+            Vec car_up = player.rotMat.up;
+            float pitch = std::asin(-car_up.z) * 57.2958f; // Convert to degrees
+            bool has_negative_pitch = pitch < -30.0f;
+
+            // Check if boost is being used
+            bool boost_active = player.boost < 99.9f;
+
+            // Check for air roll via angular velocity around z-axis
+            bool air_roll_active = std::abs(player.angVel.z) > 2.0f;
+
+            // Check diagonal velocity components (both forward and sideways)
+            float forward_vel = player.vel.Dot(player.rotMat.forward);
+            float right_vel = player.vel.Dot(player.rotMat.right);
+            bool is_diagonal = std::abs(forward_vel) > 200.0f && std::abs(right_vel) > 200.0f;
+
+            return has_negative_pitch && boost_active && air_roll_active && is_diagonal;
+        }
     };
 } // namespace RLGymCPP

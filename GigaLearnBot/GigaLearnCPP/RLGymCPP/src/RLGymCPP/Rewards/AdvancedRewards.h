@@ -568,7 +568,7 @@ namespace RLGC {
         float minBallHeightAboveCar = 55.0f;   // above car roof
         float maxBallHeightAboveCar = 200.0f;  // can count pops relative to car
         float minForwardDot = 0.1f;    // ball must be somewhat in front
-        float minSpeed = 500.0f;  // must be moving
+        float minSpeed = 600.0f;  // must be moving
 
         // NEW: absolute arena-ground threshold (only count dribbles when ball is low)
         float groundMaxZ = 500.0f;   // ball.z must be <= this to count as a ground dribble
@@ -734,8 +734,8 @@ namespace RLGC {
         // --- "On top of car" geometry (tighter than before) ---
         float maxForwardOffset = 150.0f;       // ball center not too far in front of car center
         float minForwardOffset = -110.0f;       // allow slightly behind center (still on roof)
-        float maxLateralOffset = 110.0f;       // ball should be near the center line
-        float maxDistanceXY = 190.0f;          // overall horizontal radius (tight)
+        float maxLateralOffset = 120.0f;       // ball should be near the center line
+        float maxDistanceXY = 130.0f;          // overall horizontal radius (tight)
 
         // height band relative to car position
         float minBallHeightAboveCar = 55.0f;   // ball must be above roof-ish
@@ -743,7 +743,7 @@ namespace RLGC {
 
         // carrying tends to have similar velocities
         float maxRelativeSpeed = 800.0f;       // |ballVel - carVel| must be under this
-        float minCarSpeed = 400.0f;            // still require some movement
+        float minCarSpeed = 500.0f;            // still require some movement
 
         float requiredSustainSec = 0.25f;
         float rewardScale = 1.0f;
@@ -756,12 +756,12 @@ namespace RLGC {
         explicit DribbleReward(
             float maxFwd = 150.0f,
             float minFwd = -110.0f,
-            float maxLat = 110.0f,
-            float maxXY = 190.0f,
+            float maxLat = 120.0f,
+            float maxXY = 130.0f,
             float minH = 55.0f,
             float maxH = 220.0f,
             float relSpd = 800.0f,
-            float minSpd = 400.0f,
+            float minSpd = 500.0f,
             float sustain = 0.25f,
             float scale = 1.0f)
             : maxForwardOffset(maxFwd)
@@ -890,17 +890,23 @@ namespace RLGC {
     class DribbleSetupReward : public Reward {
     private:
         struct DribbleConfig {
+            // Slow ball handling: reward small hits to get ball rolling
+            float slowBallThreshold = 500.0f;          // Ball moving slower than this
+            float slowBallHitReward = 0.6f;            // Reward for hitting slow ball
+            float slowBallSpeedGainBonus = 0.3f;       // Bonus if ball speeds up after hit
+            float minSpeedGainForBonus = 200.0f;       // Minimum speed increase to get bonus
+
             // Rolling phase: ball should move slowly and predictably
-            float maxBallRollSpeed = 800.0f;
-            float minBallRollSpeed = 200.0f;
+            float maxBallRollSpeed = 1200.0f;
+            float minBallRollSpeed = 600.0f;
 
             // Matching phase: car should match ball speed closely
-            float maxSpeedDelta = 250.0f;
-            float minSpeedDelta = 20.0f;
+            float maxSpeedDelta = 1000.0f;
+            float minSpeedDelta = 100.0f;
 
-            // CUTTING phase: car approaches at DIAGONAL angle (45-75 degrees)
+            // CUTTING phase: car approaches at DIAGONAL angle (45-90 degrees)
             // NOT perpendicular, NOT straight-on, but diagonal
-            float minCutAngle = 0.7854f;               // ~45 degrees
+            float minCutAngle = 0.53f;               // ~30 degrees
             float maxCutAngle = 1.52f;                // ~90 degrees (was 90)
             float carBallDistanceForCut = 300.0f;
             float carBallDistanceTolerance = 80.0f;    // Tighter tolerance
@@ -1032,6 +1038,26 @@ namespace RLGC {
             float carDistMoved = lastCarPos[player.carId].Dist(player.pos);
 
             float reward = 0.0f;
+
+            // =====================================================================
+            // SLOW BALL HANDLING: Reward small hits when ball is moving slowly
+            // =====================================================================
+            if (ballSpeed < config.slowBallThreshold && player.ballTouchedStep) {
+                // Reward hitting a slow ball to get it rolling
+                reward += config.slowBallHitReward;
+
+                // Bonus if ball speed increased significantly
+                float prevBallSpeed = lastBallSpeed[player.carId];
+                float speedGain = ballSpeed - prevBallSpeed;
+
+                if (speedGain > config.minSpeedGainForBonus) {
+                    float speedGainQuality = RS_CLAMP(speedGain / 300.0f, 0.0f, 1.0f);
+                    reward += config.slowBallSpeedGainBonus * speedGainQuality;
+                }
+
+                lastBallSpeed[player.carId] = ballSpeed;
+                return reward;
+            }
 
             // =====================================================================
             // PHASE 1: ROLLING - Ball moves slowly and steadily
@@ -1766,28 +1792,28 @@ namespace RLGC {
     // MECHANICAL SKILL REWARDS
     // ============================================================================
 
-    // Reward for flip resets (regaining flip in air)
-    class FlipResetReward : public Reward {
-    public:
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (!state.prev) return 0.0f;
+    //// Reward for flip resets (regaining flip in air)
+    //class FlipResetReward : public Reward {
+    //public:
+    //    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+    //        if (!state.prev) return 0.0f;
 
-            // Check if we just regained flip while in air
-            if (player.isOnGround || state.prev->players[player.index].isOnGround) {
-                return 0.0f;
-            }
+    //        // Check if we just regained flip while in air
+    //        if (player.isOnGround || state.prev->players[player.index].isOnGround) {
+    //            return 0.0f;
+    //        }
 
-            bool hadFlip = state.prev->players[player.index].HasFlipOrJump();
-            bool hasFlip = player.HasFlipOrJump();
+    //        bool hadFlip = state.prev->players[player.index].HasFlipOrJump();
+    //        bool hasFlip = player.HasFlipOrJump();
 
-            // Regained flip in air
-            if (!hadFlip && hasFlip) {
-                return 1.0f;
-            }
+    //        // Regained flip in air
+    //        if (!hadFlip && hasFlip) {
+    //            return 1.0f;
+    //        }
 
-            return 0.0f;
-        }
-    };
+    //        return 0.0f;
+    //    }
+    //};
 
     // ============================================================================
     // BasicAerialFormReward
@@ -1939,7 +1965,7 @@ namespace RLGC {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (!state.deltaTime > 0.0f) {
+            if (state.deltaTime <= 0.0f) {
                 // Just guard; in practice deltaTime should be set.
             }
             float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
@@ -2329,6 +2355,142 @@ namespace RLGC {
             if (teammateCount == 0) return 0.0f;
 
             return totalReward / teammateCount;
+        }
+    };
+
+    // ============================================================================
+    // UpsideDownAerialReward - Rewards inverted aerial control
+    // ============================================================================
+    // Rewards players for performing upside-down aerials where:
+    // - Car hood is pointing down (inverted orientation)
+    // - Player is airborne and boosting
+    // - Gaining upward velocity (+Z) while inverted
+    // - Approaching the ball from below in inverted stance
+    //
+    // This is an advanced mechanic seen in high-level play where players
+    // maintain inverted control to approach the ball from unexpected angles.
+    //
+    // Example: https://www.youtube.com/shorts/CU8TgiJCy_A
+    //
+    // Rewards are given for:
+    // 1. Being inverted while airborne (+0.1 per frame)
+    // 2. Boosting while inverted (+0.2 bonus)
+    // 3. Gaining upward velocity while inverted (+0.3 bonus, scaled by vel)
+    // 4. Approaching ball from below while inverted (+0.5 bonus, scaled by distance)
+    //
+    // 2025-01-09 - Rev 1.0 (NJH)
+    // ============================================================================
+    class UpsideDownAerialReward : public Reward {
+    private:
+        struct Config {
+            float inverted_base_reward = 0.1f;           // Base reward for being inverted while airborne
+            float boost_bonus = 0.2f;                    // Bonus for boosting while inverted
+            float upward_velocity_bonus = 0.3f;          // Bonus for gaining height while inverted
+            float ball_approach_bonus = 0.5f;            // Bonus for approaching ball from below while inverted
+
+            float min_airtime = 0.3f;                    // Minimum airtime before rewarding (avoid ground flips)
+            float min_height = 200.0f;                   // Minimum height above ground
+            float inverted_threshold = -0.7f;            // Car up vector Z component (negative = inverted)
+            float upward_vel_threshold = 100.0f;         // Minimum upward velocity to reward
+            float ball_proximity_max = 2000.0f;          // Max distance to ball to get approach bonus
+        };
+
+        Config config;
+
+    public:
+        virtual void Reset(const GameState& initialState) override {}
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Must be airborne
+            if (player.isOnGround) {
+                return 0.0f;
+            }
+
+            // Must have been airborne for minimum time (avoid rewarding ground flips)
+            if (player.airTime < config.min_airtime) {
+                return 0.0f;
+            }
+
+            // Must be at minimum height
+            if (player.pos.z < config.min_height) {
+                return 0.0f;
+            }
+
+            // Check if car is inverted (hood pointing down)
+            // Car up vector points upward when upright, so Z component is positive
+            // When inverted, Z component is negative
+            float carUpZ = player.rotMat.up.z;
+            bool isInverted = carUpZ < config.inverted_threshold;
+
+            if (!isInverted) {
+                return 0.0f;
+            }
+
+            // ================================================================
+            // Base reward for maintaining inverted aerial
+            // ================================================================
+            float reward = config.inverted_base_reward;
+
+            // ================================================================
+            // Bonus for boosting while inverted
+            // ================================================================
+            bool isBoosting = player.prevAction.boost > 0.5f;
+            if (isBoosting && player.boost > 0.0f) {
+                reward += config.boost_bonus;
+            }
+
+            // ================================================================
+            // Bonus for gaining upward velocity while inverted
+            // ================================================================
+            float upwardVel = player.vel.z;
+            if (upwardVel > config.upward_vel_threshold) {
+                // Scale bonus by how fast we're going up (up to 1.0x at supersonic)
+                float velRatio = RS_CLAMP(upwardVel / 2300.0f, 0.0f, 1.0f);
+                reward += config.upward_velocity_bonus * velRatio;
+            }
+
+            // ================================================================
+            // Bonus for approaching ball from below while inverted
+            // ================================================================
+            Vec toBall = state.ball.pos - player.pos;
+            float distToBall = toBall.Length();
+
+            if (distToBall > 1.0f && distToBall < config.ball_proximity_max) {
+                // Check if ball is above us
+                bool ballIsAbove = toBall.z > 0.0f;
+
+                if (ballIsAbove) {
+                    // Check if we're moving toward the ball
+                    Vec dirToBall = toBall / distToBall;
+                    float approachAlignment = player.vel.Dot(dirToBall);
+
+                    if (approachAlignment > 0.0f) {
+                        // Scale bonus by proximity (closer = better) and alignment
+                        float proximityFactor = 1.0f - RS_CLAMP(distToBall / config.ball_proximity_max, 0.0f, 1.0f);
+                        float alignmentFactor = RS_CLAMP(approachAlignment / 2300.0f, 0.0f, 1.0f);
+
+                        reward += config.ball_approach_bonus * proximityFactor * alignmentFactor;
+                    }
+                }
+            }
+
+            // ================================================================
+            // Additional bonus for hood pointing at ball (precise control)
+            // ================================================================
+            if (distToBall > 1.0f && distToBall < config.ball_proximity_max) {
+                Vec dirToBall = toBall / distToBall;
+
+                // Car hood is the negative up vector (since we're inverted)
+                Vec hoodDir = player.rotMat.up * -1.0f;
+                float hoodAlignment = hoodDir.Dot(dirToBall);
+
+                if (hoodAlignment > 0.7f) {
+                    // Bonus for pointing hood directly at ball
+                    reward += 0.15f * hoodAlignment;
+                }
+            }
+
+            return reward;
         }
     };
 

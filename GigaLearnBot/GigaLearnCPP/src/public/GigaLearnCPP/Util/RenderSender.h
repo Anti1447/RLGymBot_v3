@@ -5,6 +5,13 @@
 #include <RLGymCPP/BasicTypes/Action.h>
 #include <GigaLearnCPP/Util/Timer.h>
 
+// Suppress C4251 warnings about types needing DLL interface
+// These are safe to ignore when building everything together
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4251)
+#endif
+
 namespace GGL {
 	struct RG_IMEXPORT RenderSender {
 		pybind11::module pyMod;
@@ -22,3 +29,7 @@ namespace GGL {
 		~RenderSender();
 	};
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
