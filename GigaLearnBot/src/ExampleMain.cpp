@@ -400,7 +400,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new ZeroSumReward(new ImmediateShotReward(0.5f), 1.0f), 35.0f),
                 //WeightedReward(new ExcessiveShadowPunishment(3.0f, 2500.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new AerialCommitmentReward(400.0f, 1.0f), 1.0f), 20.0f),
-                WeightedReward(new MomentumMaintenanceReward(800.0f, 1600.0f, 0.25f), 5.0f),
+                //WeightedReward(new MomentumMaintenanceReward(800.0f, 1600.0f, 0.25f), 5.0f),
                 //WeightedReward(new ZeroSumReward(new FiftyAggressionReward(), 1.0f), 15.0f),
 
                 // Kickoff Rewards
@@ -416,12 +416,12 @@ std::vector<WeightedReward> GetPhasedRewards() {
 
                 // Boost Management Rewards
                 //WeightedReward(new AdvancedBoostManagementReward(), 10.0f),
-                WeightedReward(new PostKickoffMidBoostReward(), 15.0f),
-                WeightedReward(new DefensiveRotationBoostReward(), 11.0f),
-                WeightedReward(new PickupBoostReward(), 25.0f),
-                WeightedReward(new BigBoostPadCenterReward(), 25.0f),
+                WeightedReward(new PostKickoffMidBoostReward(), 20.0f),
+                WeightedReward(new DefensiveRotationBoostReward(), 15.0f),
+                WeightedReward(new PickupBoostReward(), 30.0f),
+                WeightedReward(new BigBoostPadCenterReward(), 30.0f),
                 WeightedReward(new BoostDuringFlipReward(), 7.0f),
-                WeightedReward(new BoostPathReward(), 15.0f),
+                WeightedReward(new BoostPathReward(), 20.0f),
                 WeightedReward(new SmallPadCollectionReward(), 2.0f),
                 WeightedReward(new ZeroSumReward(new BoostStealReward(), 1.0f), 35.0f),
                 WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 3.0f),
