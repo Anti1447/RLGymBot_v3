@@ -714,6 +714,204 @@ public:
 };
 
 // ============================================================================
+// SingleJumpLow5050Reward
+// 2025-01-12 | Rev 1 | NJH
+//
+// Rewards winning low 50/50 challenges with a single jump (no flip/dodge).
+// Key behaviors:
+//  - Both player and opponent must touch ball (50/50)
+//  - Player uses only single jump (no flip, no dodge)
+//  - Ball contact must be low (z < 300 units)
+//  - Reward based on positioning and ownership after contact
+// ============================================================================
+
+class SingleJumpLow5050Reward : public Reward {
+private:
+    struct PendingChallenge {
+        float timeLeft = 0.0f;          // Outcome window (0.3s)
+        uint32_t oppId = 0;
+        Vec ballPosAtChallenge;
+        bool playerHasJumped = false;
+        bool playerHasFlipped = false;
+        bool playerHasDoubleJumped = false;
+        float challengeQuality = 0.0f;
+    };
+
+    mutable std::map<uint32_t, PendingChallenge> pending;
+    mutable std::map<uint32_t, float> lastJumpTime;  // Track when player jumped
+
+    float maxBallHeightAtContact = 300.0f;
+    float outcomeWindowSec = 0.30f;                  // Time to evaluate who "won"
+
+    float rewardLow5050Win = 8.0f;                   // Won the challenge
+    float rewardLow5050Tie = 4.0f;                   // Neutral outcome
+    float rewardLow5050Loss = 1.0f;                  // Lost but made contact
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        pending.clear();
+        lastJumpTime.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+        uint32_t id = player.carId;
+
+        // ====================================================================
+        // PHASE 2: Resolve pending challenge outcomes
+        // ====================================================================
+
+        auto pit = pending.find(id);
+        if (pit != pending.end()) {
+            PendingChallenge& pc = pit->second;
+            pc.timeLeft -= dt;
+
+            // Track if player used flip or double jump during outcome window
+            if (player.hasJumped && !pc.playerHasJumped) {
+                pc.playerHasJumped = true;
+            }
+            if (player.isFlipping && !pc.playerHasFlipped) {
+                pc.playerHasFlipped = true;
+            }
+            if (player.hasDoubleJumped && !pc.playerHasDoubleJumped) {
+                pc.playerHasDoubleJumped = true;
+            }
+
+            if (pc.timeLeft <= 0.0f) {
+                float reward = 0.0f;
+
+                // Only reward if no flip or double jump was used after jump
+                if (pc.playerHasFlipped || pc.playerHasDoubleJumped) {
+                    reward = 0.0f;  // Used flip/double jump, disqualified
+                }
+                else if (player.ballTouchedStep) {
+                    // Player maintained/regained possession after challenge
+                    reward = rewardLow5050Win * RS_CLAMP(pc.challengeQuality, 0.0f, 1.0f);
+                }
+                else {
+                    // Lost possession but made clean contact
+                    reward = rewardLow5050Loss;
+                }
+
+                pending.erase(pit);
+                lastJumpTime[id] = 0.0f;
+                return reward;
+            }
+
+            return 0.0f;
+        }
+
+        // ====================================================================
+        // PHASE 1: Detect 50/50 challenge (both touching)
+        // ====================================================================
+
+        if (!player.ballTouchedStep) return 0.0f;
+
+        // Must be low contact
+        if (state.ball.pos.z > maxBallHeightAtContact) return 0.0f;
+
+        // Check if opponent also touched (50/50)
+        bool isChallenge = false;
+        uint32_t challengerId = 0;
+        for (const auto& opp : state.players) {
+            if (opp.team == player.team) continue;
+            if (opp.ballTouchedStep) {
+                isChallenge = true;
+                challengerId = opp.carId;
+                break;
+            }
+        }
+
+        if (!isChallenge) return 0.0f;
+
+        // Validate: Player only jumped, no flip/double-jump at contact time
+        if (player.isFlipping || player.hasDoubleJumped) {
+            return 0.0f;  // Used flip/double-jump, not a single jump
+        }
+
+        // Player must have jumped recently (within 0.5s)
+        // This ensures it's an active jump challenge, not just momentum
+        if (state.prev) {
+            bool wasGrounded = !state.prev->players[player.carId].hasJumped;
+            bool isAirborne = player.hasJumped && !player.isOnGround;
+
+            if (!isAirborne) {
+                return 0.0f;  // Must be airborne from jump
+            }
+        }
+
+        // ====================================================================
+        // Compute challenge quality (positioning + ownership)
+        // ====================================================================
+
+        float quality = 0.0f;
+
+        // Find opponent for comparison
+        const Player* oppPtr = nullptr;
+        for (const auto& opp : state.players) {
+            if (opp.carId == challengerId) {
+                oppPtr = &opp;
+                break;
+            }
+        }
+
+        if (!oppPtr) return 0.0f;
+
+        // Distance to ball at contact (closer = better control)
+        float myDistToBall = (player.pos - state.ball.pos).Length();
+        float oppDistToBall = (oppPtr->pos - state.ball.pos).Length();
+        float distDelta = oppDistToBall - myDistToBall;
+
+        if (distDelta > 200.0f) {
+            // Significantly closer = advantage
+            quality += 0.5f;
+        }
+        else if (distDelta > -200.0f) {
+            // Similar distance = fair challenge
+            quality += 0.25f;
+        }
+
+        // Ball velocity alignment (going toward my goal vs away)
+        const Vec myGoal = (player.team == Team::BLUE) ? CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+        const Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+        Vec toMyGoal = SafeNorm(myGoal - state.ball.pos);
+        Vec toOppGoal = SafeNorm(oppGoal - state.ball.pos);
+
+        float towardOpp = state.ball.vel.Dot(toOppGoal);
+        float towardMe = state.ball.vel.Dot(toMyGoal);
+
+        if (towardOpp > 500.0f) {
+            quality += 0.3f;  // Ball going toward opponent goal = good win
+        }
+        else if (towardMe < 500.0f) {
+            quality += 0.15f;  // Ball not dangerous = decent neutral
+        }
+
+        quality = RS_CLAMP(quality, 0.0f, 1.0f);
+
+        // ====================================================================
+        // ARM PENDING CHALLENGE
+        // ====================================================================
+
+        PendingChallenge pc;
+        pc.timeLeft = outcomeWindowSec;
+        pc.oppId = challengerId;
+        pc.ballPosAtChallenge = state.ball.pos;
+        pc.playerHasJumped = player.hasJumped;
+        pc.playerHasFlipped = player.isFlipping;
+        pc.playerHasDoubleJumped = player.hasDoubleJumped;
+        pc.challengeQuality = quality;
+
+        pending[id] = pc;
+        lastJumpTime[id] = 0.0f;
+
+        return 0.0f;  // Reward deferred until outcome window
+    }
+};
+
+
+// ============================================================================
 // EmergencySaveCommitReward
 // 2025-12-16 - Rev 1 (NJH):
 //  - When ball is threatening our net, reward committing to the save:

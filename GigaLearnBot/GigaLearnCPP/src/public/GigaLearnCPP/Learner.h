@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/torch.h>
 #include <RLGymCPP/EnvSet/EnvSet.h>
 #include "RLGymCPP/Utils/KickoffController.h"
 #include "Util/MetricSender.h"

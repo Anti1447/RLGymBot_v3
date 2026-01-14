@@ -1082,9 +1082,176 @@ namespace RLGC {
 
     class FlipDuringKickoffReward : public Reward {
     private:
-        float speed_threshold = 300.0f; // Minimum speed delta to detect a flip
-        float angle_threshold = 0.3f; // Cosine threshold for "towards ball" direction (~73 degrees)
-        float diagonal_threshold = 0.5f; // Cosine threshold for diagonal detection
+        float speed_threshold = 300.0f;  // Minimum speed delta to detect a flip
+
+        mutable std::map<uint32_t, Vec> prev_velocity;
+        mutable std::map<uint32_t, bool> was_on_ground;
+        mutable std::map<uint32_t, float> boost_pad_collected_time;  // Track when boost pad collected
+        mutable float kickoff_start_time = 0.0f;
+        mutable bool kickoff_active = false;
+
+        float kickoff_detect_ball_pos = 280.0f;
+        float kickoff_detect_ball_vel = 200.0f;
+        float kickoff_max_duration = 3.5f;
+        float kickoff_speed_flip_window = 1.0f;  // Only reward speed flips within 1s of kickoff
+
+        // Boost pad timing thresholds (relative to collecting boost pad)
+        float optimal_flip_window_start = 0.0f;   // Immediately after boost
+        float optimal_flip_window_end = 0.15f;    // 150ms after boost (max reward window)
+        float late_flip_threshold = 0.3f;         // After 300ms (reduced reward)
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            prev_velocity.clear();
+            was_on_ground.clear();
+            boost_pad_collected_time.clear();
+            kickoff_start_time = 0.0f;
+            kickoff_active = false;
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+            bool is_kickoff_now = (state.ball.pos.Length() < kickoff_detect_ball_pos &&
+                state.ball.vel.Length() < kickoff_detect_ball_vel);
+
+            // Kickoff start
+            if (is_kickoff_now && !kickoff_active) {
+                kickoff_active = true;
+                kickoff_start_time = 0.0f;
+                prev_velocity.clear();
+                was_on_ground.clear();
+                boost_pad_collected_time.clear();
+                for (const auto& player : state.players) {
+                    was_on_ground[player.carId] = true;
+                }
+            }
+
+            if (kickoff_active) {
+                kickoff_start_time += dt;
+                if (!is_kickoff_now || kickoff_start_time >= kickoff_max_duration) {
+                    kickoff_active = false;
+                }
+            }
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Only reward during kickoff and within first 1 second
+            if (!kickoff_active || kickoff_start_time > kickoff_speed_flip_window) {
+                return 0.0f;
+            }
+
+            // Must be in the air to perform a flip
+            if (player.isOnGround) {
+                was_on_ground[player.carId] = true;
+                return 0.0f;
+            }
+
+            // Only detect flip in the first frame after leaving ground
+            bool just_left_ground = was_on_ground[player.carId];
+            was_on_ground[player.carId] = false;
+
+            if (!just_left_ground) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            // Get previous velocity
+            if (prev_velocity.find(player.carId) == prev_velocity.end()) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            Vec prev_vel = prev_velocity[player.carId];
+            float speed_delta = player.vel.Length() - prev_vel.Length();
+
+            // Check if flip occurred (significant speed increase)
+            if (speed_delta < speed_threshold) {
+                prev_velocity[player.carId] = player.vel;
+                return 0.0f;
+            }
+
+            prev_velocity[player.carId] = player.vel;
+
+            // ONLY reward speed flips - remove all other flip types
+            if (IsSpeedFlip(player, state)) {
+                // Detect if player just collected a boost pad (speed jumped significantly)
+                float boost_detection_threshold = 2200.0f;  // Boost pad + ground push
+                bool just_got_boost = player.vel.Length() > boost_detection_threshold;
+
+                if (just_got_boost) {
+                    // Record boost pad collection time
+                    if (boost_pad_collected_time.find(player.carId) == boost_pad_collected_time.end()) {
+                        boost_pad_collected_time[player.carId] = kickoff_start_time;
+                    }
+                }
+
+                // Check timing relative to boost collection
+                if (boost_pad_collected_time.find(player.carId) != boost_pad_collected_time.end()) {
+                    float time_since_boost = kickoff_start_time - boost_pad_collected_time[player.carId];
+
+                    // Early flip (before boost): 0.5 reward
+                    if (time_since_boost < optimal_flip_window_start) {
+                        return 0.5f;
+                    }
+                    // Optimal window (0-150ms after boost): 1.0 reward
+                    else if (time_since_boost <= optimal_flip_window_end) {
+                        return 1.0f;
+                    }
+                    // Late flip (150-300ms after boost): 0.5 reward
+                    else if (time_since_boost <= late_flip_threshold) {
+                        return 0.5f;
+                    }
+                    // Very late flip (>300ms): no reward
+                    else {
+                        return 0.0f;
+                    }
+                }
+
+                // No boost pad detected yet, reward early flip at 0.5
+                return 0.5f;
+            }
+
+            return 0.0f;
+        }
+
+    private:
+        bool IsSpeedFlip(const Player& player, const GameState& state) const {
+            // Speed flip detection:
+            // 1. Diagonal flip input (forward + right/left velocity components)
+            // 2. Negative pitch applied (car tilted back)
+            // 3. Boost and air roll active
+
+            // Check if car has negative pitch (tilted back)
+            Vec car_up = player.rotMat.up;
+            float pitch = std::asin(-car_up.z) * 57.2958f; // Convert to degrees
+            bool has_negative_pitch = pitch < -30.0f;
+
+            // Check if boost is being used
+            bool boost_active = player.boost < 99.9f;
+
+            // Check for air roll via angular velocity around z-axis
+            bool air_roll_active = std::abs(player.angVel.z) > 2.0f;
+
+            // Check diagonal velocity components (both forward and sideways)
+            float forward_vel = player.vel.Dot(player.rotMat.forward);
+            float right_vel = player.vel.Dot(player.rotMat.right);
+            bool is_diagonal = std::abs(forward_vel) > 200.0f && std::abs(right_vel) > 200.0f;
+
+            return has_negative_pitch && boost_active && air_roll_active && is_diagonal;
+        }
+    };
+
+    // ============================================================================
+    // SideFlipKickoffReward
+    // 2025-01-13 | Rev 2 | NJH
+    // SIMPLE: Reward side flips that contact the ball during kickoff.
+    // No pitch manipulation, purely side velocity direction.
+    // ============================================================================
+    class SideFlipKickoffReward : public Reward {
+    private:
+        float speed_threshold = 200.0f;  // Minimum speed delta to detect a flip
+        float side_dominance_threshold = 0.4f;  // Side component must be dominant
 
         mutable std::map<uint32_t, Vec> prev_velocity;
         mutable std::map<uint32_t, bool> was_on_ground;
@@ -1109,7 +1276,6 @@ namespace RLGC {
             bool is_kickoff_now = (state.ball.pos.Length() < kickoff_detect_ball_pos &&
                 state.ball.vel.Length() < kickoff_detect_ball_vel);
 
-            // Kickoff start
             if (is_kickoff_now && !kickoff_active) {
                 kickoff_active = true;
                 kickoff_start_time = 0.0f;
@@ -1129,28 +1295,30 @@ namespace RLGC {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            // Only reward during kickoff
             if (!kickoff_active) {
                 return 0.0f;
             }
 
-            // Must be in the air to perform a flip
+            // Only reward if touching ball
+            if (!player.ballTouchedStep) {
+                return 0.0f;
+            }
+
+            // Must be in the air
             if (player.isOnGround) {
                 was_on_ground[player.carId] = true;
                 return 0.0f;
             }
 
-            // Only detect flip in the first frame after leaving ground
+            // Only detect flip in first frame after leaving ground
             bool just_left_ground = was_on_ground[player.carId];
             was_on_ground[player.carId] = false;
 
             if (!just_left_ground) {
-                // Already in air from previous frame, don't count as flip
                 prev_velocity[player.carId] = player.vel;
                 return 0.0f;
             }
 
-            // Get previous velocity
             if (prev_velocity.find(player.carId) == prev_velocity.end()) {
                 prev_velocity[player.carId] = player.vel;
                 return 0.0f;
@@ -1159,86 +1327,46 @@ namespace RLGC {
             Vec prev_vel = prev_velocity[player.carId];
             float speed_delta = player.vel.Length() - prev_vel.Length();
 
-            // Check if flip occurred (significant speed increase)
             if (speed_delta < speed_threshold) {
                 prev_velocity[player.carId] = player.vel;
                 return 0.0f;
             }
 
-            // Direction from car to ball
-            Vec car_to_ball = state.ball.pos - player.pos;
-            float dist = car_to_ball.Length();
-            if (dist < 1e-3f) {
-                prev_velocity[player.carId] = player.vel;
-                return 0.0f;
-            }
-            car_to_ball = car_to_ball / dist;
-
-            // Get flip direction from velocity change
             Vec vel_delta = player.vel - prev_vel;
             float vel_delta_mag = vel_delta.Length();
             if (vel_delta_mag < 1e-3f) {
                 prev_velocity[player.carId] = player.vel;
                 return 0.0f;
             }
-            Vec flip_direction = vel_delta / vel_delta_mag;
 
-            // Dot products
-            float forward_dot = flip_direction.Dot(car_to_ball);
-            float right_dot = flip_direction.Dot(player.rotMat.right);
+            Vec flip_direction = vel_delta / vel_delta_mag;
+            float right_component = std::abs(flip_direction.Dot(player.rotMat.right));
+            float forward_component = std::abs(flip_direction.Dot(player.rotMat.forward));
 
             prev_velocity[player.carId] = player.vel;
 
-            // Check for speed flip first (highest priority)
-            if (IsSpeedFlip(player, state)) {
-                return 1.0f;
-            }
-            // Check for diagonal flip towards ball
-            else if (IsDiagonalFlip(forward_dot, right_dot) && forward_dot > angle_threshold) {
-                return 0.66f;
-            }
-            // Check for front flip towards ball
-            else if (IsFrontFlip(forward_dot, right_dot) && forward_dot > angle_threshold) {
-                return 0.33f;
+            // Simple check: side component > forward component (side flip)
+            if (right_component > side_dominance_threshold && right_component > forward_component) {
+                // Ensure flip is going through the goal-to-goal axis (center line of field)
+                // This ensures the flip is hitting through the ball center, not the edge
+                Vec ownGoal = (player.team == Team::BLUE)
+                    ? CommonValues::BLUE_GOAL_CENTER
+                    : CommonValues::ORANGE_GOAL_CENTER;
+                Vec oppGoal = (player.team == Team::BLUE)
+                    ? CommonValues::ORANGE_GOAL_CENTER
+                    : CommonValues::BLUE_GOAL_CENTER;
+
+                Vec goalAxis = (oppGoal - ownGoal).Normalized();
+                // Check if flip direction aligns with goal-to-goal axis
+                float axisAlignment = std::abs(flip_direction.Dot(goalAxis));
+
+                if (axisAlignment > 0.3f) {
+                    // Flip is directed along the goal axis (through ball center)
+                    return 1.0f;
+                }
             }
 
             return 0.0f;
-        }
-
-    private:
-        bool IsFrontFlip(float forward_dot, float right_dot) const {
-            // Front flip: high forward component, minimal right component
-            return forward_dot > diagonal_threshold && std::abs(right_dot) < 0.2f;
-        }
-
-        bool IsDiagonalFlip(float forward_dot, float right_dot) const {
-            // Diagonal flip: both forward and right components significant
-            return forward_dot > angle_threshold && std::abs(right_dot) > 0.3f && std::abs(right_dot) < 0.9f;
-        }
-
-        bool IsSpeedFlip(const Player& player, const GameState& state) const {
-            // Speed flip detection:
-            // 1. Diagonal flip input (forward + right/left velocity components)
-            // 2. Negative pitch applied (car tilted back)
-            // 3. Boost and air roll active
-
-            // Check if car has negative pitch (tilted back)
-            Vec car_up = player.rotMat.up;
-            float pitch = std::asin(-car_up.z) * 57.2958f; // Convert to degrees
-            bool has_negative_pitch = pitch < -30.0f;
-
-            // Check if boost is being used
-            bool boost_active = player.boost < 99.9f;
-
-            // Check for air roll via angular velocity around z-axis
-            bool air_roll_active = std::abs(player.angVel.z) > 2.0f;
-
-            // Check diagonal velocity components (both forward and sideways)
-            float forward_vel = player.vel.Dot(player.rotMat.forward);
-            float right_vel = player.vel.Dot(player.rotMat.right);
-            bool is_diagonal = std::abs(forward_vel) > 200.0f && std::abs(right_vel) > 200.0f;
-
-            return has_negative_pitch && boost_active && air_roll_active && is_diagonal;
         }
     };
 } // namespace RLGymCPP

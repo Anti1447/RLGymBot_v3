@@ -359,28 +359,33 @@ namespace RLGC {
     };
 
 
-    // ============================================================================
-    // FORWARD MOMENTUM MAINTENANCE
-    // ============================================================================
-    // Rewards maintaining speed/momentum through plays (not stop-start)
-    // Rev 1.0 (2025-01-11, NJH)
+    // Rev 2.0 (2025-01-13, NJH) - Simplified to be less strict
     class MomentumMaintenanceReward : public Reward {
     public:
-        float targetSpeed;
-        float sampleInterval;  // How often to sample (seconds)
+        float minMaintainSpeed;   // Minimum speed to maintain
+        float optimalMaintainSpeed;
+        float sampleInterval;     // How often to sample (seconds)
 
         mutable std::unordered_map<uint32_t, float> lastSampleTime;
-        mutable std::unordered_map<uint32_t, float> avgSpeed;
-        mutable std::unordered_map<uint32_t, int> sampleCount;
 
-        MomentumMaintenanceReward(float target = 1600.0f, float interval = 0.25f)
-            : targetSpeed(target), sampleInterval(interval) {
+        // Config Presets:
+        // CONSERVATIVE: MomentumMaintenanceReward(500.0f, 1000.0f, 0.5f)
+        //   - Only rewards if maintaining at least 500 units/s
+        //   - Optimal at 1000 units/s (half boost speed)
+        //   - Samples every 500ms
+        // AGGRESSIVE: MomentumMaintenanceReward(1200.0f, 2200.0f, 0.25f)
+        //   - Requires maintaining 1200 units/s (high speed threshold)
+        //   - Optimal at 2200 units/s (supersonic)
+        //   - Samples every 250ms for quick feedback
+
+        MomentumMaintenanceReward(float minSpeed = 800.0f, float optimalSpeed = 1600.0f, float interval = 0.25f)
+            : minMaintainSpeed(minSpeed), optimalMaintainSpeed(optimalSpeed), sampleInterval(interval) {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (player.isDemoed) return 0.0f;
 
-            float currentTime = state.deltaTime;  // Use deltaTime
+            float currentTime = state.deltaTime;
 
             // Sample at intervals to avoid noise
             if (currentTime - lastSampleTime[player.carId] < sampleInterval) {
@@ -390,22 +395,23 @@ namespace RLGC {
 
             float speed = player.vel.Length();
 
-            // Update running average
-            sampleCount[player.carId]++;
-            float n = (float)sampleCount[player.carId];
-            avgSpeed[player.carId] = avgSpeed[player.carId] * ((n - 1) / n) + speed * (1 / n);
+            // Reward maintaining momentum above minimum threshold
+            if (speed < minMaintainSpeed) {
+                return -0.2f;  // Small punishment for losing momentum
+            }
 
-            // Small continuous reward for maintaining good average speed
-            float speedRatio = RS_CLAMP(avgSpeed[player.carId] / targetSpeed, 0.0f, 1.2f);
+            // Scale reward based on how well speed is maintained relative to optimal
+            float speedRatio = RS_CLAMP(
+                (speed - minMaintainSpeed) / (optimalMaintainSpeed - minMaintainSpeed),
+                0.0f, 1.2f
+            );
 
-            // Reward is small but continuous
-            return (speedRatio - 0.5f) * 0.1f;  // -0.05 to +0.07 per sample
+            // Continuous reward: base 0.3 + up to 0.7 based on speed ratio
+            return 0.3f + (speedRatio * 0.7f);  // 0.3 to 1.0
         }
 
         virtual void Reset(const GameState& initialState) override {
             lastSampleTime.clear();
-            avgSpeed.clear();
-            sampleCount.clear();
         }
     };
 

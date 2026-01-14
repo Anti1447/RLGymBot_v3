@@ -95,12 +95,15 @@ GGL::PPOLearner::PPOLearner(int obsSize, int numActions, PPOLearnerConfig _confi
 
 	SetLearningRates(config.policyLR, config.criticLR);
 
-	// Print param counts
+	// Log device info and param counts
+	std::string deviceStr = device.is_cuda() ? "CUDA GPU" : "CPU";
+	RG_LOG("PPOLearner initialized on device: " << deviceStr);
 	RG_LOG("Model parameter counts:");
 	uint64_t total = 0;
 	for (auto model : this->models) {
 		uint64_t count = model->GetParamCount();
-		RG_LOG("\t\"" << model->modelName << "\": " << Utils::NumToStr(count));
+		std::string modelDevice = model->parameters().begin()->device().is_cuda() ? "CUDA" : "CPU";
+		RG_LOG("\t\"" << model->modelName << "\": " << Utils::NumToStr(count) << " (device: " << modelDevice << ")");
 		total += count;
 	}
 	RG_LOG("\t[Total]: " << Utils::NumToStr(total));
@@ -190,6 +193,21 @@ void GGL::PPOLearner::InferActionsFromModels(
 }
 
 void GGL::PPOLearner::InferActions(torch::Tensor obs, torch::Tensor actionMasks, torch::Tensor* outActions, torch::Tensor* outLogProbs, ModelSet* models) {
+	// Log device info on first inference (static to only log once)
+	static bool firstInference = true;
+	if (firstInference) {
+		firstInference = false;
+		bool obsCuda = obs.device().is_cuda();
+		bool modelCuda = this->device.is_cuda();
+		std::string obsDevice = obsCuda ? "CUDA" : "CPU";
+		std::string modelDevice = modelCuda ? "CUDA" : "CPU";
+		RG_LOG("PPOLearner::InferActions - Observation device: " << obsDevice << ", Model device: " << modelDevice);
+		if (obsCuda != modelCuda) {
+			RG_LOG("WARNING: Observation and model on different device types! This will cause slow transfers.");
+		} else {
+			RG_LOG("✓ Observation and model on same device type - good!");
+		}
+	}
 	InferActionsFromModels(models ? *models : this->models, obs, actionMasks, config.deterministic, config.policyTemperature, config.useHalfPrecision, outActions, outLogProbs);
 }
 
@@ -217,7 +235,7 @@ torch::Tensor ComputeEntropy(torch::Tensor probs, torch::Tensor actionMasks, boo
 	return entropy.mean();
 }
 
-void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets = nullptr) {
+void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets) {
 	auto mseLoss = torch::nn::MSELoss();
 
 	MutAvgTracker
@@ -330,7 +348,7 @@ void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool i
 					auto mctsPolicyTargets = reanalysisTargets->mctsPolicyTargets.to(device);
 
 					// Get current policy and value predictions for reanalysis states
-					torch::Tensor reanalysisActionMasks = torch::ones({ reanalysisObs.size(0), actionCount }, device);
+					torch::Tensor reanalysisActionMasks = torch::ones({ reanalysisObs.size(0), models["policy"]->config.numOutputs }, device);
 
 					// Policy reanalysis loss
 					torch::Tensor policyReanalysisLoss;

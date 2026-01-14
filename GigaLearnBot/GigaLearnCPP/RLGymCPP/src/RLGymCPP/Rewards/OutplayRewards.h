@@ -177,12 +177,21 @@ namespace RLGC {
     //  - Looser/realistic "challenge" detection: dist + (vTow OR commit flags).
     //  - Shorter success window to measure beating initial challenge.
     // ============================================================================
+    // ============================================================================
+    // FlickOutplayReward - REFINED
+    // 2026-01-12 - Rev 3 (NJH/Claude):
+    // Explicit "behind opponent" detection
+    // Better quality scoring(goal = 0.9, not stacking)
+    // Tighter challenge thresholds
+    // Slightly longer confirm window
+    // ============================================================================
     class FlickOutplayReward : public Reward {
     private:
         struct PendingFlick {
-            float timeLeft = 0.0f;   // window to see if opponent touches
-            float armLeft = 0.0f;    // window to confirm flick after touch
+            float timeLeft = 0.0f;
+            float armLeft = 0.0f;
             uint32_t oppId = 0;
+            Vec ballPosAtFlick;      // NEW: Track position for "behind" check
             float quality = 0.0f;
             bool failed = false;
             bool armed = false;
@@ -191,15 +200,17 @@ namespace RLGC {
         mutable std::map<uint32_t, float> onCarTime;
         mutable std::map<uint32_t, PendingFlick> pending;
 
-        float minOnCarTime = 0.20f;
-        float minFlickSpeed = 1000.0f;
+        float minOnCarTime = 0.22f;           // Slightly longer dribble window
+        float minFlickSpeed = 1050.0f;        // Slightly higher threshold
 
-        float confirmWindowSec = 0.12f;   // time after touch to confirm off-car flick
-        float successWindowSec = 0.35f;   // time opponent must NOT touch (initial outplay)
+        float confirmWindowSec = 0.16f;       // 2 frames @ 120Hz - more forgiving
+        float successWindowSec = 0.35f;
 
-        // Challenge thresholds
         float challengeDist = 1200.0f;
-        float challengeVTow = 450.0f;
+        float challengeVTow = 500.0f;         // Tighter: must be actually approaching
+
+        // NEW: "Behind opponent" detection
+        float behindOpponentMinDotProduct = -0.3f;  // ~107 degrees away from their facing
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -207,11 +218,47 @@ namespace RLGC {
             pending.clear();
         }
 
+        // NEW HELPER: Check if flick is behind opponent (relative to their facing direction)
+        float ComputeBehindScore(const Vec& ballVel, const Player& opponent) {
+            // Opponent's forward direction
+            Vec oppFacing = opponent.rotMat.forward;
+
+            // How opposite is ball velocity to opponent's facing?
+            float dotProduct = ballVel.Dot(oppFacing);
+
+            // -1 = directly behind, 0 = sideways, +1 = directly in front
+            // We want negative (behind), so invert and clamp to [0, 1]
+            return RS_CLAMP(-dotProduct / 1000.0f, 0.0f, 1.0f);
+        }
+
+        // IMPROVED HELPER: Check if flick sends ball toward opponent's side/back
+        bool IsBallDirectionGood(const Vec& ballVel, const Vec& ballPos,
+            const Player& opponent, const Player& player) {
+            // Goal direction for context
+            Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+            Vec toOppGoal = SafeNorm(oppGoal - ballPos);
+
+            // Vector from opponent to ball (point away from them)
+            Vec awayFromOpp = SafeNorm(ballPos - opponent.pos);
+
+            // For a good flick:
+            // 1. Goes toward goal (component toward goal > 0)
+            // 2. Goes away from opponent (component away from opponent > 0)
+            // 3. Preferably behind/to the side (not directly at them)
+
+            float towardGoal = ballVel.Dot(toOppGoal);
+            float awayFromThem = ballVel.Dot(awayFromOpp);
+            float behindScore = ComputeBehindScore(ballVel, opponent);
+
+            // Goal is most important, then away, then behind
+            return (towardGoal > 500.0f) && (awayFromThem > 200.0f);
+        }
+
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
             uint32_t id = player.carId;
 
-            // Resolve pending outplay window (opponent touch check)
+            // Resolve pending outplay window
             auto it = pending.find(id);
             if (it != pending.end()) {
                 PendingFlick& pf = it->second;
@@ -238,7 +285,6 @@ namespace RLGC {
                     pf.armLeft -= dt;
                 }
                 else if (!pf.armed) {
-                    // never confirmed -> discard
                     pending.erase(it);
                     return 0.0f;
                 }
@@ -251,15 +297,17 @@ namespace RLGC {
             if (onCar && player.isOnGround) tOn += dt;
             else if (!onCar) tOn = 0.0f;
 
-            // Identify challenger (closest opponent)
+            // Identify challenger
             ChallengeInfo ci = GetChallengeInfo(player, state);
 
-            // Make "active" more realistic using commit flags
+            // Check if opponent is actively committing
             bool oppCommit = false;
+            const Player* oppPtr = nullptr;
             if (ci.oppCarId != 0) {
                 for (const auto& opp : state.players) {
                     if (opp.carId == ci.oppCarId) {
                         oppCommit = (opp.hasJumped || opp.isFlipping);
+                        oppPtr = &opp;
                         break;
                     }
                 }
@@ -270,19 +318,20 @@ namespace RLGC {
                 (ci.oppDistToBall < challengeDist) &&
                 (ci.oppVelTowardBall > challengeVTow || oppCommit);
 
-            // Arm a pending flick on touch (if we were dribbling and being challenged)
+            // Arm a pending flick on touch
             if (player.ballTouchedStep && tOn >= minOnCarTime && challengeActive) {
                 PendingFlick pf;
                 pf.armLeft = confirmWindowSec;
                 pf.timeLeft = successWindowSec;
                 pf.oppId = ci.oppCarId;
+                pf.ballPosAtFlick = state.ball.pos;
                 pf.quality = 0.0f;
                 pf.failed = false;
                 pf.armed = false;
                 pending[id] = pf;
             }
 
-            // Confirm flick and set quality once ball leaves on-car region
+            // Confirm flick and set quality once ball leaves car
             auto it2 = pending.find(id);
             if (it2 != pending.end()) {
                 PendingFlick& pf = it2->second;
@@ -297,26 +346,32 @@ namespace RLGC {
 
                     float q = 0.0f;
 
-                    // On-goal best
-                    if (BallIntersectsOppGoalMouth(player, state, 5.0f)) q += 0.7f;
+                    // On-goal: 0.7 (strong indicator of good flick)
+                    if (BallIntersectsOppGoalMouth(player, state, 5.0f)) {
+                        q = 0.9f;  // Highest reward
+                    }
+                    else {
+                        // Pop-up (height > 600 units/s = ~1200+ units height potential): 0.35
+                        if (state.ball.vel.z > 600.0f) q += 0.35f;
 
-                    // Pop-up helps beat low challenge
-                    if (state.ball.vel.z > 600.0f) q += 0.35f;
-
-                    // Away from opponent position
-                    Vec toOpp = ci.oppPos - state.ball.pos;
-                    if (state.ball.vel.Dot(toOpp) < -200.0f) q += 0.35f;
+                        // Behind/away from opponent: 0.35
+                        if (oppPtr && IsBallDirectionGood(state.ball.vel, state.ball.pos, *oppPtr, player)) {
+                            q += 0.40f;
+                        }
+                        else if (state.ball.vel.Dot(SafeNorm(pf.ballPosAtFlick - ci.oppPos)) < -200.0f) {
+                            q += 0.25f;  // At least going away
+                        }
+                    }
 
                     pf.quality = RS_CLAMP(q, 0.0f, 1.0f);
                     pf.armed = true;
-
-                    // Now we start the success window countdown (already set)
                 }
             }
 
             return 0.0f;
         }
     };
+
 
 
     // 2025-12-18 | Rev 4.0 | NJH
@@ -532,51 +587,81 @@ namespace RLGC {
     *   - Ball toward our goal: Low reward
     * ============================================================================
     */
+    // ============================================================================
+    // CutOutplayReward - REFINED
+	// 2026-01-12 - Rev 4.0 (NJH/Claude):
+    // Prevents low-velocity angle-change false positives
+    // Only counts first regain attempt(not repeated touches)
+    // Explicit "ball toward opponent = bad cut" check
+    // Better separation of outcome rewards
+    // Lower ball height threshold for ground - based cuts
+    // Prevents re - arming during outcome window
+    // ============================================================================
     class CutOutplayReward : public Reward {
     private:
         struct PendingCut {
-            float timeLeft = 0.0f;              // Outcome evaluation window (0.6s)
-            float whiffCheckTimeLeft = 0.0f;    // Whiff detection window (0.25s)
-            uint32_t oppId = 0;                 // Challenger car ID
-            Vec ballPosAtCut;                   // Ball position at moment of cut
-            Vec ballVelAtCut;                   // Ball velocity at cut moment
-            bool oppCommitted = false;          // Did opponent jump/flip?
-            bool oppWhiffed = false;            // Did they miss the ball?
-            float ballTrajectoryScore = 0.0f;   // Goal-relative trajectory post-contact (-1 to 1)
+            float timeLeft = 0.0f;
+            float whiffCheckTimeLeft = 0.0f;
+            uint32_t oppId = 0;
+            Vec ballPosAtCut;
+            Vec ballVelAtCut;
+            bool oppCommitted = false;
+            bool oppWhiffed = false;
+            float ballTrajectoryScore = 0.0f;
+            int regainTouchCount = 0;  // NEW: Prevent counting multiple regains
         };
 
-        mutable std::map<uint32_t, float> onBallTime;    // Possession tracking
+        mutable std::map<uint32_t, float> onBallTime;
+        mutable std::map<uint32_t, bool> inActiveCut;  // NEW: Prevent re-arming during outcome
         mutable std::map<uint32_t, PendingCut> pending;
 
-        // ========================================================================
-        // CONFIGURATION
-        // ========================================================================
-
         float maxDistToBall = 500.0f;
-        float challengerApproachDist = 800.0f;
-        float challengerVelocityThreshold = 650.0f;
-        float minOnBallTime = 0.15f;                    // Soft possession before cut
+        float challengerApproachDist = 850.0f;      // Tighter: must be really close
+        float challengerVelocityThreshold = 700.0f;  // Slightly higher
+        float minOnBallTime = 0.15f;
 
-        float minDirectionChange01 = 0.165f;            // ~30 degrees
-        float maxDirectionChange01 = 1.0f;              // 180 degrees
+        float minPrevBallVelocity = 300.0f;         // NEW: Prevent angle-changes from slow balls
+        float minDirectionChange01 = 0.165f;        // ~30 degrees
+        float maxDirectionChange01 = 1.0f;
+
         float minBallSpeedAfterCut = 800.0f;
 
-        float whiffDetectionWindow = 0.25f;             // 4 frames at 120Hz
-        float outcomeEvaluationWindow = 0.60f;          // Total outcome window
+        // Ground-based cuts only (prevent ceiling/wall chips)
+        float maxBallHeightAtCut = 350.0f;          // Lower = more conservative
 
-        // ========================================================================
-        // REWARD VALUES
-        // ========================================================================
+        float whiffDetectionWindow = 0.25f;
+        float outcomeEvaluationWindow = 0.60f;
+
+        // Rewards refined
         float rewardCutSuccessfulWhiff = 12.0f;
-        float rewardCutRegainedPossession = 10.0f;
-        float rewardCutShotAttempt = 9.0f;
-        float rewardCutBallTowardOpponentGoal = 7.0f;
-        float rewardCutBallNeutral = 2.0f;
-        float rewardCutBallTowardOurGoal = 1.5f;
+        float rewardCutRegainedPossession = 9.0f;
+        float rewardCutShotAttempt = 11.0f;         // Higher for successful shots
+        float rewardCutBallTowardOpponentGoal = 6.0f;
+        float rewardCutBallNeutral = 1.5f;
+        float rewardCutBallTowardOurGoal = 0.5f;
 
-        // ========================================================================
-        // HELPER: Evaluate post-cut ball trajectory (goal-relative)
-        // ========================================================================
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            onBallTime.clear();
+            inActiveCut.clear();
+            pending.clear();
+        }
+
+        // NEW HELPER: Check if ball is behind opponent's position
+        float ComputeBehindOpponentScore(const Vec& ballVel, const Vec& ballPos,
+            const Player& opponent) {
+            // Opponent's facing direction
+            Vec oppFacing = opponent.rotMat.forward;
+
+            // Vector from opponent to ball
+            Vec toBall = SafeNorm(ballPos - opponent.pos);
+
+            // How much is ball going away from opponent (in opposite direction)?
+            float oppositeFacing = -oppFacing.Dot(ballVel);
+            float awayScore = RS_CLAMP(oppositeFacing / 1000.0f, -1.0f, 1.0f);
+
+            return awayScore;
+        }
 
         float EvaluatePostCutTrajectory(const Player& player, const GameState& state) {
             Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
@@ -592,68 +677,58 @@ namespace RLGC {
             return RS_CLAMP(delta / 3000.0f, -1.0f, 1.0f);
         }
 
-        // ========================================================================
-        // HELPER: Check if we've regained possession or are shooting
-        // ========================================================================
-
-        bool HasRegainedPossessionOrShooting(const Player& player, const GameState& state, const Vec& ballPosAtCut) {
-            // Regained possession: ball is close to us
-            float distToBall = (player.pos - state.ball.pos).Length();
-            bool nearBall = (distToBall < 300.0f);
-
-            // Are we shooting at goal?
+        // IMPROVED: Only count first regain attempt, not repeated touches
+        bool HasRegainedPossessionOrShooting(const Player& player, const GameState& state,
+            PendingCut& pc) {
+            // Shooting at goal (primary objective)
             Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
             Vec toOppGoal = SafeNorm(oppGoal - state.ball.pos);
             float shotVelocity = state.ball.vel.Dot(toOppGoal);
             bool isShootingAtGoal = (shotVelocity > 1000.0f) &&
                 RewardMath::BallIntersectsOpponentGoalMouth(player, state, 2.0f, true, true);
 
-            // Check for recent touch (last 0.2s should cover regain attempt)
-            bool recentTouch = player.ballTouchedStep;
+            if (isShootingAtGoal) return true;
 
-            return nearBall || isShootingAtGoal || recentTouch;
-        }
+            // Regained possession: ball is close AND we just touched
+            float distToBall = (player.pos - state.ball.pos).Length();
+            bool nearBall = (distToBall < 300.0f) && player.ballTouchedStep;
 
-    public:
-        virtual void Reset(const GameState& initialState) override {
-            onBallTime.clear();
-            pending.clear();
+            // Only count if this is the first regain attempt
+            if (nearBall && pc.regainTouchCount == 0) {
+                pc.regainTouchCount++;
+                return true;
+            }
+
+            return false;
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
             uint32_t id = player.carId;
 
-            // ====================================================================
-            // PHASE 3: Resolve pending cut outcomes
-            // ====================================================================
-
+            // Resolve pending cuts
             auto pit = pending.find(id);
             if (pit != pending.end()) {
                 PendingCut& pc = pit->second;
 
-                // --- Whiff detection phase ---
+                // Whiff detection window
                 if (pc.whiffCheckTimeLeft > 0.0f) {
                     pc.whiffCheckTimeLeft -= dt;
 
                     for (const auto& opp : state.players) {
                         if (opp.carId != pc.oppId) continue;
 
-                        // Did opponent commit?
                         if (!pc.oppCommitted && (opp.hasJumped || opp.isFlipping)) {
                             pc.oppCommitted = true;
                         }
 
-                        // Did they touch?
                         if (opp.ballTouchedStep) {
                             pc.oppWhiffed = false;
                         }
-
                         break;
                     }
                 }
 
-                // --- Main outcome window ---
                 pc.timeLeft -= dt;
 
                 if (pc.timeLeft <= 0.0f) {
@@ -662,7 +737,7 @@ namespace RLGC {
                     if (pc.oppWhiffed && pc.oppCommitted) {
                         reward = rewardCutSuccessfulWhiff;
                     }
-                    else if (HasRegainedPossessionOrShooting(player, state, pc.ballPosAtCut)) {
+                    else if (HasRegainedPossessionOrShooting(player, state, pc)) {
                         reward = (pc.ballTrajectoryScore > 0.5f) ? rewardCutShotAttempt : rewardCutRegainedPossession;
                     }
                     else {
@@ -678,23 +753,19 @@ namespace RLGC {
                     }
 
                     pending.erase(pit);
+                    inActiveCut[id] = false;
                     onBallTime[id] = 0.0f;
                     return reward;
                 }
 
-                // Update trajectory score on contact
-                if (!pc.oppWhiffed && state.prev) {
-                    pc.ballTrajectoryScore = EvaluatePostCutTrajectory(player, state);
-                }
-
+                pc.ballTrajectoryScore = EvaluatePostCutTrajectory(player, state);
                 return 0.0f;
             }
 
-            // ====================================================================
-            // PHASE 1 & 2: Detect and validate cut attempt
-            // ====================================================================
+            // Don't re-arm during active cut outcome window
+            if (inActiveCut[id]) return 0.0f;
 
-            // Track possession window
+            // Track possession
             float distToBall = (player.pos - state.ball.pos).Length();
             bool nearBall = (distToBall < maxDistToBall);
 
@@ -708,11 +779,10 @@ namespace RLGC {
 
             if (tOn < minOnBallTime) return 0.0f;
 
-            // Validate challenger
+            // Check challenger
             ChallengeInfo ci = GetChallengeInfo(player, state);
             if (ci.oppCarId == 0) return 0.0f;
 
-            // Find opponent and check positioning
             const Player* oppPtr = nullptr;
             for (const auto& opp : state.players) {
                 if (opp.carId == ci.oppCarId) {
@@ -721,11 +791,8 @@ namespace RLGC {
                 }
             }
 
-            if (!oppPtr || !IsOpponentPositionedToContest(player, *oppPtr, state)) {
-                return 0.0f;
-            }
+            if (!oppPtr) return 0.0f;
 
-            // Is challenger actually threatening?
             bool isChallenging = (ci.oppDistToBall < challengerApproachDist) &&
                 (ci.oppVelTowardBall > challengerVelocityThreshold);
             if (!isChallenging) return 0.0f;
@@ -735,28 +802,32 @@ namespace RLGC {
 
             const Vec prevV = state.prev->ball.vel;
             const Vec curV = state.ball.vel;
+            const float prevSpd = prevV.Length();
             const float curSpd = curV.Length();
 
-            // Direction change must be dramatic (30-180°)
+            // NEW: Previous velocity must be significant
+            if (prevSpd < minPrevBallVelocity) return 0.0f;
+
+            // Direction change validation
             float angleChange01 = AngleChange01(prevV, curV);
             if (angleChange01 < minDirectionChange01 || angleChange01 > maxDirectionChange01) {
                 return 0.0f;
             }
 
-            // Ball must be accelerated
-            if (curSpd < minBallSpeedAfterCut) {
+            if (curSpd < minBallSpeedAfterCut) return 0.0f;
+
+            // Ground-based cuts only
+            if (state.ball.pos.z > maxBallHeightAtCut) return 0.0f;
+
+            // NEW: Validate ball direction is good (behind or away from opponent)
+            // This is the key "cut outplay" quality check
+            float behindScore = ComputeBehindOpponentScore(curV, state.ball.pos, *oppPtr);
+            if (behindScore < 0.0f) {
+                // Ball going TOWARD opponent = bad cut
                 return 0.0f;
             }
 
-            // Ground-based cuts (not high pops)
-            if (state.ball.pos.z > 400.0f) {
-                return 0.0f;
-            }
-
-            // ====================================================================
-            // ARM PENDING CUT
-            // ====================================================================
-
+            // Arm pending cut
             PendingCut pc;
             pc.timeLeft = outcomeEvaluationWindow;
             pc.whiffCheckTimeLeft = whiffDetectionWindow;
@@ -766,13 +837,16 @@ namespace RLGC {
             pc.oppCommitted = false;
             pc.oppWhiffed = true;
             pc.ballTrajectoryScore = 0.0f;
+            pc.regainTouchCount = 0;
 
             pending[id] = pc;
+            inActiveCut[id] = true;
             tOn = 0.0f;
 
             return 0.0f;
         }
     };
+
 
     // ============================================================================
     // 3) FakeChallengeOffenseReward

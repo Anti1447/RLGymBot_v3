@@ -2,6 +2,18 @@ cmake_minimum_required (VERSION 3.10)
 
 project("GigaLearnBot")
 
+# Make sure CMake finds libtorch if its in this directory
+if (EXISTS "${PROJECT_SOURCE_DIR}/GigaLearnCPP/libtorch/")
+	message("Using local libtorch folder...")
+	list(APPEND CMAKE_PREFIX_PATH "GigaLearnCPP/libtorch")
+	# Make ultra-sure we can find libtorch if its local
+	set(CMAKE_PREFIX_PATH "GigaLearnCPP/libtorch/share/cmake/Torch")
+endif()
+
+# Add libtorch (https://pytorch.org/cppdocs/installing.html#minimal-example)
+find_package(Torch REQUIRED)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+
 # Define sources for the main GigaLearnBot executable
 file(GLOB_RECURSE GIGALEARNBOT_FILES_SRC "src/*.cpp" "src/*.h" "src/*.hpp")
 list(REMOVE_ITEM GIGALEARNBOT_FILES_SRC
@@ -33,10 +45,20 @@ set(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}")
 
 # Include GigaLearnCPP
 add_subdirectory(GigaLearnCPP)
-target_link_libraries(GigaLearnBot GigaLearnCPP)
-target_link_libraries(rlbot GigaLearnCPP)
+target_link_libraries(GigaLearnBot PUBLIC GigaLearnCPP)
+target_link_libraries(rlbot PUBLIC GigaLearnCPP)
+
+# Link torch libraries
+target_link_libraries(GigaLearnBot PRIVATE "${TORCH_LIBRARIES}")
+target_link_libraries(rlbot PRIVATE "${TORCH_LIBRARIES}")
 
 # Include RLBotCPP
 add_subdirectory(RLBotCPP)
-target_link_libraries(GigaLearnBot RLBotCPP)
-target_link_libraries(rlbot RLBotCPP)
+target_link_libraries(GigaLearnBot PUBLIC RLBotCPP)
+target_link_libraries(rlbot PUBLIC RLBotCPP)
+
+# Suppress harmless PyTorch size_t warnings (MSVC)
+if (MSVC)
+    target_compile_options(GigaLearnBot PRIVATE /wd4267)
+    target_compile_options(rlbot PRIVATE /wd4267)
+endif()

@@ -117,9 +117,9 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
-        cfg.entropyScale = 0.02f;
-        cfg.policyLR = 1.7e-4f;
-        cfg.criticLR = 1.7e-4f;
+        cfg.entropyScale = 0.025f;
+        cfg.policyLR = 1.6e-4f;
+        cfg.criticLR = 1.6e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.6f;
@@ -323,10 +323,10 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new AdvancedRecoveryReward(), 0.7f),
                 WeightedReward(new ProperLandingReward(), 0.9f),
                 WeightedReward(new PowerSlideControlReward(), 3.0f),
-                WeightedReward(new WavedashBasicReward(), 18.0f),
+                WeightedReward(new WavedashBasicReward(), 24.0f),
                 //WeightedReward(new WallDashReward(), 15.0f),
                 WeightedReward(new WavedashReward(), 3.0f),
-                WeightedReward(new EnhancedSpeedFlipReward(), 12.0f),
+                WeightedReward(new EnhancedSpeedFlipReward(), 18.0f),
                 WeightedReward(new EmergencySaveCommitReward(), 2.0f),
 
 
@@ -334,9 +334,9 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 1.0f), 15.0f),
                 //WeightedReward(new ZeroSumReward(new AirTouchReward(), 1.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 1.0f), 4.0f), // replaces wall touch & air touch rewards
-                WeightedReward(new ZeroSumReward(new TouchHeightWallScalarReward(), 1.0f), 10.0f), // replaces wall touch & air touch rewards
+                WeightedReward(new ZeroSumReward(new TouchHeightWallScalarReward(), 1.0f), 15.0f), // replaces wall touch & air touch rewards
                 WeightedReward(new ZeroSumReward(new WallShotReward(), 1.0f), 8.0f),
-                WeightedReward(new ZeroSumReward(new WallPopReward(), 1.0f), 5.0f),
+                WeightedReward(new ZeroSumReward(new WallPopReward(), 1.0f), 7.0f),
                 WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 8.0f),
                 WeightedReward(new ZeroSumReward(new UpsideDownAerialReward(), 1.0f), 30.0f), // new for helping with flip resets
                 //WeightedReward(new ZeroSumReward(new CeilingShotTrainingReward(), 1.0f), 20.0f),
@@ -355,61 +355,64 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new ZeroSumReward(new BackboardDefenseReward(), 1.0f), 4.0f),
                 //WeightedReward(new ZeroSumReward(new HookShotReward(), 1.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new CornerClearReward(), 1.0f), 5.0f),
-                WeightedReward(new ZeroSumReward(new FiftyFiftyReward(), 1.0f), 8.0f),
+                //WeightedReward(new ZeroSumReward(new FiftyFiftyReward(), 1.0f), 2.0f),
+                WeightedReward(new ZeroSumReward(new SingleJumpLow5050Reward(), 1.0f), 12.0f),
                 WeightedReward(new ZeroSumReward(new BallRedirectReward(), 1.0f), 25.0f),
-                WeightedReward(new LowBoostOppHalfFiftyPunish(), 8.0f), //punishment for losing 50/50s in opponent half with low boost
+                WeightedReward(new LowBoostOppHalfFiftyPunish(), 5.0f), //punishment for losing 50/50s in opponent half with low boost
                 //WeightedReward(new ZeroSumReward(new EnhancedDoubleTapReward(), 1.0f), 25.0f), //messing up air dribbles
 
                 // Outplay Rewards (boosted for aggressive playmaking)
-                WeightedReward(new ZeroSumReward(new FlickReward(), 1.0f), 4.0f),
-                WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 1.0f), 15.0f),
-                WeightedReward(new ZeroSumReward(new FlickShotReward(), 1.0f), 20.0f),
-                WeightedReward(new ZeroSumReward(new FlickOnGoalReward(), 1.0f), 40.0f),
-                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 1.0f), 40.0f),
-                WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 1.0f), 1.5f),
-                WeightedReward(new ZeroSumReward(new FakeChallengeDefenseReward(), 1.0f), 2.0f),  // Reduced defense fake
+                //WeightedReward(new ZeroSumReward(new FlickReward(), 1.0f), 4.0f),
+                WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 1.0f), 8.0f),
+                WeightedReward(new ZeroSumReward(new FlickShotReward(), 1.0f), 10.0f),
+                WeightedReward(new ZeroSumReward(new FlickOutplayReward(), 1.0f), 30.0f),
+                WeightedReward(new ZeroSumReward(new FlickOnGoalReward(), 1.0f), 20.0f),
+                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 1.0f), 30.0f),
+                WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 1.0f), 1.8f),
+                //WeightedReward(new ZeroSumReward(new FakeChallengeDefenseReward(), 1.0f), 3.0f),  // Reduced defense fake
                 WeightedReward(new ZeroSumReward(new DemoBumpOutplayReward(), 0.5f), 40.0f),
                 //WeightedReward(new ZeroSumReward(new FlipResetReward(), 0.5f), 100.0f),
                 //WeightedReward(new ZeroSumReward(new FlipResetDetectionReward(), 0.5f), 75.0f),
 
                 // Possession and Dribbling (offensive focus)
-                WeightedReward(new ZeroSumReward(new DribbleReward(), 1.0f), 3.0f),
-                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 1.0f), 12.0f),
-                WeightedReward(new ZeroSumReward(new BallControlAngleReward(), 1.0f), 0.1f),
-                WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.5f),  // Reduced possession reward
-                WeightedReward(new ZeroSumReward(new DefensivePositionReward(), 1.0f), 2.5f),  // Reduced defensive positioning
-                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 1.0f), 6.0f),
-                WeightedReward(new ZeroSumReward(new CatchBallReward(), 1.0f), 6.0f),
+                //WeightedReward(new ZeroSumReward(new DribbleReward(), 1.0f), 3.0f),
+                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 1.0f), 13.0f),
+                WeightedReward(new ZeroSumReward(new BallControlAngleReward(), 1.0f), 0.15f),
+                //WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.0f),  // Reduced possession reward
+                //WeightedReward(new ZeroSumReward(new DefensivePositionReward(), 1.0f), 2.5f),  // Reduced defensive positioning
+                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 1.0f), 9.0f),
+                //WeightedReward(new ZeroSumReward(new CatchBallReward(), 1.0f), 6.0f),
                 WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 1.0f), 7.5f),
-                WeightedReward(new ZeroSumReward(new AirDribbleAccuracyReward(), 1.0f), 20.0f),
-                WeightedReward(new ZeroSumReward(new AirDribbleBumpReward(), 1.0f), 40.0f),
-                WeightedReward(new ZeroSumReward(new LowBoostDribblePunishment(), 1.0f), 5.0f),
+                WeightedReward(new ZeroSumReward(new AirDribbleAccuracyReward(), 1.0f), 25.0f),
+                //WeightedReward(new ZeroSumReward(new AirDribbleBumpReward(), 1.0f), 20.0f),
+                WeightedReward(new ZeroSumReward(new LowBoostDribblePunishment(), 1.0f), 3.0f),
 				//WeightedReward(new ZeroSumReward(new AirDribbleReward(), 1.0f), 5.0f), //using this reward with HighBallTouchReward is excellent at teaching good air drivble basics, but causes too much overfitting
-                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 1.0f), 2.0f),
-                WeightedReward(new ZeroSumReward(new OrbitBallPunishment(), 1.0f), 5.0f),
+                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 1.0f), 3.3f),
+                WeightedReward(new ZeroSumReward(new OrbitBallPunishment(), 1.0f), 2.0f),
 
                 // Boosted ball-to-goal velocity for offensive pressure
-                WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 20.0f),
+                WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 25.0f),
 
                 // Confidence and Hesitation Rewards/punishments
-                WeightedReward(new HesitationPunishment(800.0f, 1500.0f, 1.0f), 15.0f),
-                WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(1200.0f, 2000.0f), 1.0f), 25.0f),
+                //WeightedReward(new HesitationPunishment(800.0f, 1500.0f, 1.0f), 10.0f),
+                WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(1200.0f, 2000.0f), 1.0f), 20.0f),
                 WeightedReward(new ZeroSumReward(new FirstToBallReward(), 1.0f), 20.0f),
-                WeightedReward(new ZeroSumReward(new ImmediateShotReward(0.5f), 1.0f), 30.0f),
-                WeightedReward(new ExcessiveShadowPunishment(3.0f, 2500.0f), 10.0f),
-                WeightedReward(new ZeroSumReward(new AerialCommitmentReward(400.0f, 1.0f), 1.0f), 15.0f),
-                WeightedReward(new MomentumMaintenanceReward(1700.0f, 0.4f), 10.0f),
-                WeightedReward(new ZeroSumReward(new FiftyAggressionReward(), 1.0f), 20.0f),
+                WeightedReward(new ZeroSumReward(new ImmediateShotReward(0.5f), 1.0f), 35.0f),
+                //WeightedReward(new ExcessiveShadowPunishment(3.0f, 2500.0f), 10.0f),
+                //WeightedReward(new ZeroSumReward(new AerialCommitmentReward(400.0f, 1.0f), 1.0f), 20.0f),
+                WeightedReward(new MomentumMaintenanceReward(800.0f, 1600.0f, 0.25f), 5.0f),
+                //WeightedReward(new ZeroSumReward(new FiftyAggressionReward(), 1.0f), 15.0f),
 
                 // Kickoff Rewards
                 WeightedReward(new ZeroSumReward(new KickoffSpeedReward(), 1.0f), 10.0f),
-                WeightedReward(new ZeroSumReward(new KickoffFormReward(), 1.0f), 24.0f),
+                WeightedReward(new ZeroSumReward(new KickoffFormReward(), 1.0f), 20.0f),
                 WeightedReward(new ZeroSumReward(new KickoffReward(), 1.0f), 22.0f),
                 WeightedReward(new ZeroSumReward(new KickoffFirstTouchReward(), 1.0f), 10.0f),
-                //WeightedReward(new FlipDuringKickoffReward(), 5.0f),
+                WeightedReward(new SideFlipKickoffReward(), 15.0f),
+                WeightedReward(new FlipDuringKickoffReward(), 15.0f),
 				//WeightedReward(new ZeroSumReward(new KickoffContactPunishmentReward(), 1.0f), 8.0f),
-                WeightedReward(new ZeroSumReward(new KickoffBallPositionReward(), 1.0f), 5.0f),
-                WeightedReward(new ZeroSumReward(new EnhancedKickoffReward(), 1.0f), 10.0f),
+                //WeightedReward(new ZeroSumReward(new KickoffBallPositionReward(), 1.0f), 6.0f),
+                //WeightedReward(new ZeroSumReward(new EnhancedKickoffReward(), 1.0f), 13.0f),
 
                 // Boost Management Rewards
                 //WeightedReward(new AdvancedBoostManagementReward(), 10.0f),
@@ -418,8 +421,8 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new PickupBoostReward(), 25.0f),
                 WeightedReward(new BigBoostPadCenterReward(), 25.0f),
                 WeightedReward(new BoostDuringFlipReward(), 7.0f),
-                WeightedReward(new BoostPathReward(), 12.0f),
-                WeightedReward(new SmallPadCollectionReward(), 1.5f),
+                WeightedReward(new BoostPathReward(), 15.0f),
+                WeightedReward(new SmallPadCollectionReward(), 2.0f),
                 WeightedReward(new ZeroSumReward(new BoostStealReward(), 1.0f), 35.0f),
                 WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 3.0f),
                 //WeightedReward(new ZeroSumReward(new BoostWastePenaltyReward(), 1.0f), 10.0f),
@@ -429,11 +432,11 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new SupersonicReward(), 12.0f),
 
                 //Combat Rewards
-                WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 30.0f),
-                WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 30.0f),
-                WeightedReward(new ZeroSumReward(new DemoOffenseReward(), 0.5f), 45.0f),
-                WeightedReward(new ZeroSumReward(new AirBumpDemoReward(), 0.5f), 75.0f),
-                WeightedReward(new ZeroSumReward(new DemoChasingReward(), 0.5f), 0.03f),
+                WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 40.0f),
+                WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 40.0f),
+                WeightedReward(new ZeroSumReward(new DemoOffenseReward(), 0.5f), 55.0f),
+                WeightedReward(new ZeroSumReward(new AirBumpDemoReward(), 0.5f), 85.0f),
+                WeightedReward(new ZeroSumReward(new DemoChasingReward(), 0.5f), 0.06f),
 
                 //General Event Rewards
                 // Reduced penalty for conceding to encourage aggression (Phase 4 - Platinum)
@@ -993,11 +996,13 @@ int main(int argc, char* argv[]) {
     cfg.skillTracker.deterministic = false;
 
     // === MuZero Implementation ===
-    cfg.reanalysis.enabled = true;
-    cfg.reanalysis.mctsSimulations = 4;           // Very low for testing
+    cfg.reanalysis.enabled = false;
+    cfg.reanalysis.mctsSimulations = 16;           // Very low for testing
     cfg.reanalysis.reanalysisInterval = 50;        // Every 50 iterations instead of 100
-    cfg.reanalysis.samplesPerReanalysis = 100;    // Small batch
-    cfg.reanalysis.minBufferSize = 1000;          // Lower threshold
+    cfg.reanalysis.samplesPerReanalysis = 200;    // Small batch
+    cfg.reanalysis.minBufferSize = 5000;          // Lower threshold
+    cfg.reanalysis.policyReanalysisWeight = 0.02f; // gradually rely more on reanalysis. START LOW
+    cfg.reanalysis.valueReanalysisWeight = 0.02f;  // gradually rely more on reanalysis. START LOW
 
 
     // === DEVICE ===
@@ -1010,7 +1015,7 @@ int main(int argc, char* argv[]) {
     cfg.randomSeed = 123;
 
     // === PPO CONFIG ===
-    int tsPerItr = 300'000;
+    int tsPerItr = 200'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;

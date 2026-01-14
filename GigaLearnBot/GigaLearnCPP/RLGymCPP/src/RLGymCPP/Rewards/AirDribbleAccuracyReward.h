@@ -46,15 +46,15 @@ namespace RLGC {
         // Maximum reward per single touch
         // More aggressive: 10.0-12.0 | More conservative: 5.0-6.0
 
-        const float SEQ_REWARD_CAP = 60.0f;
+        const float SEQ_REWARD_CAP = 65.0f;
         // Total reward cap per sequence (lower = encourages quick finishes)
         // More aggressive: 60.0-70.0 | More conservative: 30.0-40.0
 
-        const float MAX_SEQ_DURATION = 12.0f;
+        const float MAX_SEQ_DURATION = 13.0f;
         // Maximum sequence duration in seconds
         // More aggressive: 10.0-12.0 | More conservative: 5.0-6.0
 
-        const int MAX_TOUCHES = 30;
+        const int MAX_TOUCHES = 40;
         // Maximum touches before exhausting
         // More aggressive: 30-35 | More conservative: 15-20
 
@@ -63,12 +63,12 @@ namespace RLGC {
         // More aggressive: 8.0 | More conservative: 15.0-20.0
 
         // --- DECAY CURVE ---
-        const float DECAY_EXPONENT = 0.45f;
+        const float DECAY_EXPONENT = 0.5f;
         // How fast rewards diminish (lower = softer)
         // More aggressive: 0.25-0.35 | More conservative: 0.55-0.70
 
         // --- BONUS REWARDS ---
-        const float ENTRY_BONUS = 0.6f;
+        const float ENTRY_BONUS = 0.65f;
         // One-time bonus when first qualifying touch occurs
         // More aggressive: 0.8-1.0 | More conservative: 0.2-0.3
 
@@ -90,7 +90,7 @@ namespace RLGC {
         // More aggressive: 1.5-1.8 | More conservative: 1.1-1.2
 
         // --- FINISHING ZONE DETECTION ---
-        const float FINISHING_ZONE_RADIUS = 700.0f;
+        const float FINISHING_ZONE_RADIUS = 300.0f;
         // XY-plane distance from goal center to enter "finishing zone"
         // When inside: enforce strict z-height constraints
         // When outside: allow high arcs
@@ -100,7 +100,7 @@ namespace RLGC {
         // Blue goal at y=5120, Orange at y=-5120
 
         // --- HEIGHT CONSTRAINT FOR FINISHING ZONE ---
-        const float MAX_BALL_Z_FOR_GOAL = 630.f;
+        const float MAX_BALL_Z_FOR_GOAL = 640.f;
         // Maximum ball center z-height when in finishing zone
         // = Goal height (642.775) + tolerance (75)
         // Prevents overshooting
@@ -110,25 +110,25 @@ namespace RLGC {
         // More aggressive: 0.1-0.2 | More conservative: 0.5-0.7
 
         // --- HEIGHT PENALTY FOR SETUP DRIBBLES ---
-        const float EXCESSIVE_HEIGHT_THRESHOLD = 1600.0f;
+        const float EXCESSIVE_HEIGHT_THRESHOLD = 2000.0f;
         // Ball height above which to penalize when FAR from goal
         // Used during setup phase only
         // Conservative: 800-1000
 
-        const float HEIGHT_PENALTY_EXPONENT = 1.5f;
+        const float HEIGHT_PENALTY_EXPONENT = 1.0f;
         // How aggressively to penalize excessive height
         // More aggressive: 2.0-3.0 | More conservative: 0.8-1.0
 
-        const float MAX_HEIGHT_PENALTY = 0.25f;
+        const float MAX_HEIGHT_PENALTY = 0.8f;
         // Cap on penalty reduction far from goal
         // More aggressive: 0.2-0.3 | More conservative: 0.6-0.8
 
         // --- DIRECTIONAL REQUIREMENTS ---
-        const float MIN_DIR_MULTIPLIER = 0.45f;
+        const float MIN_DIR_MULTIPLIER = 0.46f;
         // Minimum directional alignment multiplier
         // More aggressive: 0.4-0.5 | More conservative: 0.65-0.75
 
-        const float GOOD_DIR_THRESHOLD = 0.5f;
+        const float GOOD_DIR_THRESHOLD = 0.525f;
         // Alignment threshold for "good" direction (dot product)
         // More aggressive: 0.4-0.5 | More conservative: 0.65-0.75
 

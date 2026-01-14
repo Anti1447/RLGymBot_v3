@@ -788,10 +788,50 @@ void GGL::Learner::Start() {
 					report["Env Step Time"] = envStepTime;
 				}
 
-				// Add collected experience to reanalysis buffer
+				// Add collected experience to reanalysis buffer (with prioritized sampling)
 				if (config.reanalysis.enabled && !tempExperienceBuffer.empty()) {
-					reanalysisBuffer->Add(tempExperienceBuffer);
-					RG_LOG("Added " << tempExperienceBuffer.size() << " samples to reanalysis buffer (total: " << reanalysisBuffer->Size() << ")");
+					// Filter samples using prioritized sampling strategy
+					std::vector<ExperienceSample> prioritizedSamples;
+
+					for (const auto& sample : tempExperienceBuffer) {
+						const RLGC::GameState& state = sample.state;
+						const Vec& ballPos = state.ball.pos;
+
+						// Strategy 1: Ball near goals (both X,Y and Z within 1500 units)
+						bool nearBlueGoal = (std::abs(ballPos.x - CommonValues::BLUE_GOAL_BACK.x) < 1500.0f) &&
+											(std::abs(ballPos.y - CommonValues::BLUE_GOAL_BACK.y) < 1500.0f) &&
+											(std::abs(ballPos.z - CommonValues::BLUE_GOAL_BACK.z) < 1500.0f);
+
+						bool nearOrangeGoal = (std::abs(ballPos.x - CommonValues::ORANGE_GOAL_BACK.x) < 1500.0f) &&
+											  (std::abs(ballPos.y - CommonValues::ORANGE_GOAL_BACK.y) < 1500.0f) &&
+											  (std::abs(ballPos.z - CommonValues::ORANGE_GOAL_BACK.z) < 1500.0f);
+
+						bool nearGoal = nearBlueGoal || nearOrangeGoal;
+
+						// Strategy 2: Kickoff detection (ball near center, low altitude)
+						bool isKickoff = (std::abs(ballPos.x) < 1500.0f) &&
+										 (std::abs(ballPos.y) < 1500.0f) &&
+										 (ballPos.z < 200.0f);
+
+						// Strategy 3: High uncertainty states (value close to neutral)
+						bool highUncertainty = (std::abs(sample.value - 0.5f) < 0.3f);
+
+						// Strategy 4: High reward states (interesting dynamics)
+						bool highReward = (sample.reward > 0.1f);
+
+						// Include sample if it meets any priority criterion
+						bool isWorthAnalyzing = nearGoal || isKickoff || highUncertainty || highReward;
+
+						if (isWorthAnalyzing) {
+							prioritizedSamples.push_back(sample);
+						}
+					}
+
+					if (!prioritizedSamples.empty()) {
+						reanalysisBuffer->Add(prioritizedSamples);
+						RG_LOG("Added " << prioritizedSamples.size() << "/" << tempExperienceBuffer.size()
+							<< " prioritized samples to reanalysis buffer (total: " << reanalysisBuffer->Size() << ")");
+					}
 					tempExperienceBuffer.clear();
 				}
 
@@ -918,6 +958,11 @@ void GGL::Learner::Start() {
 						report["Reanalysis/Value Difference"] = reanalysisMetrics.valueDifference;
 						report["Reanalysis/Samples Processed"] = (double)reanalysisMetrics.samplesProcessed;
 					}
+
+					// Clean up GPU memory after reanalysis
+					#ifdef RG_CUDA_SUPPORT
+					torch::cuda::synchronize();
+					#endif
 				}
 
 				// Set metrics
