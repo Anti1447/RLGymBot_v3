@@ -5,6 +5,19 @@
 
 namespace GGL {
 
+	enum class NetworkArchitecture {
+		MLP,         // Standard multi-layer perceptron
+		MLP_MIXER    // MLP-Mixer with token-based relational learning
+	};
+
+	// Configuration for MLP-Mixer architecture
+	struct MixerConfig {
+		int numMixerBlocks = 2;    // Number of mixer blocks to stack
+		int hiddenDim = 256;       // Hidden dimension for mixer blocks
+		int tokenDim = 128;        // Dimension of each token (may differ from network hidden dim)
+		int mlpExpansionFactor = 4; // Expansion factor for MLP hidden layers (0 = auto)
+	};
+
 	// https://github.com/AechPro/rlgym-ppo/blob/main/rlgym_ppo/ppo/ppo_learner.py
 	struct PPOLearnerConfig {
 
@@ -12,8 +25,8 @@ namespace GGL {
 		int64_t batchSize = 50'000;
 		int64_t miniBatchSize = 0; // Set to 0 to just use batchSize
 
-		// On the last batch of the iteration, 
-		//	if the amount of remaining experience exceeds the batch size, 
+		// On the last batch of the iteration,
+		//	if the amount of remaining experience exceeds the batch size,
 		//	all remaining experience is used as a larger batch.
 		// This prevents experience loss due to batch size rounding.
 		// This will only happen if the amount of remaining experience is < batchSize*2.
@@ -29,6 +42,10 @@ namespace GGL {
 		// Use half-precision models for inference
 		// This is much faster on GPU, not so much for CPU
 		bool useHalfPrecision = true;
+
+		// Neural network architecture selection
+		NetworkArchitecture networkArch = NetworkArchitecture::MLP;
+		MixerConfig mixerConfig = MixerConfig();  // Used only if networkArch == MLP_MIXER
 
 		PartialModelConfig policy, critic, sharedHead;
 
@@ -57,7 +74,9 @@ namespace GGL {
 		float guidingStrength = 0.03f;
 
 		// MuZero Setups
-		// Reanalysis loss weights (Phase 6)
+		// Reanalysis loss flags and weights (Phase 6)
+		bool policyReanalysisEnabled = false;  // Will be set from LearnerConfig
+		bool valueReanalysisEnabled = false;   // Will be set from LearnerConfig
 		float policyReanalysisWeight = 0.0f;  // Will be set from LearnerConfig
 		float valueReanalysisWeight = 0.0f;   // Will be set from LearnerConfig
 

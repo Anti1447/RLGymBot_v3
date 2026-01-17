@@ -1,4 +1,5 @@
 #include "PPOLearner.h"
+#include "../Util/MixerModelWrapper.h"
 
 #include <torch/nn/utils/convert_parameters.h>
 #include <torch/nn/utils/clip_grad.h>
@@ -91,19 +92,30 @@ GGL::PPOLearner::PPOLearner(int obsSize, int numActions, PPOLearnerConfig _confi
 	if (config.batchSize % config.miniBatchSize != 0)
 		RG_ERR_CLOSE("PPOLearner: config.batchSize (" << config.batchSize << ") must be a multiple of config.miniBatchSize (" << config.miniBatchSize << ")");
 
-	MakeModels(true, obsSize, numActions, config.sharedHead, config.policy, config.critic, device, models);
+	if (config.networkArch == NetworkArchitecture::MLP_MIXER) {
+		// For MLP-Mixer, we need to know numPlayers from observation structure
+		// Standard AdvancedObs format: ball(6) + player(12*N) where N includes self and others
+		// We infer numPlayers from obsSize
+		// obsSize = 6 (ball) + 12 * numPlayers
+		// numPlayers = (obsSize - 6) / 12
+		int numPlayers = (obsSize - 6) / 12;
+		if (numPlayers <= 0 || (obsSize - 6) % 12 != 0) {
+			RG_ERR_CLOSE("PPOLearner: Cannot infer numPlayers from obsSize (" << obsSize << ") for MLP-Mixer. "
+				<< "Expected obsSize = 6 (ball) + 12*numPlayers. Example: obsSize=30 for 2v2 (1+4 players)");
+		}
+		MakeMixerModels(true, obsSize, numPlayers, numActions, device, models, config.mixerConfig);
+	} else {
+		MakeModels(true, obsSize, numActions, config.sharedHead, config.policy, config.critic, device, models);
+	}
 
 	SetLearningRates(config.policyLR, config.criticLR);
 
-	// Log device info and param counts
-	std::string deviceStr = device.is_cuda() ? "CUDA GPU" : "CPU";
-	RG_LOG("PPOLearner initialized on device: " << deviceStr);
+	// Print param counts
 	RG_LOG("Model parameter counts:");
 	uint64_t total = 0;
 	for (auto model : this->models) {
 		uint64_t count = model->GetParamCount();
-		std::string modelDevice = model->parameters().begin()->device().is_cuda() ? "CUDA" : "CPU";
-		RG_LOG("\t\"" << model->modelName << "\": " << Utils::NumToStr(count) << " (device: " << modelDevice << ")");
+		RG_LOG("\t\"" << model->modelName << "\": " << Utils::NumToStr(count));
 		total += count;
 	}
 	RG_LOG("\t[Total]: " << Utils::NumToStr(total));
@@ -150,6 +162,62 @@ void GGL::PPOLearner::MakeModels(
 		outModels.Add(new Model("critic", fullCriticConfig, device));
 }
 
+void GGL::PPOLearner::MakeMixerModels(
+	bool makeCritic,
+	int obsSize, int numPlayers, int numActions,
+	torch::Device device,
+	ModelSet& outModels,
+	const MixerConfig& mixerConfig) {
+
+	// Create MLP-Mixer policy network
+	// The MixerModelWrapper handles tokenization internally
+	auto policyWrapper = new MixerModelWrapper(
+		"policy",
+		obsSize,
+		numPlayers,
+		numActions,
+		mixerConfig,
+		device,
+		ModelOptimType::ADAMW
+	);
+
+	// Validate dimensions match our expectations
+	TORCH_CHECK(policyWrapper->config.numInputs == obsSize,
+		"Policy mixer obsSize mismatch: expected ", obsSize, ", got ", policyWrapper->config.numInputs);
+	TORCH_CHECK(policyWrapper->config.numOutputs == numActions,
+		"Policy mixer action space mismatch: expected ", numActions, ", got ", policyWrapper->config.numOutputs);
+
+	// Store in ModelSet (now using IModel* for type safety)
+	outModels.map["policy"] = policyWrapper;
+
+	if (makeCritic) {
+		auto criticWrapper = new MixerModelWrapper(
+			"critic",
+			obsSize,
+			numPlayers,
+			1,  // Value network outputs single value
+			mixerConfig,
+			device,
+			ModelOptimType::ADAMW
+		);
+
+		TORCH_CHECK(criticWrapper->config.numInputs == obsSize,
+			"Critic mixer obsSize mismatch");
+		TORCH_CHECK(criticWrapper->config.numOutputs == 1,
+			"Critic mixer must output single value");
+
+		outModels.map["critic"] = criticWrapper;
+	}
+
+	RG_LOG("MixerModels created:");
+	RG_LOG("\t  numPlayers: " << numPlayers);
+	RG_LOG("\t  obs_size: " << obsSize);
+	RG_LOG("\t  num_actions: " << numActions);
+	RG_LOG("\t  mixer_blocks: " << mixerConfig.numMixerBlocks);
+	RG_LOG("\t  hidden_dim: " << mixerConfig.hiddenDim);
+	RG_LOG("\t  token_dim: " << mixerConfig.tokenDim);
+}
+
 torch::Tensor GGL::PPOLearner::InferPolicyProbsFromModels(
 	ModelSet& models,
 	torch::Tensor obs, torch::Tensor actionMasks,
@@ -193,21 +261,6 @@ void GGL::PPOLearner::InferActionsFromModels(
 }
 
 void GGL::PPOLearner::InferActions(torch::Tensor obs, torch::Tensor actionMasks, torch::Tensor* outActions, torch::Tensor* outLogProbs, ModelSet* models) {
-	// Log device info on first inference (static to only log once)
-	static bool firstInference = true;
-	if (firstInference) {
-		firstInference = false;
-		bool obsCuda = obs.device().is_cuda();
-		bool modelCuda = this->device.is_cuda();
-		std::string obsDevice = obsCuda ? "CUDA" : "CPU";
-		std::string modelDevice = modelCuda ? "CUDA" : "CPU";
-		RG_LOG("PPOLearner::InferActions - Observation device: " << obsDevice << ", Model device: " << modelDevice);
-		if (obsCuda != modelCuda) {
-			RG_LOG("WARNING: Observation and model on different device types! This will cause slow transfers.");
-		} else {
-			RG_LOG("✓ Observation and model on same device type - good!");
-		}
-	}
 	InferActionsFromModels(models ? *models : this->models, obs, actionMasks, config.deterministic, config.policyTemperature, config.useHalfPrecision, outActions, outLogProbs);
 }
 
@@ -235,7 +288,7 @@ torch::Tensor ComputeEntropy(torch::Tensor probs, torch::Tensor actionMasks, boo
 	return entropy.mean();
 }
 
-void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets) {
+void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets = nullptr) {
 	auto mseLoss = torch::nn::MSELoss();
 
 	MutAvgTracker
@@ -348,7 +401,7 @@ void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool i
 					auto mctsPolicyTargets = reanalysisTargets->mctsPolicyTargets.to(device);
 
 					// Get current policy and value predictions for reanalysis states
-					torch::Tensor reanalysisActionMasks = torch::ones({ reanalysisObs.size(0), models["policy"]->config.numOutputs }, device);
+					torch::Tensor reanalysisActionMasks = torch::ones({ reanalysisObs.size(0), actionCount }, device);
 
 					// Policy reanalysis loss
 					torch::Tensor policyReanalysisLoss;

@@ -190,6 +190,8 @@ int main(int argc, char* argv[]) {
     // Configure all training settings from ModelConfig
     ConfigureLearnerConfig(cfg, phaseCfg);
 
+    config.ppoConfig.networkArch = NetworkArchitecture::MLP_MIXER;
+
     // Configure render mode settings
     if (renderMode) {
         cfg.sendMetrics = false;           // No need to log metrics from render instance

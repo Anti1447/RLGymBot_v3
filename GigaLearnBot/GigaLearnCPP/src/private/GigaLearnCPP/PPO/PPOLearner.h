@@ -36,6 +36,14 @@ namespace GGL {
 			torch::Device device,
 			ModelSet& outModels
 		);
+
+	static void MakeMixerModels(
+		bool makeCritic,
+		int obsSize, int numPlayers, int numActions,
+		torch::Device device,
+		ModelSet& outModels,
+		const MixerConfig& mixerConfig
+	);
 		
 		// If models is null, this->models will be used
 		void InferActions(torch::Tensor obs, torch::Tensor actionMasks, torch::Tensor* outActions, torch::Tensor* outLogProbs, ModelSet* models = NULL);

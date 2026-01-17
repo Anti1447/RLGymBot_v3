@@ -32,6 +32,9 @@ namespace GGL {
 		case ModelActivationType::TANH:
 			seq->push_back(torch::nn::Tanh());
 			return;
+		case ModelActivationType::SWISH:
+			seq->push_back(torch::nn::SiLU());  // SiLU is Swish activation
+			return;
 		}
 
 		RG_ERR_CLOSE("Unknown activation function type: " << (int)type);
@@ -81,7 +84,22 @@ namespace GGL {
 
 	//////////////////////////
 
-	class Model : public torch::nn::Module {
+	// Base interface for both Model and MixerModelWrapper
+	class IModel {
+	public:
+		virtual const char* getModelName() const = 0;
+		virtual torch::Tensor Forward(torch::Tensor input, bool halfPrec) = 0;
+		virtual void SetOptimLR(float newLR) = 0;
+		virtual void StepOptim() = 0;
+		virtual void Save(std::filesystem::path folder, bool saveOptim = true) = 0;
+		virtual void Load(std::filesystem::path folder, bool allowNotExist, bool loadOptim = true) = 0;
+		virtual torch::Tensor CopyParams() const = 0;
+		virtual uint64_t GetParamCount() const = 0;
+		virtual std::vector<torch::Tensor> parameters() const = 0;
+		virtual ~IModel() = default;
+	};
+
+	class Model : public torch::nn::Module, public IModel {
 	public:
 		const char* modelName;
 		torch::Device device;
@@ -99,7 +117,9 @@ namespace GGL {
 			torch::Device device
 		);
 
-		virtual torch::Tensor Forward(torch::Tensor input, bool halfPrec);
+		const char* getModelName() const override { return modelName; }
+
+		virtual torch::Tensor Forward(torch::Tensor input, bool halfPrec) override;
 		
 		void SetOptimLR(float newLR);
 
@@ -158,9 +178,9 @@ namespace GGL {
 
 	class ModelSet {
 	public:
-		std::map<std::string, Model*> map = {};
+		std::map<std::string, IModel*> map = {};
 
-		Model* operator[](const std::string& name) { 
+		IModel* operator[](const std::string& name) {
 			auto itr = map.find(name);
 			if (itr == map.end()) {
 				return NULL;
@@ -169,30 +189,30 @@ namespace GGL {
 			}
 		};
 
-		void Add(Model* model) {
-			map[model->modelName] = model;
+		void Add(IModel* model) {
+			map[model->getModelName()] = model;
 		}
 
 		// NOTE: Automatically zeros grad after
 		void StepOptims() {
-			for (Model* model : *this) {
+			for (IModel* model : *this) {
 				model->StepOptim();
 			}
 		}
 
 		void Save(std::filesystem::path folder, bool saveOptims = true) {
-			for (Model* model : *this)
+			for (IModel* model : *this)
 				model->Save(folder, saveOptims);
 		}
 
 		void Load(std::filesystem::path folder, bool allowNotExist, bool loadOptims) {
-			for (Model* model : *this)
+			for (IModel* model : *this)
 				model->Load(folder, allowNotExist, loadOptims);
 		}
 
-		class ModelIterator : public std::iterator<std::forward_iterator_tag, typename Model*> {
+		class ModelIterator : public std::iterator<std::forward_iterator_tag, typename IModel*> {
 		public:
-			using MapItr = std::map<std::string, Model*>::iterator;
+			using MapItr = std::map<std::string, IModel*>::iterator;
 			MapItr _mapItr;
 
 			ModelIterator(MapItr mapItr) : _mapItr(mapItr) {}
@@ -202,7 +222,7 @@ namespace GGL {
 			bool operator==(const ModelIterator& other) const { return _mapItr == other._mapItr; }
 			bool operator!=(const ModelIterator& other) const { return _mapItr != other._mapItr; }
 
-			typename Model*& operator*() const { return _mapItr->second; }
+			typename IModel*& operator*() const { return _mapItr->second; }
 		};
 
 		ModelIterator begin() {
@@ -215,13 +235,18 @@ namespace GGL {
 
 		ModelSet CloneAll() {
 			ModelSet clone = *this;
-			for (Model*& model : clone)
-				model = model->MakeClone();
+			for (IModel*& model : clone) {
+				// Note: CloneAll only works for Model* types (MLP), not MixerModelWrapper*
+				Model* mlpModel = dynamic_cast<Model*>(model);
+				if (mlpModel) {
+					model = mlpModel->MakeClone();
+				}
+			}
 			return clone;
 		}
 
 		void Free() {
-			for (Model* model : *this)
+			for (IModel* model : *this)
 				delete model;
 			map.clear();
 		}

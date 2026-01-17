@@ -15,14 +15,15 @@ namespace GGL {
 		RELU,
 		LEAKY_RELU,
 		SIGMOID,
-		TANH
+		TANH,
+		SWISH
 	};
 
 	// Doesn't include inputs or outputs
 	struct PartialModelConfig {
 		std::vector<int> layerSizes = {};
 		ModelActivationType activationType = ModelActivationType::RELU;
-		ModelOptimType optimType = ModelOptimType::ADAM;
+		ModelOptimType optimType = ModelOptimType::ADAMW;
 		bool addLayerNorm = true;
 		bool addOutputLayer = true;
 
