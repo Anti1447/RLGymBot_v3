@@ -13,7 +13,7 @@
 # ============================================================================
 
 param(
-    [string]$ExePath = ".\build\GigaLearnBot.exe",
+    [string]$ExePath = ".\build\bin\GigaLearnBot.exe",
     [string]$CheckpointFolder = "C:\Projects\RLGymBot_v3\GigaLearnBot\build\checkpoints",
     [int]$CheckIntervalSeconds = 15
 )
@@ -114,13 +114,18 @@ function Start-RenderProcess {
     param([string]$CheckpointPath)
 
     # GigaLearn loads the latest checkpoint from the checkpoint folder automatically
-    # We just need to start with --render flag
-    # Run from the build directory to ensure correct working directory
-    $workingDir = Split-Path -Parent (Resolve-Path $ExePath)
+    # The --render flag enables:
+    #   - Deterministic policy (best actions, no exploration)
+    #   - 3 parallel games with fixed modes: 1v1, 2v2, 3v3
+    #   - Connection to RocketSimVis for visualization
+    # Run from the build directory (not bin) to ensure correct relative path resolution
+    $buildDir = Split-Path -Parent (Resolve-Path $ExePath)
+    $workingDir = Split-Path -Parent $buildDir
     $process = Start-Process -FilePath $ExePath -ArgumentList "--render" -WorkingDirectory $workingDir -PassThru -NoNewWindow
     Write-Success "Render instance started (PID: $($process.Id))"
     Write-Info "Working directory: $workingDir"
     Write-Info "Loading checkpoint: $CheckpointPath"
+    Write-Info "Game modes: 1v1 (env 0), 2v2 (env 1), 3v3 (env 2) - deterministic"
     return $process
 }
 

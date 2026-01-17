@@ -2,6 +2,18 @@ cmake_minimum_required (VERSION 3.10)
 
 project("GigaLearnBot")
 
+# Force all executables and libraries to output to the build root (not Debug/Release subdirs)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+# Also set config-specific versions to the same location (for Visual Studio)
+foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG} CONFIG)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG} "${CMAKE_BINARY_DIR}/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG} "${CMAKE_BINARY_DIR}/lib")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG} "${CMAKE_BINARY_DIR}/lib")
+endforeach()
+
 # Make sure CMake finds libtorch if its in this directory
 if (EXISTS "${PROJECT_SOURCE_DIR}/GigaLearnCPP/libtorch/")
 	message("Using local libtorch folder...")
@@ -38,10 +50,7 @@ set_target_properties(rlbot PROPERTIES CXX_STANDARD 20)
 set_target_properties(rlbot PROPERTIES CXX_STANDARD_REQUIRED ON)
 
 
-# Make sure GigaLearnCPP is going to build in the same directory as us
-# Otherwise, we won't be able to import it at runtime
-set(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}")
-set(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}")
+# GigaLearnCPP will use the CMAKE_RUNTIME/LIBRARY_OUTPUT_DIRECTORY settings above
 
 # Include GigaLearnCPP
 add_subdirectory(GigaLearnCPP)

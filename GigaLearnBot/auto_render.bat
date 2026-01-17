@@ -4,6 +4,11 @@ REM Auto-Relaunch Render Script for GigaLearnBot (Batch Version)
 REM ============================================================================
 REM This is a simple wrapper that calls the PowerShell script.
 REM
+REM Render mode features:
+REM   - Deterministic policy (best actions, no exploration)
+REM   - 3 parallel games cycling through 1v1 -> 2v2 -> 3v3
+REM   - Connection to RocketSimVis for visualization
+REM
 REM Usage:
 REM   auto_render.bat
 REM

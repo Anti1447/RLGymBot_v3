@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include "../Math.h"
+#include <unordered_map>
 
 namespace RLGC {
 
@@ -365,6 +366,56 @@ namespace RLGC {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			return !player.isOnGround;
+		}
+	};
+
+	class TurtledPenaltyReward : public Reward {
+	private:
+		mutable std::unordered_map<uint32_t, float> turtledTime;
+		mutable std::unordered_map<uint32_t, bool> wasTurtled;
+
+		// Tunables
+		float graceTime = 1.0f;        // seconds before penalty starts
+		float penaltyPerSecond = -0.5f; // applied after grace
+		float recoveryReward = 1.0f;   // one-time reward on recovery
+
+	public:
+		virtual void Reset(const GameState& initialState) override {
+			turtledTime.clear();
+			wasTurtled.clear();
+		}
+
+		virtual float GetReward(const Player& player,
+			const GameState& state,
+			bool isFinal) override {
+			float reward = 0.0f;
+
+			// Upside-down check: car's up vector points downward
+			bool upsideDown = player.rotMat.up.z < 0.0f;
+			bool onGround = player.isOnGround;
+			bool isTurtled = upsideDown && onGround;
+
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+			if (isTurtled) {
+				turtledTime[player.carId] += dt;
+				wasTurtled[player.carId] = true;
+
+				// Penalize only after grace period
+				if (turtledTime[player.carId] > graceTime) {
+					reward += penaltyPerSecond * dt;
+				}
+			}
+			else {
+				// Just recovered
+				if (wasTurtled[player.carId]) {
+					reward += recoveryReward;
+				}
+				turtledTime[player.carId] = 0.0f;
+				wasTurtled[player.carId] = false;
+			}
+
+			return reward;
 		}
 	};
 
