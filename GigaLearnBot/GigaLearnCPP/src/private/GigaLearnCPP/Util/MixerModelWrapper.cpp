@@ -14,6 +14,7 @@ GGL::MixerModelWrapper::MixerModelWrapper(
 ) :
 	modelName(modelName),
 	device(device),
+	config(PartialModelConfig{}),
 	mixerConfig(mixerCfg),
 	tokenizer(TokenizerConfig{
 		.obsSize = obsSize,
@@ -61,20 +62,21 @@ torch::Tensor GGL::MixerModelWrapper::Forward(torch::Tensor input, bool halfPrec
 					config.numOutputs,
 					mixerConfig.numMixerBlocks
 				);
-				mixerNetHalf->to(RG_HALFPERC_TYPE, true);
+				(*mixerNetHalf)->to(device);
+				(*mixerNetHalf)->to(RG_HALFPERC_TYPE, true);
 			}
 
 			auto fromParams = mixerNet->parameters();
-			auto toParams = mixerNetHalf->parameters();
+			auto toParams = (*mixerNetHalf)->parameters();
 			for (size_t i = 0; i < fromParams.size(); i++) {
-				auto scaledParams = fromParams[i].to(RG_HALFPERC_TYPE, true);
+				auto scaledParams = fromParams[i].to(device, RG_HALFPERC_TYPE, true);
 				toParams[i].copy_(scaledParams, true);
 			}
 		}
 
-		auto halfTokens = tokens.to(RG_HALFPERC_TYPE);
-		auto halfOutput = mixerNetHalf->forward(halfTokens);
-		return halfOutput.to(torch::kFloat);
+		auto halfTokens = tokens.to(device, RG_HALFPERC_TYPE);
+		auto halfOutput = (*mixerNetHalf)->forward(halfTokens);
+		return halfOutput.to(device, torch::kFloat);
 	} else {
 		// Step 2: Pass tokens through mixer network
 		return mixerNet->forward(tokens);

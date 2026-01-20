@@ -237,9 +237,9 @@ namespace RLGC {
                     }
 
                     // SLIGHT BONUS: Wavedashing (but not flip spam)
-                    // Wavedashing is detected by powerslide + jump state
+                    // Wavedashing is detected by handbrake + jump state
                     // hasFlipped here means we DID flip, so we skip this bonus
-                    if (!player.hasFlipped && player.prevAction.powerslide > 0.5f) {
+                    if (!player.hasFlipped && player.prevAction.handbrake > 0.5f) {
                         // Small bonus for wavedashing (not flipping)
                         if (wheelsInContact >= 2) {
                             reward += 0.05f;

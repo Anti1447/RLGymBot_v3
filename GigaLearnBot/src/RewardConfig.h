@@ -14,6 +14,7 @@
 #include <RLGymCPP/Rewards/GodTierMovementRewards_Enhanced.h>
 #include <RLGymCPP/Rewards/PossessionRewards.h>
 #include <RLGymCPP/Rewards/MovementAndKickoffRewards_Enhanced.h>
+#include <RLGymCPP/Rewards/RotationRewards.h>
 
 using namespace RLGC;
 

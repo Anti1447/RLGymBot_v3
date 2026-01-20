@@ -24,8 +24,11 @@ using namespace torch;
 static void ExportRLBOTPolicyStateDict(GGL::ModelSet& models, const std::filesystem::path& folderPath) {
 	if (!models["policy"])
 		RG_ERR_CLOSE("ExportRLBOTPolicyStateDict: models[\"policy\"] is null");
-	auto* policy = models["policy"];
-	auto* shared = models["shared_head"];
+	auto* policy = dynamic_cast<GGL::Model*>(models["policy"]);
+	auto* shared = dynamic_cast<GGL::Model*>(models["shared_head"]);
+
+	if (!policy)
+		RG_ERR_CLOSE("ExportRLBOTPolicyStateDict: policy is not a Model type");
 
 	torch::NoGradGuard noGrad;
 	torch::nn::Sequential combo;
@@ -115,7 +118,7 @@ GGL::PPOLearner::PPOLearner(int obsSize, int numActions, PPOLearnerConfig _confi
 	uint64_t total = 0;
 	for (auto model : this->models) {
 		uint64_t count = model->GetParamCount();
-		RG_LOG("\t\"" << model->modelName << "\": " << Utils::NumToStr(count));
+		RG_LOG("\t\"" << model->getModelName() << "\": " << Utils::NumToStr(count));
 		total += count;
 	}
 	RG_LOG("\t[Total]: " << Utils::NumToStr(total));
@@ -233,8 +236,12 @@ torch::Tensor GGL::PPOLearner::InferPolicyProbsFromModels(
 
 	auto logits = models["policy"]->Forward(obs, halfPrec) / temperature;
 
+	auto* policy = dynamic_cast<GGL::Model*>(models["policy"]);
+	if (!policy)
+		RG_ERR_CLOSE("InferPolicyProbsFromModels: policy is not a Model type");
+
 	auto result = torch::softmax(logits + ACTION_DISABLED_LOGIT * actionMasks.logical_not(), -1);
-	return result.view({ -1, models["policy"]->config.numOutputs }).clamp(ACTION_MIN_PROB, 1);
+	return result.view({ -1, policy->config.numOutputs }).clamp(ACTION_MIN_PROB, 1);
 }
 
 void GGL::PPOLearner::InferActionsFromModels(
@@ -288,8 +295,14 @@ torch::Tensor ComputeEntropy(torch::Tensor probs, torch::Tensor actionMasks, boo
 	return entropy.mean();
 }
 
-void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets = nullptr) {
+void GGL::PPOLearner::Learn(ExperienceBuffer& experience, Report& report, bool isFirstIteration, GGL::Learner::ReanalysisTargets* reanalysisTargets) {
 	auto mseLoss = torch::nn::MSELoss();
+
+	// Get action count from policy model
+	auto* policy = dynamic_cast<Model*>(models["policy"]);
+	if (!policy)
+		RG_ERR_CLOSE("Learn: policy is not a Model type");
+	const int actionCount = policy->config.numOutputs;
 
 	MutAvgTracker
 		avgEntropy,
@@ -604,10 +617,10 @@ void GGL::PPOLearner::SetLearningRates(float policyLR, float criticLR) {
 
 GGL::ModelSet GGL::PPOLearner::GetPolicyModels() {
 	ModelSet result = {};
-	for (Model* model : models) {
-		if (model->modelName == "critic")
+	for (IModel* model : models) {
+		if (std::string(model->getModelName()) == "critic")
 			continue;
-		
+
 		result.Add(model);
 	}
 	return result;

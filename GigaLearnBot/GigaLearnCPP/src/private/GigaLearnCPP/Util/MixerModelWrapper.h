@@ -2,6 +2,7 @@
 #include <torch/torch.h>
 #include "MixerBlock.h"
 #include "RLTokenizer.h"
+#include "Models.h"
 #include <GigaLearnCPP/Util/ModelConfig.h>
 #include <filesystem>
 #include <memory>

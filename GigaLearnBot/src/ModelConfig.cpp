@@ -21,10 +21,10 @@ PhaseConfig GetPhaseConfig() {
     case TrainingPhase::PHASE_2_SILVER:
         cfg.entropyScale = 0.04f;
         cfg.policyLR = 2e-4f;
-        cfg.criticLR = 1.5e-4f;
+        cfg.criticLR = 2e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.3f;
+        cfg.randomStateChance = 0.4f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         break;
@@ -184,16 +184,16 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.ppo.criticLR = phaseCfg.criticLR;
 
     // === NETWORK SIZE (CONSTANT FOR ALL PHASES) ===
-    cfg.ppo.sharedHead.layerSizes = { 512, 512, 512 };
+    cfg.ppo.sharedHead.layerSizes = { 1024, 512, 512 };
     cfg.ppo.policy.layerSizes = { 512, 512 };
     cfg.ppo.critic.layerSizes = { 512, 512 };
 
-    auto optim = ModelOptimType::ADAM;
+    auto optim = ModelOptimType::ADAMW;
     cfg.ppo.policy.optimType = optim;
     cfg.ppo.critic.optimType = optim;
     cfg.ppo.sharedHead.optimType = optim;
 
-    auto activation = ModelActivationType::LEAKY_RELU;
+    auto activation = ModelActivationType::GELU;
     cfg.ppo.policy.activationType = activation;
     cfg.ppo.critic.activationType = activation;
     cfg.ppo.sharedHead.activationType = activation;

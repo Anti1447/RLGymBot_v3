@@ -35,6 +35,9 @@ namespace GGL {
 		case ModelActivationType::SWISH:
 			seq->push_back(torch::nn::SiLU());  // SiLU is Swish activation
 			return;
+		case ModelActivationType::GELU:
+			seq->push_back(torch::nn::GELU());
+			return;
 		}
 
 		RG_ERR_CLOSE("Unknown activation function type: " << (int)type);
@@ -162,15 +165,19 @@ namespace GGL {
 			return clone;
 		}
 
-		uint64_t GetParamCount() {
+		uint64_t GetParamCount() const override {
 			uint64_t total = 0;
-			for (auto& param : this->parameters()) {
+			for (auto& param : torch::nn::Module::parameters()) {
 				if (!param.requires_grad())
 					continue;
 				total += param.numel();
 			}
 
 			return total;
+		}
+
+		std::vector<torch::Tensor> parameters() const override {
+			return torch::nn::Module::parameters();
 		}
 
 		virtual ~Model() = default;

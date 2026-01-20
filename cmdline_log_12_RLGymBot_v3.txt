@@ -1,0 +1,2839 @@
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,38
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,65
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,12
+): error C2737: 'obsDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,29
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,12
+): error C2737: 'actDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(41,11
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(42,25
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(44,10
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(45,24
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(118,3
+): error C2039: 'modelName': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot
+\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(156,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(159,2
+0): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(162,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(237,4
+5): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(291,1
+51): error C2572: 'GGL::PPOLearner::Learn': redefinition of default argument: parameter 1 [C:\Proje
+cts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(6
+  6,8):
+      see declaration of 'GGL::PPOLearner::Learn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(404,8
+1): error C2065: 'actionCount': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\build\G
+igaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(607,2
+8): error C2440: 'initializing': cannot convert from 'GGL::IModel *' to 'GGL::Model *' [C:\Projects
+\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (607,28):
+      Cast from base to derived requires dynamic_cast or static_cast
+
+  PolicyVersionManager.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(35,9): warning
+C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Projects\R
+LGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(99,31):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(36,9): warning
+C4099: 'GGL::PolicyVersionManager': type name first seen using 'struct' now seen using 'class' [C:\
+Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(19,8):
+warning C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(120,22): warning C4018: '>': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\
+GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(302,52): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'stru
+ct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+  MixerModelWrapper.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(58,27
+): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pro
+jects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(118,2
+7): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(25,35): error C2504: 'IModel': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Gi
+gaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,15): error C3646: 'mixerConfig': unknown override specifier [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,3): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,4): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,21): error C2143: syntax error: missing ',' before '&' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(54,17): error C3668: 'GGL::MixerModelWrapper::Forward': method with override specifier 'override'
+did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\Gi
+gaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(56,8): error C3668: 'GGL::MixerModelWrapper::SetOptimLR': method with override specifier 'override
+' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\
+GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(57,8): error C3668: 'GGL::MixerModelWrapper::StepOptim': method with override specifier 'override'
+ did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(75,8): error C3668: 'GGL::MixerModelWrapper::Save': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(76,8): error C3668: 'GGL::MixerModelWrapper::Load': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(78,17): error C3668: 'GGL::MixerModelWrapper::CopyParams': method with override specifier 'overrid
+e' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP
+\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(99,12): error C3668: 'GGL::MixerModelWrapper::GetParamCount': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(107,15): error C3668: 'GGL::MixerModelWrapper::getModelName': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(111,30): error C3668: 'GGL::MixerModelWrapper::parameters': method with override specifier 'overri
+de' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCP
+P\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(83,5): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\bui
+ld\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(6,25): error C2511: 'GGL::MixerModelWrapper::MixerModelWrapper(const char *,int,int,int,const GG
+L::MixerConfig &,c10::Device,GGL::ModelOptimType)': overloaded member function not found in 'GGL::M
+ixerModelWrapper' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(25,8):
+      see declaration of 'GGL::MixerModelWrapper'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(32,1): error C2550: 'GGL::MixerModelWrapper::{ctor}': constructor initializer lists are only all
+owed on constructor definitions [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnC
+PP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,10): error C2660: 'GGL::MakeOptimizer': function does not take 2 arguments [C:\Projects\RLGym
+Bot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(43,3
+  4):
+      see declaration of 'GGL::MakeOptimizer'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.cpp(39,10):
+      while trying to match the argument list '()'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,2): error C2597: illegal reference to non-static member 'GGL::MixerModelWrapper::optim' [C:\P
+rojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(30,28):
+      see declaration of 'GGL::MixerModelWrapper::optim'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(60,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(62,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(64,19): error C2039: 'to': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\GigaL
+earnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(68,34): error C2039: 'parameters': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_
+v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,5): error C3536: 'toParams': cannot be used before it is initialized [C:\Projects\RLGymBot_v3
+\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,15): error C2109: subscript requires array or pointer type [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(76,35): error C2039: 'forward': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\
+GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(77,10): error C3536: 'halfOutput': cannot be used before it is initialized [C:\Projects\RLGymBot
+_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  Models.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33,48):
+error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(171,48):
+ error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLear
+nCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+  Learner.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(6
+0,9): warning C4099: 'GGL::PolicyVersionManager': type name first seen using 'class' now seen using
+ 'struct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(9
+9,31): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct'
+ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(1
+01,27): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct
+' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(590,47): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(873,18): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  InferUnit.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,8): wa
+rning C4099: 'GGL::ModelSet': type name first seen using 'struct' now seen using 'class' [C:\Projec
+ts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,
+  8):
+      see declaration of 'GGL::ModelSet'
+
+  Generating Code...
+  RLBotCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLBotCPP.lib
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\build>cmake --build . --config Release
+MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  RocketSim.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RocketSim.lib
+  RLGymCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLGymCPP.lib
+  PPOLearner.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,38
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,65
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,12
+): error C2737: 'obsDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,29
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,12
+): error C2737: 'actDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(41,11
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(42,25
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(44,10
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(45,24
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(118,3
+): error C2039: 'modelName': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot
+\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(156,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(159,2
+0): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(162,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(237,4
+5): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(291,1
+51): error C2572: 'GGL::PPOLearner::Learn': redefinition of default argument: parameter 1 [C:\Proje
+cts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(6
+  6,8):
+      see declaration of 'GGL::PPOLearner::Learn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(404,8
+1): error C2065: 'actionCount': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\build\G
+igaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(607,2
+8): error C2440: 'initializing': cannot convert from 'GGL::IModel *' to 'GGL::Model *' [C:\Projects
+\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (607,28):
+      Cast from base to derived requires dynamic_cast or static_cast
+
+  PolicyVersionManager.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(35,9): warning
+C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Projects\R
+LGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(99,31):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(36,9): warning
+C4099: 'GGL::PolicyVersionManager': type name first seen using 'struct' now seen using 'class' [C:\
+Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(19,8):
+warning C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(120,22): warning C4018: '>': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\
+GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(302,52): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'stru
+ct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+  MixerModelWrapper.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(58,27
+): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pro
+jects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(118,2
+7): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(25,35): error C2504: 'IModel': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Gi
+gaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,15): error C3646: 'mixerConfig': unknown override specifier [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,3): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,4): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,21): error C2143: syntax error: missing ',' before '&' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(54,17): error C3668: 'GGL::MixerModelWrapper::Forward': method with override specifier 'override'
+did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\Gi
+gaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(56,8): error C3668: 'GGL::MixerModelWrapper::SetOptimLR': method with override specifier 'override
+' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\
+GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(57,8): error C3668: 'GGL::MixerModelWrapper::StepOptim': method with override specifier 'override'
+ did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(75,8): error C3668: 'GGL::MixerModelWrapper::Save': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(76,8): error C3668: 'GGL::MixerModelWrapper::Load': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(78,17): error C3668: 'GGL::MixerModelWrapper::CopyParams': method with override specifier 'overrid
+e' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP
+\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(99,12): error C3668: 'GGL::MixerModelWrapper::GetParamCount': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(107,15): error C3668: 'GGL::MixerModelWrapper::getModelName': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(111,30): error C3668: 'GGL::MixerModelWrapper::parameters': method with override specifier 'overri
+de' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCP
+P\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(83,5): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\bui
+ld\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(6,25): error C2511: 'GGL::MixerModelWrapper::MixerModelWrapper(const char *,int,int,int,const GG
+L::MixerConfig &,c10::Device,GGL::ModelOptimType)': overloaded member function not found in 'GGL::M
+ixerModelWrapper' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(25,8):
+      see declaration of 'GGL::MixerModelWrapper'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(32,1): error C2550: 'GGL::MixerModelWrapper::{ctor}': constructor initializer lists are only all
+owed on constructor definitions [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnC
+PP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,10): error C2660: 'GGL::MakeOptimizer': function does not take 2 arguments [C:\Projects\RLGym
+Bot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(43,3
+  4):
+      see declaration of 'GGL::MakeOptimizer'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.cpp(39,10):
+      while trying to match the argument list '()'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,2): error C2597: illegal reference to non-static member 'GGL::MixerModelWrapper::optim' [C:\P
+rojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(30,28):
+      see declaration of 'GGL::MixerModelWrapper::optim'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(60,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(62,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(64,19): error C2039: 'to': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\GigaL
+earnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(68,34): error C2039: 'parameters': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_
+v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,5): error C3536: 'toParams': cannot be used before it is initialized [C:\Projects\RLGymBot_v3
+\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,15): error C2109: subscript requires array or pointer type [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(76,35): error C2039: 'forward': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\
+GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(77,10): error C3536: 'halfOutput': cannot be used before it is initialized [C:\Projects\RLGymBot
+_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  Models.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33,48):
+error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(171,48):
+ error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLear
+nCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+  Learner.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(6
+0,9): warning C4099: 'GGL::PolicyVersionManager': type name first seen using 'class' now seen using
+ 'struct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(9
+9,31): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct'
+ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(1
+01,27): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct
+' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(590,47): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(873,18): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  InferUnit.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,8): wa
+rning C4099: 'GGL::ModelSet': type name first seen using 'struct' now seen using 'class' [C:\Projec
+ts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,
+  8):
+      see declaration of 'GGL::ModelSet'
+
+  Generating Code...
+  RLBotCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLBotCPP.lib
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\build>cmake --build . --config Release
+MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  RocketSim.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RocketSim.lib
+  RLGymCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLGymCPP.lib
+  PPOLearner.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PPO/PPOLearner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,38
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,65
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(32,12
+): error C2737: 'obsDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,29
+): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(33,12
+): error C2737: 'actDim': const object must be initialized [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(41,11
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(42,25
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(44,10
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(45,24
+): error C2039: 'seq': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\build
+\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(118,3
+): error C2039: 'modelName': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot
+\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(156,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (156,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(159,2
+0): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (159,20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(162,2
+1): error C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (162,21):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(237,4
+5): error C2039: 'config': is not a member of 'GGL::IModel' [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(88,8
+  ):
+      see declaration of 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(291,1
+51): error C2572: 'GGL::PPOLearner::Learn': redefinition of default argument: parameter 1 [C:\Proje
+cts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(6
+  6,8):
+      see declaration of 'GGL::PPOLearner::Learn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(404,8
+1): error C2065: 'actionCount': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\build\G
+igaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp(607,2
+8): error C2440: 'initializing': cannot convert from 'GGL::IModel *' to 'GGL::Model *' [C:\Projects
+\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.cpp
+  (607,28):
+      Cast from base to derived requires dynamic_cast or static_cast
+
+  PolicyVersionManager.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(35,9): warning
+C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Projects\R
+LGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(99,31):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.h(36,9): warning
+C4099: 'GGL::PolicyVersionManager': type name first seen using 'struct' now seen using 'class' [C:\
+Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(19,8):
+warning C4099: 'GGL::PPOLearner': type name first seen using 'struct' now seen using 'class' [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/PolicyVersionManager.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(120,22): warning C4018: '>': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\
+GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.cpp
+(302,52): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'stru
+ct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+  MixerModelWrapper.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2039: 'OptionsBase': is not a member of 'torch::nn' [C:\Projects\RLGymBot_v3\GigaLearnBot\
+build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\api\include\tor
+  ch\nn\utils\convert_parameters.h(6,11):
+      see declaration of 'torch::nn'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(31,43)
+: error C2504: 'OptionsBase': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Giga
+LearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(143,33
+): error C2039: 'forward': is not a member of 'GGL::MixerBlock' [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  95,5):
+      see declaration of 'GGL::MixerBlock'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(58,27
+): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pro
+jects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\RLTokenizer.h(118,2
+7): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data [C:\Pr
+ojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(25,35): error C2504: 'IModel': base class undefined [C:\Projects\RLGymBot_v3\GigaLearnBot\build\Gi
+gaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,15): error C3646: 'mixerConfig': unknown override specifier [C:\Projects\RLGymBot_v3\GigaLearnB
+ot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(35,3): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,4): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int [
+C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(48,21): error C2143: syntax error: missing ',' before '&' [C:\Projects\RLGymBot_v3\GigaLearnBot\bu
+ild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(54,17): error C3668: 'GGL::MixerModelWrapper::Forward': method with override specifier 'override'
+did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\Gi
+gaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(56,8): error C3668: 'GGL::MixerModelWrapper::SetOptimLR': method with override specifier 'override
+' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\
+GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(57,8): error C3668: 'GGL::MixerModelWrapper::StepOptim': method with override specifier 'override'
+ did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(75,8): error C3668: 'GGL::MixerModelWrapper::Save': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(76,8): error C3668: 'GGL::MixerModelWrapper::Load': method with override specifier 'override' did
+not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLe
+arnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(78,17): error C3668: 'GGL::MixerModelWrapper::CopyParams': method with override specifier 'overrid
+e' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP
+\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(99,12): error C3668: 'GGL::MixerModelWrapper::GetParamCount': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(107,15): error C3668: 'GGL::MixerModelWrapper::getModelName': method with override specifier 'over
+ride' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(111,30): error C3668: 'GGL::MixerModelWrapper::parameters': method with override specifier 'overri
+de' did not override any base class methods [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCP
+P\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.h
+(83,5): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\bui
+ld\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/MixerModelWrapper.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(6,25): error C2511: 'GGL::MixerModelWrapper::MixerModelWrapper(const char *,int,int,int,const GG
+L::MixerConfig &,c10::Device,GGL::ModelOptimType)': overloaded member function not found in 'GGL::M
+ixerModelWrapper' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(25,8):
+      see declaration of 'GGL::MixerModelWrapper'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(32,1): error C2550: 'GGL::MixerModelWrapper::{ctor}': constructor initializer lists are only all
+owed on constructor definitions [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnC
+PP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,10): error C2660: 'GGL::MakeOptimizer': function does not take 2 arguments [C:\Projects\RLGym
+Bot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(43,3
+  4):
+      see declaration of 'GGL::MakeOptimizer'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.cpp(39,10):
+      while trying to match the argument list '()'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(39,2): error C2597: illegal reference to non-static member 'GGL::MixerModelWrapper::optim' [C:\P
+rojects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWra
+  pper.h(30,28):
+      see declaration of 'GGL::MixerModelWrapper::optim'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(60,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(62,6): error C2065: 'mixerConfig': undeclared identifier [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(64,19): error C2039: 'to': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\GigaL
+earnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(68,34): error C2039: 'parameters': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_
+v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,5): error C3536: 'toParams': cannot be used before it is initialized [C:\Projects\RLGymBot_v3
+\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(71,15): error C2109: subscript requires array or pointer type [C:\Projects\RLGymBot_v3\GigaLearn
+Bot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(76,35): error C2039: 'forward': is not a member of 'GGL::MixerNetwork' [C:\Projects\RLGymBot_v3\
+GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerBlock.h(
+  167,5):
+      see declaration of 'GGL::MixerNetwork'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\MixerModelWrapper.c
+pp(77,10): error C3536: 'halfOutput': cannot be used before it is initialized [C:\Projects\RLGymBot
+_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  Models.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/private/GigaLearnCPP/Util/Models.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33,48):
+error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearn
+CPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(33
+  ,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(171,48):
+ error C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLear
+nCPP\GigaLearnCPP.vcxproj]
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.cpp(17
+  1,48):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+  Learner.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(6
+0,9): warning C4099: 'GGL::PolicyVersionManager': type name first seen using 'class' now seen using
+ 'struct' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManag
+  er.h(60,9):
+      see declaration of 'GGL::PolicyVersionManager'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(9
+9,31): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct'
+ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PolicyVersionManager.h(1
+01,27): warning C4099: 'GGL::PPOLearner': type name first seen using 'class' now seen using 'struct
+' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Learner.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\PPO\PPOLearner.h(1
+  9,8):
+      see declaration of 'GGL::PPOLearner'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(590,47): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\public\GigaLearnCPP\Learner.cpp(873,18): warn
+ing C4018: '<': signed/unsigned mismatch [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\G
+igaLearnCPP.vcxproj]
+  InferUnit.cpp
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,15): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  15):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,20): e
+rror C2259: 'GGL::Model': cannot instantiate abstract class [C:\Projects\RLGymBot_v3\GigaLearnBot\b
+uild\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(102,
+  8):
+      see declaration of 'GGL::Model'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      due to following members:
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'uint64_t GGL::IModel::GetParamCount(void) const': is abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(97,2
+  0):
+      see declaration of 'GGL::IModel::GetParamCount'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(151,
+  20):
+      'std::vector<at::Tensor,std::allocator<at::Tensor>> GGL::IModel::parameters(void) const': is
+  abstract
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(98,3
+  8):
+      see declaration of 'GGL::IModel::parameters'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,28): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(158,
+  28):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,27): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(159,
+  27):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,29): e
+rror C2385: ambiguous access of 'parameters' [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnC
+PP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      could be the 'parameters' in base 'torch::nn::Module'
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(167,
+  29):
+      or could be the 'parameters' in base 'GGL::IModel'
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,8): wa
+rning C4099: 'GGL::ModelSet': type name first seen using 'struct' now seen using 'class' [C:\Projec
+ts\RLGymBot_v3\GigaLearnBot\build\GigaLearnCPP\GigaLearnCPP.vcxproj]
+  (compiling source file '../../GigaLearnCPP/src/public/GigaLearnCPP/Util/InferUnit.cpp')
+      C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\src\private\GigaLearnCPP\Util\Models.h(179,
+  8):
+      see declaration of 'GGL::ModelSet'
+
+  Generating Code...
+  RLBotCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLBotCPP.lib
+
+C:\Projects\RLGymBot_v3\GigaLearnBot\build>

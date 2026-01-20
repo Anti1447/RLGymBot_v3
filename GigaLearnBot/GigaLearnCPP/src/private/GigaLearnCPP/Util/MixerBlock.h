@@ -28,7 +28,7 @@ namespace GGL {
     //
     // Rev 1.0 (2025-01-16, NJH)
 
-    struct MixerBlockOptions : torch::nn::OptionsBase {
+    struct MixerBlockOptions {
         MixerBlockOptions(int64_t numTokens, int64_t hiddenDim, int64_t mlpDim = 0)
             : num_tokens_(numTokens), hidden_dim_(hiddenDim), mlp_dim_(mlpDim == 0 ? hiddenDim * 4 : mlpDim) {}
 
@@ -122,7 +122,7 @@ namespace GGL {
 
             // Create mixer blocks
             for (int i = 0; i < numBlocks; i++) {
-                auto mixerBlock = std::make_shared<MixerBlock>(numTokens, hiddenDim);
+                auto mixerBlock = MixerBlock(numTokens, hiddenDim);
                 register_module("mixerBlock_" + std::to_string(i), mixerBlock);
                 mixerBlocks.push_back(mixerBlock);
             }
@@ -159,7 +159,7 @@ namespace GGL {
         torch::nn::Linear inputProjection;
         torch::nn::Linear outputProjection;
         torch::nn::LayerNorm norm;
-        std::vector<std::shared_ptr<MixerBlock>> mixerBlocks;
+        std::vector<MixerBlock> mixerBlocks;
         int64_t numTokens;
         int64_t hiddenDim;
     };

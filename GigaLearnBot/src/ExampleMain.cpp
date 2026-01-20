@@ -190,7 +190,8 @@ int main(int argc, char* argv[]) {
     // Configure all training settings from ModelConfig
     ConfigureLearnerConfig(cfg, phaseCfg);
 
-    config.ppoConfig.networkArch = NetworkArchitecture::MLP_MIXER;
+    // Use standard MLP architecture
+    cfg.ppo.networkArch = NetworkArchitecture::MLP;
 
     // Configure render mode settings
     if (renderMode) {

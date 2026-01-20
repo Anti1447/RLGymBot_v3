@@ -16,7 +16,8 @@ namespace GGL {
 		LEAKY_RELU,
 		SIGMOID,
 		TANH,
-		SWISH
+		SWISH,
+		GELU
 	};
 
 	// Doesn't include inputs or outputs
