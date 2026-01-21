@@ -43,14 +43,15 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new VelocityPlayerToBallReward(), 1.0f),  // VERY REDUCED
                 WeightedReward(new ZeroSumReward(new StrongTouchReward(25, 110), 0.3f), 30.0f),  // Stricter
                 WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 20.0f),
-                WeightedReward(new InstantSpacingReward(RotationPhase::BRONZE_SILVER), 0.5f),  // UPGRADED
+                WeightedReward(new InstantSpacingReward(RotationPhase::GOLD), 0.67f),  // UPGRADED
                 WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 15.0f),
                 WeightedReward(new GoalReward(-1.0f), 300.0f),
 
                 // NEW: Aerial focus
                 WeightedReward(new ZeroSumReward(new AirTouchReward(), 0.3f), 30.0f),  // MAIN FOCUS
-                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 0.3f), 20.0f),
+                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 0.3f), 25.0f),
                 WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.3f), 15.0f),
+                WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 7.0f),
                 WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 15.0f),
                 WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 10.0f),
 
@@ -67,9 +68,11 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new SmallPadCollectionReward(), 2.0f),
                 WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 20.0f),
 
+                // NEW: Minor possession shaping
+                WeightedReward(new DefensivePositionReward(), 1.5f),
                 WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 1.0f),
                 // NEW: Retreat after touch (prepare for rotation)
-                WeightedReward(new RetreatAfterTouchReward(RotationPhase::GOLD), 0.5f),
+                WeightedReward(new RetreatAfterTouchReward(RotationPhase::GOLD), 3.0f),
 
                 WeightedReward(new DemoAwarenessReward(), 1.5f),
                 WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 20.0f),
