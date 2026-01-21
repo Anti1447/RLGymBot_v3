@@ -30,12 +30,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.028f;
+        cfg.entropyScale = 0.035f;
         cfg.policyLR = 1.9e-4f;
         cfg.criticLR = 1.9e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.3f;
+        cfg.randomStateChance = 0.45f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         break;
@@ -69,8 +69,8 @@ PhaseConfig GetPhaseConfig() {
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.5f;
-        cfg.useAerialTraining = true;
-        cfg.aerialTrainingChance = 0.15f;  // 15% aerial training
+        cfg.useAerialTraining = false;
+        cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;
 
     case TrainingPhase::PHASE_7_GC:
@@ -80,8 +80,8 @@ PhaseConfig GetPhaseConfig() {
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.55f;
-        cfg.useAerialTraining = true;
-        cfg.aerialTrainingChance = 0.1f;  // 10% aerial training
+        cfg.useAerialTraining = false;
+        cfg.aerialTrainingChance = 0.0f;  // 10% aerial training
         break;
 
     case TrainingPhase::PHASE_8_SSL:
@@ -91,8 +91,8 @@ PhaseConfig GetPhaseConfig() {
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.6f;
-        cfg.useAerialTraining = true;
-        cfg.aerialTrainingChance = 0.05f;  // 5% aerial training
+        cfg.useAerialTraining = false;
+        cfg.aerialTrainingChance = 0.0f;  // 5% aerial training
         break;
 
     case TrainingPhase::PHASE_9_PRO:
@@ -102,18 +102,18 @@ PhaseConfig GetPhaseConfig() {
         cfg.noTouchTimeout = 12.0f;         // Strictest
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.65f;
-        cfg.useAerialTraining = true;
-        cfg.aerialTrainingChance = 0.05f;  // 5% aerial training
+        cfg.useAerialTraining = false;
+        cfg.aerialTrainingChance = 0.0f;  // 5% aerial training
         break;
 
     default:
         // Fallback to Bronze settings
-        cfg.entropyScale = 0.025f;
+        cfg.entropyScale = 0.045f;
         cfg.policyLR = 2.5e-4f;
         cfg.criticLR = 2.5e-4f;
         cfg.noTouchTimeout = 15.0f;
-        cfg.useRandomState = false;
-        cfg.randomStateChance = 0.0f;
+        cfg.useRandomState = true;
+        cfg.randomStateChance = 0.3f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         break;
@@ -170,7 +170,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 456;
 
     // === PPO CONFIG ===
-    int tsPerItr = 100'000;
+    int tsPerItr = 150'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -179,7 +179,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9905;
+    cfg.ppo.gaeGamma = 0.99075;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

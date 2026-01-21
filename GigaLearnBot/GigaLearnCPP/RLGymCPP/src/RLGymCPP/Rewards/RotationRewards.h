@@ -521,10 +521,10 @@ public:
 
 		case RotationPhase::PLATINUM:
 			// Focus: All basics, introduce roles
-			total += spacingReward.GetReward(player, state, isFinal) * 0.6f;
-			total += retreatReward.GetReward(player, state, isFinal) * 1.0f;
-			total += roleReward.GetReward(player, state, isFinal) * 0.5f;
-			total += momentumReward.GetReward(player, state, isFinal) * 0.3f;
+			total += spacingReward.GetReward(player, state, isFinal) * 0.1f;
+			total += retreatReward.GetReward(player, state, isFinal) * 0.6f;
+			total += roleReward.GetReward(player, state, isFinal) * 0.3f;
+			total += momentumReward.GetReward(player, state, isFinal) * 0.2f;
 			break;
 
 		case RotationPhase::DIAMOND:
