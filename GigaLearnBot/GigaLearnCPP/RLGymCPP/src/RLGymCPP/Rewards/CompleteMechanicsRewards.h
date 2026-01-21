@@ -100,7 +100,7 @@ public:
     }
 };
 
-// Landing on 4 wheels after aerial
+// Landing on at least 3 wheels after aerial on any surface (ground, wall, ceiling)
 class ProperLandingReward : public Reward {
 private:
     mutable std::map<uint32_t, bool> wasAirborne;
@@ -113,13 +113,43 @@ public:
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         bool wasInAir = wasAirborne[player.carId];
         wasAirborne[player.carId] = !player.isOnGround;
-        
+
         // Just landed from being airborne
         if (wasInAir && player.isOnGround) {
-            // Check if landed upright
-            float upZ = player.rotMat.up.z;
-            if (upZ > 0.7f) {
-                return 1.0f; // Good landing
+            // Count wheels with contact
+            int wheelsOnGround = 0;
+            for (int i = 0; i < 4; i++) {
+                if (player.wheelsWithContact[i]) {
+                    wheelsOnGround++;
+                }
+            }
+
+            // Need at least 3 wheels for a proper landing
+            if (wheelsOnGround < 3) {
+                return 0.0f;
+            }
+
+            // Check alignment with surface normal
+            if (player.worldContact.hasContact) {
+                // Car's up vector should align with surface normal
+                // This works for ground (normal pointing up), walls (sideways), and ceiling (pointing down)
+                Vec surfaceNormal = player.worldContact.contactNormal;
+                Vec carUp = player.rotMat.up;
+
+                // Dot product: 1.0 = perfectly aligned, 0.0 = perpendicular, -1.0 = opposite
+                float alignment = carUp.Dot(surfaceNormal);
+
+                // Reward based on alignment quality
+                // > 0.9 = excellent landing (facing the right way)
+                // > 0.7 = good landing (mostly aligned)
+                // > 0.5 = acceptable landing (somewhat aligned)
+                if (alignment > 0.9f) {
+                    return 1.0f; // Excellent landing
+                } else if (alignment > 0.7f) {
+                    return 0.7f; // Good landing
+                } else if (alignment > 0.5f) {
+                    return 0.4f; // Acceptable landing
+                }
             }
         }
         return 0.0f;
@@ -5357,6 +5387,342 @@ public:
             reward += 0.15f;  // 3rd man
         }
         
+        return reward;
+    }
+};
+
+// Simple kickoff reward for back player (3v3) to encourage boost grabbing
+class KickoffBackPlayerBoostReward : public Reward {
+private:
+    mutable std::map<uint32_t, bool> isKickoff;
+    mutable std::map<uint32_t, bool> hasGrabbedBoost;
+    mutable std::map<uint32_t, float> prevBoost;
+
+    // Check if we're at kickoff (ball at center, players near spawn positions)
+    bool IsKickoffState(const GameState& state) const {
+        // Ball must be at center and stationary
+        if (state.ball.pos.Dist(CommonValues::KICKOFF_BALL_CENTER) > 200.0f) {
+            return false;
+        }
+        if (state.ball.vel.Length() > 50.0f) {
+            return false;
+        }
+        return true;
+    }
+
+    // Find the furthest player from ball on the team (the back player)
+    bool IsBackPlayer(const Player& player, const GameState& state) const {
+        float myDist = player.pos.Dist(state.ball.pos);
+
+        // Count how many teammates are further from ball
+        int teammatesFurther = 0;
+        int teammatesTotal = 0;
+
+        for (const auto& p : state.players) {
+            if (p.team == player.team && p.carId != player.carId) {
+                teammatesTotal++;
+                float theirDist = p.pos.Dist(state.ball.pos);
+                if (theirDist > myDist) {
+                    teammatesFurther++;
+                }
+            }
+        }
+
+        // For 3v3, we should have 2 teammates, and we should be furthest
+        return (teammatesTotal == 2 && teammatesFurther == 0);
+    }
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        isKickoff.clear();
+        hasGrabbedBoost.clear();
+        prevBoost.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        auto& kickoffFlag = isKickoff[player.carId];
+        auto& grabbedBoost = hasGrabbedBoost[player.carId];
+        auto& lastBoost = prevBoost[player.carId];
+
+        float reward = 0.0f;
+
+        // Check if kickoff just started
+        if (IsKickoffState(state)) {
+            if (!kickoffFlag) {
+                // Kickoff just started
+                kickoffFlag = true;
+                grabbedBoost = false;
+                lastBoost = player.boost;
+            }
+
+            // If we're the back player during kickoff
+            if (IsBackPlayer(player, state)) {
+                // Detect boost grab (boost increased)
+                if (player.boost > lastBoost + 10.0f) {
+                    if (!grabbedBoost) {
+                        // First boost grab during this kickoff
+                        grabbedBoost = true;
+                        reward = 2.0f; // Big reward for grabbing boost
+                    }
+                }
+
+                // Small continuous reward for moving towards corner boost
+                if (!grabbedBoost) {
+                    // Find nearest corner boost (big boost pads)
+                    float closestDist = 999999.0f;
+                    Vec closestBoost;
+
+                    // Corner boost pad indices (from BOOST_LOCATIONS array):
+                    // 3, 4 (back corners), 8, 9 (mid corners), 15, 18 (center line corners)
+                    int cornerBoostIndices[] = {3, 4, 8, 9, 15, 18};
+
+                    for (int idx : cornerBoostIndices) {
+                        Vec boostPos = CommonValues::BOOST_LOCATIONS[idx];
+                        float dist = player.pos.Dist(boostPos);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestBoost = boostPos;
+                        }
+                    }
+
+                    // Reward for moving towards corner boost
+                    Vec toBoost = (closestBoost - player.pos).Normalized();
+                    Vec velocity = player.vel.Normalized();
+                    float alignment = velocity.Dot(toBoost);
+
+                    if (alignment > 0.5f && closestDist < 2000.0f) {
+                        reward += 0.1f * alignment; // Small shaping reward
+                    }
+                }
+            }
+        } else {
+            // Kickoff ended
+            kickoffFlag = false;
+            grabbedBoost = false;
+        }
+
+        lastBoost = player.boost;
+        return reward;
+    }
+};
+
+// ============================================================================
+// PossessionControlReward
+// Rewards maintaining possession and penalizes giving it away
+// Tracks both individual and team possession duration
+// ============================================================================
+class PossessionControlReward : public Reward {
+private:
+    struct PossessionMemory {
+        Team lastPossessingTeam = Team::BLUE;
+        uint32_t lastPossessingPlayer = 0;
+        float possessionDuration = 0.0f;
+        float teamPossessionDuration = 0.0f;
+        bool hadPossession = false;
+        Vec lastBallVel;
+        float timeSinceLastTouch = 999.0f;
+    };
+
+    mutable PossessionMemory memory;
+
+    // Possession detection parameters
+    const float POSSESSION_DISTANCE = 250.0f;  // Max distance to ball to have possession
+    const float POSSESSION_VEL_ALIGNMENT = 0.3f;  // Min velocity alignment to have control
+    const float TOUCH_TIMEOUT = 2.0f;  // Time after touch to still consider possession
+
+    // Check if a player has possession of the ball
+    bool HasPossession(const Player& player, const GameState& state) const {
+        float distToBall = player.pos.Dist(state.ball.pos);
+
+        // Must be close to ball
+        if (distToBall > POSSESSION_DISTANCE) {
+            return false;
+        }
+
+        // Just touched ball
+        if (player.ballTouchedStep) {
+            return true;
+        }
+
+        // Ball moving in same direction as player
+        if (player.vel.Length() > 100.0f && state.ball.vel.Length() > 100.0f) {
+            Vec playerDir = player.vel.Normalized();
+            Vec ballDir = state.ball.vel.Normalized();
+            if (playerDir.Dot(ballDir) > POSSESSION_VEL_ALIGNMENT) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Find which team has possession
+    Team GetPossessingTeam(const GameState& state, uint32_t& outPlayerId) const {
+        Team possessingTeam = Team::BLUE;
+        uint32_t possessingPlayer = 0;
+        float closestDist = 999999.0f;
+        bool anyPossession = false;
+
+        for (const auto& p : state.players) {
+            if (HasPossession(p, state)) {
+                float dist = p.pos.Dist(state.ball.pos);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    possessingTeam = p.team;
+                    possessingPlayer = p.carId;
+                    anyPossession = true;
+                }
+            }
+        }
+
+        outPlayerId = possessingPlayer;
+        return anyPossession ? possessingTeam : memory.lastPossessingTeam;
+    }
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        memory = PossessionMemory();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+        float reward = 0.0f;
+
+        uint32_t currentPossessor = 0;
+        Team currentPossessingTeam = GetPossessingTeam(state, currentPossessor);
+        bool playerHasPossession = HasPossession(player, state);
+
+        // Update time since last touch
+        if (player.ballTouchedStep) {
+            memory.timeSinceLastTouch = 0.0f;
+        } else {
+            memory.timeSinceLastTouch += dt;
+        }
+
+        // ====================================================================
+        // 1. POSSESSION DURATION REWARDS
+        // ====================================================================
+
+        // Team possession tracking
+        if (currentPossessingTeam == player.team) {
+            memory.teamPossessionDuration += dt;
+
+            // Continuous reward for maintaining team possession
+            if (memory.teamPossessionDuration > 0.5f) {
+                // Reward scales with duration (diminishing returns)
+                float durationBonus = RS_CLAMP(memory.teamPossessionDuration / 5.0f, 0.0f, 1.0f);
+                reward += 0.05f * durationBonus;
+            }
+        } else {
+            memory.teamPossessionDuration = 0.0f;
+        }
+
+        // Individual possession tracking
+        if (playerHasPossession) {
+            memory.possessionDuration += dt;
+            memory.hadPossession = true;
+
+            // Continuous reward for maintaining individual possession
+            if (memory.possessionDuration > 0.3f) {
+                float durationBonus = RS_CLAMP(memory.possessionDuration / 3.0f, 0.0f, 1.0f);
+                reward += 0.08f * durationBonus;
+            }
+        } else {
+            memory.possessionDuration = 0.0f;
+        }
+
+        // ====================================================================
+        // 2. POSSESSION CHANGE DETECTION (GIVEAWAYS)
+        // ====================================================================
+
+        // Detect possession change to opponent team
+        if (memory.lastPossessingTeam != currentPossessingTeam) {
+            // Check if this player gave away possession
+            if (memory.lastPossessingPlayer == player.carId &&
+                memory.timeSinceLastTouch < TOUCH_TIMEOUT) {
+
+                // Analyze HOW possession was lost
+                Vec ballVelChange = state.ball.vel - memory.lastBallVel;
+                float ballSpeedChange = ballVelChange.Length();
+
+                // Opponent goal direction
+                Vec oppGoal = (player.team == Team::BLUE)
+                    ? CommonValues::ORANGE_GOAL_CENTER
+                    : CommonValues::BLUE_GOAL_CENTER;
+                Vec toOppGoal = (oppGoal - state.ball.pos).Normalized();
+
+                // Check if ball is going toward opponent (good) or back to us (bad)
+                float ballDirectionQuality = state.ball.vel.Dot(toOppGoal);
+
+                if (ballDirectionQuality > 0.0f) {
+                    // Ball going toward opponent = good loss (intentional clear/shot)
+                    reward += 0.0f;  // Neutral
+                } else {
+                    // Ball going back toward our goal = BAD GIVEAWAY
+                    float giveawayPenalty = -1.5f;
+
+                    // Worse penalty if ball is moving fast back at us
+                    if (state.ball.vel.Length() > 1000.0f && ballDirectionQuality < -0.3f) {
+                        giveawayPenalty = -2.5f;  // Severe penalty for dangerous giveaway
+                    }
+
+                    reward += giveawayPenalty;
+                }
+            }
+        }
+
+        // ====================================================================
+        // 3. SMART POSSESSION PLAY BONUSES
+        // ====================================================================
+
+        if (playerHasPossession && memory.possessionDuration > 0.5f) {
+            // Bonus for maintaining possession while moving toward opponent goal
+            Vec oppGoal = (player.team == Team::BLUE)
+                ? CommonValues::ORANGE_GOAL_CENTER
+                : CommonValues::BLUE_GOAL_CENTER;
+            Vec toOppGoal = (oppGoal - player.pos).Normalized();
+
+            float forwardProgress = player.vel.Dot(toOppGoal);
+            if (forwardProgress > 500.0f) {
+                reward += 0.1f;  // Bonus for possession + forward movement
+            }
+
+            // Bonus for keeping ball close (tight dribble control)
+            float distToBall = player.pos.Dist(state.ball.pos);
+            if (distToBall < 150.0f) {
+                reward += 0.05f;  // Tight control bonus
+            }
+        }
+
+        // ====================================================================
+        // 4. TEAM POSSESSION SUPPORT
+        // ====================================================================
+
+        // Reward for being in support position when teammate has possession
+        if (!playerHasPossession && currentPossessingTeam == player.team) {
+            // Check if we're in a good support position (not too close, not too far)
+            float distToBall = player.pos.Dist(state.ball.pos);
+            if (distToBall > 800.0f && distToBall < 2000.0f) {
+                // Good support distance
+
+                // Check if we're ahead of the ball (offensive support)
+                Vec oppGoal = (player.team == Team::BLUE)
+                    ? CommonValues::ORANGE_GOAL_CENTER
+                    : CommonValues::BLUE_GOAL_CENTER;
+                float playerToGoalDist = player.pos.Dist(oppGoal);
+                float ballToGoalDist = state.ball.pos.Dist(oppGoal);
+
+                if (playerToGoalDist < ballToGoalDist) {
+                    reward += 0.03f;  // Small bonus for offensive support position
+                }
+            }
+        }
+
+        // Update memory
+        memory.lastPossessingTeam = currentPossessingTeam;
+        memory.lastPossessingPlayer = currentPossessor;
+        memory.lastBallVel = state.ball.vel;
+
         return reward;
     }
 };

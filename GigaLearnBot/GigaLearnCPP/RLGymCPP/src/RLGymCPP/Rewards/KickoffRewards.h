@@ -1243,130 +1243,136 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // SideFlipKickoffReward
-    // 2025-01-13 | Rev 2 | NJH
-    // SIMPLE: Reward side flips that contact the ball during kickoff.
-    // No pitch manipulation, purely side velocity direction.
+    // KickoffFlipReward
+    // 2025-01-20 | Rev 4 | NJH (LENIENT VERSION)
+    // Reward flipping into the ball at kickoff (front, side, or diagonal flips)
+    // Accepts a wide range of flip timings and types to encourage learning
     // ============================================================================
-    class SideFlipKickoffReward : public Reward {
+    class KickoffFlipReward : public Reward {
     private:
-        float speed_threshold = 200.0f;  // Minimum speed delta to detect a flip
-        float side_dominance_threshold = 0.4f;  // Side component must be dominant
+        struct PlayerMemory {
+            bool wasFlipping = false;
+            bool hasFlippedThisKickoff = false;
+            float distToBallWhenFlipped = 999999.0f;
+            Vec flipDirection;
+        };
 
-        mutable std::map<uint32_t, Vec> prev_velocity;
-        mutable std::map<uint32_t, bool> was_on_ground;
-        mutable float kickoff_start_time = 0.0f;
-        mutable bool kickoff_active = false;
+        mutable std::map<uint32_t, PlayerMemory> memory;
+        mutable bool kickoffActive = false;
 
-        float kickoff_detect_ball_pos = 280.0f;
-        float kickoff_detect_ball_vel = 200.0f;
-        float kickoff_max_duration = 3.5f;
+        // Kickoff detection thresholds
+        const float KICKOFF_BALL_POS_THRESHOLD = 280.0f;
+        const float KICKOFF_BALL_VEL_THRESHOLD = 200.0f;
+
+        // Distance thresholds for "last moment" flip (LENIENT)
+        const float IDEAL_FLIP_DISTANCE = 400.0f;  // Perfect distance (wider sweet spot)
+        const float MIN_FLIP_DISTANCE = 100.0f;     // Allow closer flips
+        const float MAX_FLIP_DISTANCE = 900.0f;     // Allow much earlier flips
+
+        bool IsKickoffState(const GameState& state) const {
+            return (state.ball.pos.Length() < KICKOFF_BALL_POS_THRESHOLD &&
+                    state.ball.vel.Length() < KICKOFF_BALL_VEL_THRESHOLD);
+        }
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            prev_velocity.clear();
-            was_on_ground.clear();
-            kickoff_start_time = 0.0f;
-            kickoff_active = false;
+            memory.clear();
+            kickoffActive = false;
         }
 
         virtual void PreStep(const GameState& state) override {
-            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+            bool isKickoffNow = IsKickoffState(state);
 
-            bool is_kickoff_now = (state.ball.pos.Length() < kickoff_detect_ball_pos &&
-                state.ball.vel.Length() < kickoff_detect_ball_vel);
-
-            if (is_kickoff_now && !kickoff_active) {
-                kickoff_active = true;
-                kickoff_start_time = 0.0f;
-                prev_velocity.clear();
-                was_on_ground.clear();
-                for (const auto& player : state.players) {
-                    was_on_ground[player.carId] = true;
+            // Kickoff just started
+            if (isKickoffNow && !kickoffActive) {
+                kickoffActive = true;
+                // Reset all player memories for new kickoff
+                for (auto& pair : memory) {
+                    pair.second.hasFlippedThisKickoff = false;
+                    pair.second.distToBallWhenFlipped = 999999.0f;
                 }
             }
 
-            if (kickoff_active) {
-                kickoff_start_time += dt;
-                if (!is_kickoff_now || kickoff_start_time >= kickoff_max_duration) {
-                    kickoff_active = false;
-                }
+            // Kickoff just ended
+            if (!isKickoffNow && kickoffActive) {
+                kickoffActive = false;
             }
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (!kickoff_active) {
+            if (!kickoffActive) {
                 return 0.0f;
             }
 
-            // Only reward if touching ball
-            if (!player.ballTouchedStep) {
-                return 0.0f;
+            auto& mem = memory[player.carId];
+            bool isFlippingNow = player.isFlipping;
+            float reward = 0.0f;
+
+            // Detect flip start
+            if (isFlippingNow && !mem.wasFlipping) {
+                // Player just started flipping
+                float distToBall = player.pos.Dist(state.ball.pos);
+                mem.distToBallWhenFlipped = distToBall;
+
+                // Calculate flip direction in car's local frame
+                Vec toBall = (state.ball.pos - player.pos).Normalized();
+                float forwardComponent = toBall.Dot(player.rotMat.forward);
+                float rightComponent = toBall.Dot(player.rotMat.right);
+                float upComponent = toBall.Dot(player.rotMat.up);
+
+                mem.flipDirection = Vec(forwardComponent, rightComponent, upComponent);
+                mem.hasFlippedThisKickoff = true;
             }
 
-            // Must be in the air
-            if (player.isOnGround) {
-                was_on_ground[player.carId] = true;
-                return 0.0f;
-            }
+            mem.wasFlipping = isFlippingNow;
 
-            // Only detect flip in first frame after leaving ground
-            bool just_left_ground = was_on_ground[player.carId];
-            was_on_ground[player.carId] = false;
+            // Reward on ball contact
+            if (player.ballTouchedStep && mem.hasFlippedThisKickoff) {
+                float distWhenFlipped = mem.distToBallWhenFlipped;
 
-            if (!just_left_ground) {
-                prev_velocity[player.carId] = player.vel;
-                return 0.0f;
-            }
+                // Check if flip was at the "last moment" (not too early, not too late)
+                if (distWhenFlipped >= MIN_FLIP_DISTANCE && distWhenFlipped <= MAX_FLIP_DISTANCE) {
+                    // Calculate distance quality (closer to IDEAL_FLIP_DISTANCE = better)
+                    float distanceFromIdeal = std::abs(distWhenFlipped - IDEAL_FLIP_DISTANCE);
+                    float maxDeviation = MAX_FLIP_DISTANCE - IDEAL_FLIP_DISTANCE;
+                    float distanceQuality = 1.0f - RS_CLAMP(distanceFromIdeal / maxDeviation, 0.0f, 1.0f);
 
-            if (prev_velocity.find(player.carId) == prev_velocity.end()) {
-                prev_velocity[player.carId] = player.vel;
-                return 0.0f;
-            }
+                    // Analyze flip type based on direction components (LENIENT)
+                    float fwd = std::abs(mem.flipDirection.x);
+                    float side = std::abs(mem.flipDirection.y);
 
-            Vec prev_vel = prev_velocity[player.carId];
-            float speed_delta = player.vel.Length() - prev_vel.Length();
+                    // Accept front flips, side flips, and diagonal flips (more lenient thresholds)
+                    bool isFrontFlip = (fwd > 0.5f);  // Just needs to be somewhat forward
+                    bool isSideFlip = (side > 0.35f);  // Easier to trigger side flip
+                    bool isDiagonalFlip = (fwd > 0.3f && side > 0.3f);  // Easier diagonal
 
-            if (speed_delta < speed_threshold) {
-                prev_velocity[player.carId] = player.vel;
-                return 0.0f;
-            }
+                    if (isFrontFlip || isSideFlip || isDiagonalFlip) {
+                        // Base reward for good timing (more generous)
+                        reward = 1.0f + (0.8f * distanceQuality);
 
-            Vec vel_delta = player.vel - prev_vel;
-            float vel_delta_mag = vel_delta.Length();
-            if (vel_delta_mag < 1e-3f) {
-                prev_velocity[player.carId] = player.vel;
-                return 0.0f;
-            }
+                        // Bonus for ideal distance (easier to get)
+                        if (distanceQuality > 0.6f) {
+                            reward += 0.4f; // Good timing bonus
+                        }
 
-            Vec flip_direction = vel_delta / vel_delta_mag;
-            float right_component = std::abs(flip_direction.Dot(player.rotMat.right));
-            float forward_component = std::abs(flip_direction.Dot(player.rotMat.forward));
+                        // Slight bonus for diagonal/side flips (more advanced)
+                        if (isDiagonalFlip) {
+                            reward *= 1.1f;
+                        } else if (isSideFlip) {
+                            reward *= 1.15f;
+                        }
 
-            prev_velocity[player.carId] = player.vel;
-
-            // Simple check: side component > forward component (side flip)
-            if (right_component > side_dominance_threshold && right_component > forward_component) {
-                // Ensure flip is going through the goal-to-goal axis (center line of field)
-                // This ensures the flip is hitting through the ball center, not the edge
-                Vec ownGoal = (player.team == Team::BLUE)
-                    ? CommonValues::BLUE_GOAL_CENTER
-                    : CommonValues::ORANGE_GOAL_CENTER;
-                Vec oppGoal = (player.team == Team::BLUE)
-                    ? CommonValues::ORANGE_GOAL_CENTER
-                    : CommonValues::BLUE_GOAL_CENTER;
-
-                Vec goalAxis = (oppGoal - ownGoal).Normalized();
-                // Check if flip direction aligns with goal-to-goal axis
-                float axisAlignment = std::abs(flip_direction.Dot(goalAxis));
-
-                if (axisAlignment > 0.3f) {
-                    // Flip is directed along the goal axis (through ball center)
-                    return 1.0f;
+                        // Reset so we only reward once per kickoff
+                        mem.hasFlippedThisKickoff = false;
+                    }
+                } else {
+                    // Flipped outside acceptable range - give small reward anyway (very lenient)
+                    mem.hasFlippedThisKickoff = false;
+                    return 0.2f;  // Still reward the attempt
                 }
             }
 
-            return 0.0f;
+            return reward;
         }
     };
 } // namespace RLGymCPP

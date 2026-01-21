@@ -68,7 +68,7 @@ public:
 
 	// Returns true if added, false if car was already added
 	bool _AddCarFromPtr(Car* car);
-	RSAPI Car* AddCar(Team team, const CarConfig& config = CAR_CONFIG_OCTANE);
+	RSAPI Car* AddCar(Team team, const CarConfig& config = CAR_CONFIG_DOMINUS);
 
 	// Returns false if the car ID was not found in the cars list
 	RSAPI bool RemoveCar(uint32_t id);
