@@ -30,9 +30,9 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.035f;
-        cfg.policyLR = 1.9e-4f;
-        cfg.criticLR = 1.9e-4f;
+        cfg.entropyScale = 0.03f;
+        cfg.policyLR = 1.8e-4f;
+        cfg.criticLR = 1.8e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.45f;
@@ -142,7 +142,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // with distribution: 1v1 (1/6), 2v2 (2/6), 3v3 (3/6)
     // This ensures the skill rating reflects performance across all modes
     cfg.skillTracker.enabled = true;
-    cfg.skillTracker.numArenas = 32;       // Sufficient for mixed-mode evaluation
+    cfg.skillTracker.numArenas = 40;       // Sufficient for mixed-mode evaluation
     cfg.skillTracker.simTime = 45.f;       // Per-arena sim time
     cfg.skillTracker.maxSimTime = 240.f;
     cfg.skillTracker.updateInterval = 16;
@@ -179,7 +179,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.99075;
+    cfg.ppo.gaeGamma = 0.991;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 
