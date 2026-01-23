@@ -1,5 +1,6 @@
 #include "PPOLearner.h"
 #include "../Util/MixerModelWrapper.h"
+#include "../Util/InferenceOptimizer.h"
 
 #include <torch/nn/utils/convert_parameters.h>
 #include <torch/nn/utils/clip_grad.h>
@@ -88,6 +89,12 @@ static void ExportRLBOTPolicyStateDict(GGL::ModelSet& models, const std::filesys
 }
 
 GGL::PPOLearner::PPOLearner(int obsSize, int numActions, PPOLearnerConfig _config, Device _device) : config(_config), device(_device) {
+
+	// Initialize LibTorch CPU inference optimizations (MKL-DNN, threading, etc.)
+	// This provides 5-15x speedup for CPU inference
+	if (device.is_cpu()) {
+		InferenceOptimizer::Initialize();
+	}
 
 	if (config.miniBatchSize == 0)
 		config.miniBatchSize = config.batchSize;

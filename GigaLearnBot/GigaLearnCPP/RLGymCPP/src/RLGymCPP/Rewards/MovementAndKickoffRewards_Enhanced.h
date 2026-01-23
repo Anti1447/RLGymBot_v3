@@ -335,44 +335,44 @@ public:
 class MovementAndKickoffCombinedReward : public Reward {
 private:
     SaveBoostReward saveBoost;
-    DiscourageFlippingLowBoostReward discourageFlip;
+    FrontFlipBoostWasteReward frontFlipWaste;
     LandingQualityReward landingQuality;
     SupersonicBoostPenalty supersonicPenalty;
     EnhancedKickoffReward kickoffReward;
-    
+
     // Weights for each component
     float saveBoostWeight;
-    float discourageFlipWeight;
+    float frontFlipWasteWeight;
     float landingQualityWeight;
     float supersonicPenaltyWeight;
     float kickoffWeight;
-    
+
 public:
     MovementAndKickoffCombinedReward(
         float saveBoostW = 0.1f,
-        float discourageFlipW = 1.0f,
+        float frontFlipWasteW = 1.0f,
         float landingQualityW = 1.0f,
         float supersonicPenaltyW = 1.0f,
         float kickoffW = 1.0f
     ) : saveBoostWeight(saveBoostW),
-        discourageFlipWeight(discourageFlipW),
+        frontFlipWasteWeight(frontFlipWasteW),
         landingQualityWeight(landingQualityW),
         supersonicPenaltyWeight(supersonicPenaltyW),
         kickoffWeight(kickoffW) {}
-    
+
     virtual void Reset(const GameState& initialState) override {
         saveBoost.Reset(initialState);
-        discourageFlip.Reset(initialState);
+        frontFlipWaste.Reset(initialState);
         landingQuality.Reset(initialState);
         supersonicPenalty.Reset(initialState);
         kickoffReward.Reset(initialState);
     }
-    
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float total = 0.0f;
-        
+
         total += saveBoost.GetReward(player, state, isFinal) * saveBoostWeight;
-        total += discourageFlip.GetReward(player, state, isFinal) * discourageFlipWeight;
+        total += frontFlipWaste.GetReward(player, state, isFinal) * frontFlipWasteWeight;
         total += landingQuality.GetReward(player, state, isFinal) * landingQualityWeight;
         total += supersonicPenalty.GetReward(player, state, isFinal) * supersonicPenaltyWeight;
         total += kickoffReward.GetReward(player, state, isFinal) * kickoffWeight;

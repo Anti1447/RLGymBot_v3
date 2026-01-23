@@ -28,41 +28,10 @@
 namespace RLGC {
 
     // ============================================================================
-    // BOOST EFFICIENCY REWARD
-    // Rewards productive boost usage (high speed, ball contact, aerial play)
+    // NOTE: BoostEfficiencyReward has been removed (redundant with BoostWastePenaltyReward)
+    // Use BoostWastePenaltyReward instead - it provides more sophisticated
+    // context-aware boost efficiency evaluation.
     // ============================================================================
-    class BoostEfficiencyReward : public Reward {
-    private:
-        mutable std::map<uint32_t, float> lastBoost;
-
-    public:
-        virtual void Reset(const GameState& initialState) override {
-            lastBoost.clear();
-        }
-
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            float prevBoost = lastBoost[player.carId];
-            lastBoost[player.carId] = player.boost;
-
-            if (prevBoost == 0.0f) return 0.0f;
-
-            float boostUsed = prevBoost - player.boost;
-            if (boostUsed <= 0.0f) return 0.0f;
-
-            float speed = player.vel.Length();
-            if (speed > 1000.0f && boostUsed > 0.0f) {
-                // Using boost while moving fast = good
-                return 0.5f;
-            }
-
-            // Penalize boost wastage (using boost while slow)
-            if (speed < 500.0f && boostUsed > 1.0f) {
-                return -0.2f;
-            }
-
-            return 0.0f;
-        }
-    };
 
     // ============================================================================
     // LOW BOOST OPPONENT HALF FIFTY PENALTY
@@ -117,7 +86,7 @@ namespace RLGC {
     private:
         mutable std::map<uint32_t, std::deque<float>> recentBoostPickups;
         static constexpr float SEQUENCE_WINDOW = 3.0f;  // seconds
-        static constexpr float SMALL_PAD_MAX = 15.0f;   // 12 boost pads
+        static constexpr float SMALL_PAD_MAX = 13.0f;   // 12 boost pads + margin for detection
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -237,8 +206,8 @@ namespace RLGC {
         static constexpr float BIG_PAD_THRESHOLD = 90.0f;  // Detect 100 boost pickup
         static constexpr float CENTER_RADIUS = 28.0f;      // Lock-on radius (optimal)
         static constexpr float BOX_WIDTH = 160.0f;         // Collection boundary
-        static constexpr float MAX_REWARD = 1.0f;          // Perfect center hit
-        static constexpr float MIN_REWARD = 0.2f;          // Edge of box
+        static constexpr float MAX_REWARD = 0.3f;          // Perfect center hit (reduced - minor optimization)
+        static constexpr float MIN_REWARD = 0.1f;          // Edge of box
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -317,47 +286,129 @@ namespace RLGC {
 
     // ============================================================================
     // BOOST PATH REWARD
-    // Rewards efficient boost pad collection by tracking path efficiency.
-    // Short distances between consecutive pads = optimal routing.
+    // Rewards efficient boost pad collection during defensive rotation.
+    // Encourages collecting pads WHILE rotating (minimal deviation from path).
+    // Based on tip: "Learning when to pick up small pads can save you time and
+    // prevent you from breaking rotation/position."
     // ============================================================================
     class BoostPathReward : public Reward {
     private:
-        mutable std::map<uint32_t, std::deque<Vec>> recentPadPositions;
+        struct PathState {
+            Vec lastPosition;
+            Vec rotationStartPos;
+            float boostAtStart;
+            bool isRotating;
+            int padsCollected;
+        };
+
+        mutable std::map<uint32_t, PathState> playerPaths;
+
+        // Check if player is rotating back to defense
+        bool IsRotatingDefensively(const Player& player, const GameState& state) const {
+            Vec ownGoal = (player.team == Team::BLUE) ?
+                CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+
+            Vec toGoal = (ownGoal - player.pos).Normalized();
+            float velocityTowardGoal = player.vel.Dot(toGoal);
+
+            // Moving toward own goal with reasonable speed
+            return velocityTowardGoal > 300.0f;
+        }
+
+        // Calculate deviation from direct path
+        float CalculatePathDeviation(const Vec& start, const Vec& current, const Vec& goal) const {
+            Vec directPath = goal - start;
+            float directDist = directPath.Length();
+
+            if (directDist < 0.01f) return 0.0f;
+
+            Vec normalizedDirect = directPath.Normalized();
+            Vec actualPath = current - start;
+
+            // Project actual path onto direct path
+            float projection = actualPath.Dot(normalizedDirect);
+            Vec projectedPoint = start + (normalizedDirect * projection);
+
+            // Deviation is perpendicular distance from direct path
+            float deviation = (current - projectedPoint).Length();
+
+            return deviation;
+        }
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            recentPadPositions.clear();
+            playerPaths.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (!state.prev) return 0.0f;
 
-            float boostGain = player.boost - state.prev->players[player.index].boost;
+            uint32_t id = player.carId;
 
-            if (boostGain > 0.0f) {
-                Vec padPos = player.pos;
-
-                auto& path = recentPadPositions[player.carId];
-                path.push_back(padPos);
-
-                if (path.size() > 5) {
-                    path.pop_front();
-                }
-
-                if (path.size() >= 3) {
-                    float totalDist = 0.0f;
-                    for (size_t i = 1; i < path.size(); i++) {
-                        totalDist += path[i].Dist(path[i - 1]);
-                    }
-
-                    float avgDist = totalDist / (path.size() - 1);
-
-                    if (avgDist < 1500.0f) {
-                        return 5.0f;
-                    }
-                }
+            // Initialize path state
+            if (playerPaths.find(id) == playerPaths.end()) {
+                playerPaths[id] = PathState{ player.pos, player.pos, player.boost, false, 0 };
             }
 
+            auto& pState = playerPaths[id];
+            bool currentlyRotating = IsRotatingDefensively(player, state);
+
+            // Start tracking rotation
+            if (currentlyRotating && !pState.isRotating) {
+                pState.rotationStartPos = player.pos;
+                pState.boostAtStart = player.boost;
+                pState.padsCollected = 0;
+                pState.isRotating = true;
+            }
+            // End tracking rotation
+            else if (!currentlyRotating && pState.isRotating) {
+                pState.isRotating = false;
+            }
+
+            // Track boost pickups during rotation
+            float boostGain = player.boost - state.prev->players[player.index].boost;
+
+            if (pState.isRotating && boostGain > 0.0f) {
+                pState.padsCollected++;
+
+                Vec ownGoal = (player.team == Team::BLUE) ?
+                    CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+
+                // Calculate deviation from direct rotation path
+                float deviation = CalculatePathDeviation(
+                    pState.rotationStartPos,
+                    player.pos,
+                    ownGoal
+                );
+
+                // Reward based on minimal deviation (staying on rotation path)
+                // Low deviation = good pathing
+                float reward = 0.0f;
+
+                if (deviation < 500.0f) {
+                    // Excellent - barely deviated from rotation
+                    reward = 1.0f;
+                }
+                else if (deviation < 1000.0f) {
+                    // Good - minor deviation
+                    reward = 0.5f;
+                }
+                else if (deviation < 1500.0f) {
+                    // Acceptable - moderate deviation
+                    reward = 0.2f;
+                }
+                // else: Large deviation = no reward (broke rotation for boost)
+
+                // Bonus for collecting multiple pads
+                if (pState.padsCollected >= 2) {
+                    reward *= 1.2f;
+                }
+
+                pState.lastPosition = player.pos;
+                return reward;
+            }
+
+            pState.lastPosition = player.pos;
             return 0.0f;
         }
     };
@@ -475,36 +526,38 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // DISCOURAGE FLIPPING LOW BOOST REWARD
-    // Penalizes flipping when both boost and speed are low.
+    // FRONT FLIP BOOST WASTE REWARD
+    // Penalizes boosting during a front flip.
+    // Issue: During front flip, car faces backward mid-flip, causing boost to
+    // push car backward and slow it down. Best method = diagonal flip / speed flip.
     // ============================================================================
-    class DiscourageFlippingLowBoostReward : public Reward {
+    class FrontFlipBoostWasteReward : public Reward {
     private:
-        mutable std::map<uint32_t, bool> wasFlipping;
-
-        static constexpr float SPEED_THRESHOLD = 1300.0f;
-        static constexpr float BOOST_THRESHOLD = 12.0f;
-        static constexpr float PENALTY = -0.5f;
+        static constexpr float PENALTY_PER_TICK = -0.3f;
+        static constexpr float FRONT_FLIP_PITCH_THRESHOLD = 0.5f;  // ~30 degrees forward pitch
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            wasFlipping.clear();
+            // No state needed
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            bool currentlyFlipping = player.isFlipping;
-            bool previouslyFlipping = wasFlipping[player.carId];
-            wasFlipping[player.carId] = currentlyFlipping;
-
-            if (currentlyFlipping && !previouslyFlipping) {
-                float speed = player.vel.Length();
-                float boost = player.boost;
-
-                if (speed < SPEED_THRESHOLD && boost < BOOST_THRESHOLD) {
-                    return PENALTY;
-                }
+            // Only penalize if actively flipping AND boosting
+            if (!player.isFlipping || player.prevAction.boost == 0) {
+                return 0.0f;
             }
 
+            // Detect if this is a front flip (positive pitch input)
+            // Front flips have forward pitch input
+            float pitchInput = player.prevAction.pitch;
+
+            // Front flip: pitch input > threshold (tilting forward)
+            // This is the problematic flip type where boost wastes during backward rotation
+            if (pitchInput > FRONT_FLIP_PITCH_THRESHOLD) {
+                return PENALTY_PER_TICK;
+            }
+
+            // Diagonal flips and side flips are OK (don't penalize)
             return 0.0f;
         }
     };
@@ -577,7 +630,7 @@ namespace RLGC {
     class SupersonicBoostPenalty : public Reward {
     private:
         static constexpr float SUPERSONIC_THRESHOLD = 2300.0f;
-        static constexpr float PENALTY_PER_TICK = -0.05f;
+        static constexpr float PENALTY_PER_TICK = -0.1f;  // Increased for stronger learning signal
 
     public:
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -624,6 +677,11 @@ namespace RLGC {
         mutable std::map<uint32_t, float> previousBoost;
         mutable std::map<uint32_t, float> previousSpeed;
         mutable std::map<uint32_t, float> wasteAccumulator;
+
+        // Metrics tracking (similar to SupersonicReward)
+        inline static std::atomic<long long> s_wasteCountMilli{ 0 };
+        inline static std::atomic<long long> s_wastePenaltyMilli{ 0 };
+        inline static std::atomic<long long> s_boostWastedMilli{ 0 };
 
         WasteConfig config;
 
@@ -707,6 +765,23 @@ namespace RLGC {
         }
 
     public:
+        struct WasteMetrics {
+            double wasteCount = 0.0;
+            double totalPenalty = 0.0;
+            double totalBoostWasted = 0.0;
+        };
+
+        static WasteMetrics GetAndResetMetrics() {
+            WasteMetrics m;
+            long long c = s_wasteCountMilli.exchange(0);
+            m.wasteCount = double(c) / 1000.0;
+            long long p = s_wastePenaltyMilli.exchange(0);
+            m.totalPenalty = double(p) / 1000.0;
+            long long b = s_boostWastedMilli.exchange(0);
+            m.totalBoostWasted = double(b) / 1000.0;
+            return m;
+        }
+
         BoostWastePenaltyReward() : config() {}
 
         explicit BoostWastePenaltyReward(const WasteConfig& cfg) : config(cfg) {}
@@ -763,6 +838,13 @@ namespace RLGC {
             float finalPenalty = efficiencyPenalty * mitigationFactor;
 
             wasteAccumulator[player.carId] += std::abs(finalPenalty);
+
+            // Track metrics
+            if (finalPenalty < 0.0f) {
+                s_wasteCountMilli.fetch_add(1000);  // Increment waste event count
+                s_wastePenaltyMilli.fetch_add(static_cast<long long>(std::abs(finalPenalty) * 1000.0f));
+                s_boostWastedMilli.fetch_add(static_cast<long long>(boostConsumed * 1000.0f));
+            }
 
             previousBoost[player.carId] = currentBoost;
             previousSpeed[player.carId] = currentSpeed;
@@ -999,6 +1081,90 @@ namespace RLGC {
 
         void SetConfig(const BoostManagementConfig& cfg) {
             config = cfg;
+        }
+    };
+
+    // ============================================================================
+    // WALL PLAY REWARD
+    // Rewards using walls to reach high balls instead of wasting boost on aerials.
+    // Based on tip: "Using the Walls - You won't have to use 80 Boost to reach
+    // a high ball, more likely to get an accurate touch, more likely to get a
+    // powerful touch."
+    // ============================================================================
+    class WallPlayReward : public Reward {
+    private:
+        static constexpr float HIGH_BALL_HEIGHT = 500.0f;     // Ball height threshold
+        static constexpr float WALL_DISTANCE = 300.0f;        // Distance to wall
+        static constexpr float BALL_PROXIMITY = 800.0f;       // Distance to ball
+        static constexpr float BASE_REWARD = 0.5f;            // Base reward for wall play
+        static constexpr float LOW_BOOST_BONUS = 1.0f;        // Bonus if boost < 30
+        static constexpr float TOUCH_BONUS = 2.0f;            // Bonus for touching ball from wall
+        static constexpr float LOW_BOOST_THRESHOLD = 30.0f;
+
+        bool IsNearWall(const Player& player) const {
+            float xDist = std::abs(std::abs(player.pos.x) - CommonValues::SIDE_WALL_X);
+            float yDist = std::abs(std::abs(player.pos.y) - CommonValues::BACK_WALL_Y);
+
+            return (xDist < WALL_DISTANCE || yDist < WALL_DISTANCE);
+        }
+
+        bool IsOnWall(const Player& player) const {
+            if (!player.isOnGround) return false;
+
+            RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
+            float pitch = std::abs(carAngle.pitch);
+            float roll = std::abs(carAngle.roll);
+
+            // Car is tilted (on wall/ceiling)
+            return (pitch > 0.3f || roll > 0.3f);
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            // No state needed
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Check if ball is high
+            if (state.ball.pos.z < HIGH_BALL_HEIGHT) {
+                return 0.0f;
+            }
+
+            // Check if player is near/on wall
+            bool nearWall = IsNearWall(player);
+            bool onWall = IsOnWall(player);
+
+            if (!nearWall && !onWall) {
+                return 0.0f;
+            }
+
+            // Check if ball is nearby
+            float distToBall = player.pos.Dist(state.ball.pos);
+            if (distToBall > BALL_PROXIMITY) {
+                return 0.0f;
+            }
+
+            float reward = 0.0f;
+
+            // Base reward for positioning on/near wall for high ball
+            if (onWall) {
+                reward = BASE_REWARD;
+            }
+            else if (nearWall) {
+                reward = BASE_REWARD * 0.5f;  // Moving toward wall
+            }
+
+            // Bonus if low boost (smart decision to use wall instead of aerial)
+            if (player.boost < LOW_BOOST_THRESHOLD) {
+                reward += LOW_BOOST_BONUS;
+            }
+
+            // Large bonus for actually touching the ball from wall
+            if (onWall && player.ballTouchedStep) {
+                reward += TOUCH_BONUS;
+            }
+
+            return reward;
         }
     };
 
@@ -1265,6 +1431,105 @@ namespace RLGC {
     };
 
     // ============================================================================
+    // KICKOFF BOOST RETENTION REWARD
+    // ============================================================================
+    // Rewards ending kickoff with optimal boost retention (9-13 boost).
+    // This leftover boost is critical if you lose the kickoff to help rotate
+    // back and block the shot.
+    //
+    // Logic:
+    // - Detects kickoff end (ball moves away from center with velocity)
+    // - Checks player boost at kickoff end
+    // - Optimal range: 9-13 boost (high reward)
+    // - Acceptable range: 5-20 boost (moderate reward)
+    // - Too low (<5): penalty (can't defend if you lose)
+    // - Too high (>20): penalty (didn't commit enough)
+    // ============================================================================
+    class KickoffBoostRetentionReward : public Reward {
+    private:
+        mutable std::map<uint32_t, bool> wasInKickoff;
+        mutable std::map<uint32_t, bool> hasReceivedKickoffReward;
+
+        // Kickoff detection
+        static constexpr float KICKOFF_BALL_POS_RADIUS = 300.0f;
+        static constexpr float KICKOFF_BALL_VEL_THRESHOLD = 500.0f;  // Ball must be moving to end kickoff
+
+        // Optimal boost retention
+        static constexpr float OPTIMAL_MIN = 9.0f;
+        static constexpr float OPTIMAL_MAX = 13.0f;
+        static constexpr float ACCEPTABLE_MIN = 5.0f;
+        static constexpr float ACCEPTABLE_MAX = 20.0f;
+
+        // Rewards
+        static constexpr float OPTIMAL_REWARD = 2.0f;
+        static constexpr float ACCEPTABLE_REWARD = 0.8f;
+        static constexpr float TOO_LOW_PENALTY = -1.5f;
+        static constexpr float TOO_HIGH_PENALTY = -0.5f;
+
+        bool IsKickoffActive(const GameState& state) const {
+            return (state.ball.pos.Length() < KICKOFF_BALL_POS_RADIUS);
+        }
+
+        bool IsKickoffEnding(const GameState& state) const {
+            // Kickoff ends when ball moves away from center with speed
+            return (state.ball.pos.Length() > KICKOFF_BALL_POS_RADIUS &&
+                    state.ball.vel.Length() > KICKOFF_BALL_VEL_THRESHOLD);
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            wasInKickoff.clear();
+            hasReceivedKickoffReward.clear();
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            uint32_t id = player.carId;
+
+            // Initialize tracking
+            if (wasInKickoff.find(id) == wasInKickoff.end()) {
+                wasInKickoff[id] = false;
+                hasReceivedKickoffReward[id] = false;
+            }
+
+            bool currentlyInKickoff = IsKickoffActive(state);
+            bool kickoffEnding = IsKickoffEnding(state);
+
+            // Track kickoff state
+            if (currentlyInKickoff) {
+                wasInKickoff[id] = true;
+                hasReceivedKickoffReward[id] = false;  // Reset for new kickoff
+            }
+
+            // Detect kickoff end and evaluate boost retention
+            if (wasInKickoff[id] && kickoffEnding && !hasReceivedKickoffReward[id]) {
+                hasReceivedKickoffReward[id] = true;
+                wasInKickoff[id] = false;
+
+                float boost = player.boost;
+
+                // Optimal range: 9-13 boost
+                if (boost >= OPTIMAL_MIN && boost <= OPTIMAL_MAX) {
+                    return OPTIMAL_REWARD;
+                }
+                // Acceptable range: 5-20 boost
+                else if (boost >= ACCEPTABLE_MIN && boost <= ACCEPTABLE_MAX) {
+                    return ACCEPTABLE_REWARD;
+                }
+                // Too low: can't defend if you lose kickoff
+                else if (boost < ACCEPTABLE_MIN) {
+                    return TOO_LOW_PENALTY;
+                }
+                // Too high: didn't commit enough to kickoff
+                else {
+                    return TOO_HIGH_PENALTY;
+                }
+            }
+
+            return 0.0f;
+        }
+    };
+
+    // ============================================================================
     // POST-KICKOFF MID BOOST GRAB REWARD
     // ============================================================================
     // Rewards grabbing mid boost pads after kickoff when ball is in mid area.
@@ -1419,7 +1684,7 @@ namespace RLGC {
             float smallBoostReward = 0.3f;      // Reward for grabbing small boost pad
 
             // Defensive rotation detection
-            float minVelocityTowardGoal = 500.0f;  // Must be moving toward own goal
+            float minVelocityTowardGoal = 300.0f;  // Must be moving toward own goal (reduced for slower rotations)
             float behindBallThreshold = 200.0f;     // Must be this far behind ball (toward own goal)
 
             // Boost detection
