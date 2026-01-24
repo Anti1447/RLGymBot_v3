@@ -16,6 +16,7 @@
 #include <RLGymCPP/Rewards/MovementAndKickoffRewards_Enhanced.h>
 #include <RLGymCPP/Rewards/RotationRewards.h>
 #include <RLGymCPP/Rewards/PreemptiveSaveRewards.h>
+#include <RLGymCPP/Rewards/AdvancedDemoRewards.h>
 
 using namespace RLGC;
 

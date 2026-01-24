@@ -30,12 +30,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.03f;
-        cfg.policyLR = 1.8e-4f;
-        cfg.criticLR = 1.8e-4f;
+        cfg.entropyScale = 0.025f;
+        cfg.policyLR = 1.7e-4f;
+        cfg.criticLR = 1.7e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.45f;
+        cfg.randomStateChance = 0.5f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         break;
@@ -170,7 +170,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 456;
 
     // === PPO CONFIG ===
-    int tsPerItr = 150'000;
+    int tsPerItr = 200'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -179,7 +179,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.991;
+    cfg.ppo.gaeGamma = 0.9915;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

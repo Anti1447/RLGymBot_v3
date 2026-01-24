@@ -3,6 +3,7 @@
 #include <torch/csrc/api/include/torch/serialize.h>
 #include <torch/csrc/api/include/torch/nn/utils/convert_parameters.h>
 #include <torch/nn/modules/normalization.h>
+#include <torch/script.h>
 
 GGL::Model::Model(
 	const char* modelName,
@@ -38,9 +39,16 @@ void GGL::Model::CompileForInference() {
 		return;
 	}
 
-	// JIT compilation disabled - requires LibTorch 1.9+ with torch::jit::trace API
-	// This LibTorch version doesn't support the necessary JIT APIs
-	// Using eager mode with other optimizations instead
+	// NOTE: LibTorch 2.x removed the torch::jit::trace C++ API
+	// JIT tracing must be done in Python and loaded via torch::jit::load()
+	// For now, using eager mode with other optimizations
+	//
+	// Alternative approach for future:
+	// 1. Trace models in Python: traced = torch.jit.trace(model, example_input)
+	// 2. Save: torch.jit.save(traced, "model.pt")
+	// 3. Load in C++: torch::jit::load("model.pt")
+	//
+	// This would require refactoring the training loop to export traced models
 	isCompiled = false;
 }
 

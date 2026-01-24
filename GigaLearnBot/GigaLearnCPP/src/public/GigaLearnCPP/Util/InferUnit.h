@@ -13,8 +13,10 @@ namespace GGL {
 
 		// Preallocated buffers for batch inference (avoid reallocation overhead)
 		// These provide 1.3-2x speedup for batch operations
-		torch::Tensor obsBuffer;
+		torch::Tensor obsBuffer;          // GPU buffers (or CPU if !useGPU)
 		torch::Tensor actionMaskBuffer;
+		torch::Tensor cpuObsBuffer;       // CPU staging buffers (pinned memory for async GPU transfers)
+		torch::Tensor cpuActionMaskBuffer;
 		int maxBatchSize = 256;
 
 		// NOTE: Reset() will never be called on your obs 

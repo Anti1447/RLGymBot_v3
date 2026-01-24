@@ -3,6 +3,29 @@
 #include <GigaLearnCPP/Util/Models.h>
 #include <GigaLearnCPP/PPO/PPOLearner.h>
 
+// CUDA Optimizer for GPU inference optimizations
+namespace GGL {
+	class CUDAOptimizer {
+	private:
+		static bool initialized;
+	public:
+		static void Initialize() {
+			if (initialized) return;
+			if (!torch::cuda::is_available()) return;
+
+			RG_LOG("=== Initializing CUDA Inference Optimizations ===");
+			at::globalContext().setBenchmarkCuDNN(true);
+			at::globalContext().setAllowTF32CuDNN(true);
+			at::globalContext().setAllowTF32CuBLAS(true);
+			RG_LOG("Enabled cuDNN benchmark & TF32 precision");
+			initialized = true;
+			RG_LOG("=== CUDA Optimizations Complete ===");
+		}
+		static bool IsInitialized() { return initialized; }
+	};
+	bool CUDAOptimizer::initialized = false;
+}
+
 GGL::InferUnit::InferUnit(
 	RLGC::ObsBuilder* obsBuilder, int obsSize, RLGC::ActionParser* actionParser,
 	PartialModelConfig sharedHeadConfig, PartialModelConfig policyConfig, 
@@ -28,6 +51,11 @@ GGL::InferUnit::InferUnit(
 		RG_ERR_CLOSE("InferUnit: Exception when trying to load models: " << e.what());
 	}
 
+	// Initialize CUDA optimizations if using GPU
+	if (useGPU) {
+		CUDAOptimizer::Initialize();
+	}
+
 	// Preallocate tensors for batch inference (avoid reallocation overhead)
 	// This provides 1.3-2x speedup for batch operations
 	auto device = useGPU ? torch::kCUDA : torch::kCPU;
@@ -37,12 +65,21 @@ GGL::InferUnit::InferUnit(
 		.device(device)
 		.requires_grad(false);
 
+	// For GPU: allocate buffers on GPU directly
+	// For CPU: allocate on CPU with pinned memory
 	obsBuffer = torch::empty({maxBatchSize, obsSize}, tensorOpts);
 	actionMaskBuffer = torch::empty({maxBatchSize, actionParser->GetActionAmount()},
 									 tensorOpts.dtype(torch::kBool));
 
-	// Pin memory for faster CPU<->tensor transfers (CPU only)
-	if (device == torch::kCPU) {
+	// CPU staging buffers for GPU path (pinned memory for async transfers)
+	if (useGPU) {
+		cpuObsBuffer = torch::empty({maxBatchSize, obsSize},
+			torch::TensorOptions().dtype(torch::kFloat32).pinned_memory(true));
+		cpuActionMaskBuffer = torch::empty({maxBatchSize, actionParser->GetActionAmount()},
+			torch::TensorOptions().dtype(torch::kBool).pinned_memory(true));
+		RG_LOG("InferUnit: Allocated pinned CPU staging buffers for GPU");
+	} else {
+		// Pin memory for faster CPU operations
 		obsBuffer = obsBuffer.pin_memory();
 		actionMaskBuffer = actionMaskBuffer.pin_memory();
 	}
@@ -72,29 +109,63 @@ std::vector<RLGC::Action> GGL::InferUnit::BatchInferActions(const std::vector<RL
 		if (batchSize <= maxBatchSize) {
 			// FAST PATH: Reuse preallocated buffers (no allocation overhead)
 			// This provides 1.3-2x speedup
-			auto obsBatch = obsBuffer.narrow(0, 0, batchSize);
-			auto maskBatch = actionMaskBuffer.narrow(0, 0, batchSize);
 
-			// Fill buffers in-place (avoid intermediate vector allocations)
-			for (int i = 0; i < batchSize; i++) {
-				FList curObs = obsBuilder->BuildObs(players[i], states[i]);
-				if (curObs.size() != obsSize) {
-					RG_ERR_CLOSE(
-						"InferUnit: Obs builder produced an obs that differs from the provided size (expected: " << obsSize << ", got: " << curObs.size() << ")\n" <<
-						"Make sure you provided the correct obs size to the InferUnit constructor.\n" <<
-						"Also, make sure there aren't an incorrect number of players (there are " << states[i].players.size() << " in this state)"
-					);
+			if (useGPU) {
+				// GPU PATH: Fill CPU staging buffers, then async copy to GPU
+				auto cpuObsBatch = cpuObsBuffer.narrow(0, 0, batchSize);
+				auto cpuMaskBatch = cpuActionMaskBuffer.narrow(0, 0, batchSize);
+
+				// Fill CPU staging buffers (pinned memory)
+				for (int i = 0; i < batchSize; i++) {
+					FList curObs = obsBuilder->BuildObs(players[i], states[i]);
+					if (curObs.size() != obsSize) {
+						RG_ERR_CLOSE(
+							"InferUnit: Obs builder produced an obs that differs from the provided size (expected: " << obsSize << ", got: " << curObs.size() << ")\n" <<
+							"Make sure you provided the correct obs size to the InferUnit constructor.\n" <<
+							"Also, make sure there aren't an incorrect number of players (there are " << states[i].players.size() << " in this state)"
+						);
+					}
+
+					std::memcpy(cpuObsBatch[i].data_ptr<float>(), curObs.data(), obsSize * sizeof(float));
+
+					auto masks = actionParser->GetActionMask(players[i], states[i]);
+					std::memcpy(cpuMaskBatch[i].data_ptr<bool>(), masks.data(), masks.size() * sizeof(uint8_t));
 				}
 
-				// Copy directly to tensor (no intermediate vector)
-				std::memcpy(obsBatch[i].data_ptr<float>(), curObs.data(), obsSize * sizeof(float));
+				// Async copy from pinned CPU memory to GPU (non-blocking)
+				auto obsBatch = obsBuffer.narrow(0, 0, batchSize);
+				auto maskBatch = actionMaskBuffer.narrow(0, 0, batchSize);
 
-				auto masks = actionParser->GetActionMask(players[i], states[i]);
-				std::memcpy(maskBatch[i].data_ptr<bool>(), masks.data(), masks.size() * sizeof(uint8_t));
+				obsBatch.copy_(cpuObsBatch, /*non_blocking=*/true);
+				maskBatch.copy_(cpuMaskBatch, /*non_blocking=*/true);
+
+				tObs = obsBatch;
+				tActionMasks = maskBatch;
+
+			} else {
+				// CPU PATH: Fill buffers directly
+				auto obsBatch = obsBuffer.narrow(0, 0, batchSize);
+				auto maskBatch = actionMaskBuffer.narrow(0, 0, batchSize);
+
+				for (int i = 0; i < batchSize; i++) {
+					FList curObs = obsBuilder->BuildObs(players[i], states[i]);
+					if (curObs.size() != obsSize) {
+						RG_ERR_CLOSE(
+							"InferUnit: Obs builder produced an obs that differs from the provided size (expected: " << obsSize << ", got: " << curObs.size() << ")\n" <<
+							"Make sure you provided the correct obs size to the InferUnit constructor.\n" <<
+							"Also, make sure there aren't an incorrect number of players (there are " << states[i].players.size() << " in this state)"
+						);
+					}
+
+					std::memcpy(obsBatch[i].data_ptr<float>(), curObs.data(), obsSize * sizeof(float));
+
+					auto masks = actionParser->GetActionMask(players[i], states[i]);
+					std::memcpy(maskBatch[i].data_ptr<bool>(), masks.data(), masks.size() * sizeof(uint8_t));
+				}
+
+				tObs = obsBatch;
+				tActionMasks = maskBatch;
 			}
-
-			tObs = obsBatch;
-			tActionMasks = maskBatch;
 
 		} else {
 			// SLOW PATH: Batch too large, allocate on the fly (fallback)
@@ -115,8 +186,25 @@ std::vector<RLGC::Action> GGL::InferUnit::BatchInferActions(const std::vector<RL
 				allActionMasks += actionParser->GetActionMask(players[i], states[i]);
 			}
 
-			tObs = torch::tensor(allObs).reshape({(int64_t)players.size(), obsSize}).to(device);
-			tActionMasks = torch::tensor(allActionMasks).reshape({(int64_t)players.size(), this->actionParser->GetActionAmount()}).to(device);
+			// Use pinned memory + async copy for GPU
+			if (useGPU) {
+				auto cpuObs = torch::from_blob(allObs.data(), {(int64_t)players.size(), obsSize},
+					torch::TensorOptions().dtype(torch::kFloat32)).clone();
+				auto cpuMasks = torch::from_blob(allActionMasks.data(),
+					{(int64_t)players.size(), this->actionParser->GetActionAmount()},
+					torch::TensorOptions().dtype(torch::kUInt8)).clone();
+
+				// Pin memory for faster transfer
+				cpuObs = cpuObs.pin_memory();
+				cpuMasks = cpuMasks.pin_memory();
+
+				// Async copy to GPU
+				tObs = cpuObs.to(device, /*non_blocking=*/true);
+				tActionMasks = cpuMasks.to(torch::kBool).to(device, /*non_blocking=*/true);
+			} else {
+				tObs = torch::tensor(allObs).reshape({(int64_t)players.size(), obsSize});
+				tActionMasks = torch::tensor(allActionMasks).reshape({(int64_t)players.size(), this->actionParser->GetActionAmount()});
+			}
 		}
 
 		torch::Tensor tActions, tLogProbs;

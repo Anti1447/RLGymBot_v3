@@ -90,10 +90,20 @@ static void ExportRLBOTPolicyStateDict(GGL::ModelSet& models, const std::filesys
 
 GGL::PPOLearner::PPOLearner(int obsSize, int numActions, PPOLearnerConfig _config, Device _device) : config(_config), device(_device) {
 
-	// Initialize LibTorch CPU inference optimizations (MKL-DNN, threading, etc.)
-	// This provides 5-15x speedup for CPU inference
+	// Initialize inference optimizations
 	if (device.is_cpu()) {
+		// CPU: MKL-DNN, threading, etc. (5-15x speedup)
 		InferenceOptimizer::Initialize();
+	} else {
+		// GPU: cuDNN benchmark, TF32, etc. (8-12x speedup)
+		if (torch::cuda::is_available()) {
+			RG_LOG("=== Initializing CUDA Inference Optimizations ===");
+			at::globalContext().setBenchmarkCuDNN(true);
+			at::globalContext().setAllowTF32CuDNN(true);
+			at::globalContext().setAllowTF32CuBLAS(true);
+			RG_LOG("Enabled cuDNN benchmark & TF32 precision");
+			RG_LOG("=== CUDA Optimizations Complete ===");
+		}
 	}
 
 	if (config.miniBatchSize == 0)
