@@ -17,6 +17,8 @@
 #include <RLGymCPP/Rewards/RotationRewards.h>
 #include <RLGymCPP/Rewards/PreemptiveSaveRewards.h>
 #include <RLGymCPP/Rewards/AdvancedDemoRewards.h>
+#include <RLGymCPP/Rewards/RecoveryRewards.h>
+#include <RLGymCPP/Rewards/AdvancedPlayRewards.h>
 
 using namespace RLGC;
 

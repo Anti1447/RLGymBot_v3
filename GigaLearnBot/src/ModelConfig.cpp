@@ -30,7 +30,7 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.025f;
+        cfg.entropyScale = 0.035f;
         cfg.policyLR = 1.7e-4f;
         cfg.criticLR = 1.7e-4f;
         cfg.noTouchTimeout = 12.0f;
@@ -179,7 +179,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9915;
+    cfg.ppo.gaeGamma = 0.99175;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 
