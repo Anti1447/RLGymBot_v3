@@ -19,6 +19,12 @@
 #include <RLGymCPP/Rewards/AdvancedDemoRewards.h>
 #include <RLGymCPP/Rewards/RecoveryRewards.h>
 #include <RLGymCPP/Rewards/AdvancedPlayRewards.h>
+#include <RLGymCPP/Rewards/PositioningRewards.h>
+#include <RLGymCPP/Rewards/SmartWallPlayRewards.h>
+#include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
+#include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
+#include <RLGymCPP/Rewards/HookshotReward.h>
+// DirectionChangeReward and HookShotReward defined in HookshotReward.h
 
 using namespace RLGC;
 

@@ -12,6 +12,9 @@
 #include <RLGymCPP/StateSetters/AerialTrainingState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 #include <RLGymCPP/Gamestates/GameState.h>
+#include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
+#include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
+#include <RLGymCPP/Rewards/HookshotReward.h>
 
 using namespace GGL;
 using namespace RLGC;
@@ -116,6 +119,63 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     // To prevent expensive metrics from eating at performance, we will only run them on 1/4th of steps
     // This doesn't really matter unless you have expensive metrics (which this example doesn't)
     bool doExpensiveMetrics = (rand() % 4) == 0;
+
+    // ========================================================================
+    // AIR DRIBBLE METRICS (collected every step)
+    // ========================================================================
+    auto airDribbleMetrics = AirDribbleAccuracyReward::GetAndResetMetrics();
+
+    if (airDribbleMetrics.attempts > 0) {
+        // Only report if there were actual attempts this step
+        report.AddAvg("AirDribble/Avg Sequence Length", airDribbleMetrics.avgSequenceLength);
+        report.AddAvg("AirDribble/Soft Touch Ratio %", airDribbleMetrics.softTouchRatio);
+        report.AddAvg("AirDribble/Completion Rate %", airDribbleMetrics.completionRate);
+        report.AddAvg("AirDribble/Zone Efficiency %", airDribbleMetrics.scoringZoneEfficiency);
+        report.AddAvg("AirDribble/Quality Score", airDribbleMetrics.touchQualityScore);
+
+        // Also include raw counters for debugging
+        report.AddAvg("AirDribble/Attempts", airDribbleMetrics.attempts);
+        report.AddAvg("AirDribble/On Target", airDribbleMetrics.onTarget);
+        report.AddAvg("AirDribble/Overshot Count", airDribbleMetrics.overshotCount);
+        report.AddAvg("AirDribble/Total Reward", airDribbleMetrics.rewardSum);
+    }
+
+    // ========================================================================
+    // AIR DRIBBLE CLEARING METRICS (collected every step)
+    // ========================================================================
+    auto clearingMetrics = AirDribbleClearingReward::GetAndResetMetrics();
+
+    if (clearingMetrics.attempts > 0) {
+        // Only report if there were actual clearing attempts this step
+        report.AddAvg("AirDribbleClearing/Avg Sequence Length", clearingMetrics.avgSequenceLength);
+        report.AddAvg("AirDribbleClearing/Soft Touch Ratio %", clearingMetrics.softTouchRatio);
+        report.AddAvg("AirDribbleClearing/Clearing Rate %", clearingMetrics.clearingRate);
+        report.AddAvg("AirDribbleClearing/Zone Efficiency %", clearingMetrics.zoneEfficiency);
+        report.AddAvg("AirDribbleClearing/Quality Score", clearingMetrics.touchQualityScore);
+
+        // Also include raw counters for debugging
+        report.AddAvg("AirDribbleClearing/Attempts", clearingMetrics.attempts);
+        report.AddAvg("AirDribbleClearing/Successful", clearingMetrics.successful);
+        report.AddAvg("AirDribbleClearing/In Clearing Zone", clearingMetrics.inClearingZone);
+        report.AddAvg("AirDribbleClearing/Total Reward", clearingMetrics.rewardSum);
+    }
+
+    // ========================================================================
+    // POSSESSION REDIRECT METRICS - Direction Change & Hook Shot
+    // ========================================================================
+    auto directionChangeMetrics = DirectionChangeReward::GetAndResetMetrics();
+    if (directionChangeMetrics.attempts > 0) {
+        report.AddAvg("PossessionRedirect/DirectionChange/Attempts", (float)directionChangeMetrics.attempts);
+        report.AddAvg("PossessionRedirect/DirectionChange/SuccessRate %", directionChangeMetrics.GetSuccessRate() * 100.0f);
+        report.AddAvg("PossessionRedirect/DirectionChange/Avg Reward", directionChangeMetrics.GetAverageReward());
+    }
+
+    auto hookShotMetrics = HookShotReward::GetAndResetMetrics();
+    if (hookShotMetrics.attempts > 0) {
+        report.AddAvg("PossessionRedirect/HookShot/Attempts", (float)hookShotMetrics.attempts);
+        report.AddAvg("PossessionRedirect/HookShot/OnGoalRate %", hookShotMetrics.GetSuccessRate() * 100.0f);
+        report.AddAvg("PossessionRedirect/HookShot/Avg Reward", hookShotMetrics.GetAverageReward());
+    }
 
     // Add our metrics
     for (auto& state : states) {

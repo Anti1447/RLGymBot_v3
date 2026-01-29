@@ -33,6 +33,11 @@ namespace RLGC {
         mutable std::map<uint32_t, bool>  inScoringZone;
         mutable std::map<uint32_t, bool>  enteredFinishingZone;
 
+        // First touch quality tracking
+        mutable std::map<uint32_t, Vec>   firstTouchBallPos;
+        mutable std::map<uint32_t, Vec>   firstTouchBallVel;
+        mutable std::map<uint32_t, bool>  firstTouchProcessed;
+
         // ============================================================================
         // TUNABLE CONSTANTS
         // ============================================================================
@@ -76,21 +81,34 @@ namespace RLGC {
         // Bonus when second qualifying touch occurs
         // More aggressive: 1.2-1.5 | More conservative: 0.4-0.6
 
-        // --- SCORING ZONE REWARDS ---
-        const float SCORING_ZONE_MIN_HEIGHT = 150.0f;
-        // Minimum ball height for scoring zone
-        // Conservative: 300-350
+        // --- FIRST TOUCH QUALITY ---
+        const float ROUGH_TOUCH_VELOCITY_THRESHOLD = 1200.0f;
+        // Ball velocity change threshold for rough touch detection
+        // If ball velocity change > this on first touch, quality penalty applied
+        // Lower = more strict | Higher = more lenient
 
-        const float SCORING_ZONE_MAX_HEIGHT = 640.0f;
+        const float ROUGH_TOUCH_PENALTY = 0.7f;
+        // Penalty multiplier for rough/aggressive first touches
+        // Applied to entry bonus only
+        // More aggressive: 0.4-0.5 | More conservative: 0.8-0.9
+
+        // --- SCORING ZONE REWARDS ---
+        const float SCORING_ZONE_MIN_HEIGHT = 250.0f;
+        // Minimum ball height for scoring zone
+        // Relaxed from 150 to allow more natural dribble progression
+        // Conservative approach: 250-700uu range
+
+        const float SCORING_ZONE_MAX_HEIGHT = 630.0f;
         // Maximum ball height for scoring zone
-        // Conservative: 640-680 (just above goal rim at 642.775)
+        // Relaxed from 640 to prevent early abandonment
+        // Goal rim at 642.775; 700uu provides forgiving tolerance
 
         const float SCORING_ZONE_BONUS = 1.3f;
         // Reward multiplier when in scoring zone
         // More aggressive: 1.5-1.8 | More conservative: 1.1-1.2
 
         // --- FINISHING ZONE DETECTION ---
-        const float FINISHING_ZONE_RADIUS = 300.0f;
+        const float FINISHING_ZONE_RADIUS = 900.0f;
         // XY-plane distance from goal center to enter "finishing zone"
         // When inside: enforce strict z-height constraints
         // When outside: allow high arcs
@@ -110,18 +128,20 @@ namespace RLGC {
         // More aggressive: 0.1-0.2 | More conservative: 0.5-0.7
 
         // --- HEIGHT PENALTY FOR SETUP DRIBBLES ---
-        const float EXCESSIVE_HEIGHT_THRESHOLD = 2000.0f;
+        const float EXCESSIVE_HEIGHT_THRESHOLD = 1800.0f;
         // Ball height above which to penalize when FAR from goal
         // Used during setup phase only
-        // Conservative: 800-1000
+        // Tightened from 2000 to enforce cleaner arc control
 
-        const float HEIGHT_PENALTY_EXPONENT = 1.0f;
+        const float HEIGHT_PENALTY_EXPONENT = 1.5f;
         // How aggressively to penalize excessive height
-        // More aggressive: 2.0-3.0 | More conservative: 0.8-1.0
+        // Increased from 1.0 to 1.5 for stronger penalty on tall arcs
+        // Encourages more controlled setup plays
 
-        const float MAX_HEIGHT_PENALTY = 0.8f;
+        const float MAX_HEIGHT_PENALTY = 0.6f;
         // Cap on penalty reduction far from goal
-        // More aggressive: 0.2-0.3 | More conservative: 0.6-0.8
+        // Reduced from 0.8 to 0.6 to be more restrictive
+        // Prevents excessive height during setup
 
         // --- DIRECTIONAL REQUIREMENTS ---
         const float MIN_DIR_MULTIPLIER = 0.46f;
@@ -131,6 +151,15 @@ namespace RLGC {
         const float GOOD_DIR_THRESHOLD = 0.525f;
         // Alignment threshold for "good" direction (dot product)
         // More aggressive: 0.4-0.5 | More conservative: 0.65-0.75
+
+        // --- BOOST REQUIREMENTS ---
+        const float MINIMUM_BOOST_TO_INITIATE = 30.0f;
+        // Minimum boost to start an air dribble attempt
+        // Prevents wasteful low-boost attempts
+
+        const float MINIMUM_BOOST_TO_CONTINUE = 20.0f;
+        // Minimum boost to continue existing sequence
+        // Below this threshold: reset sequence and return 0
 
         const float EPS_REWARD_SKIP = 1e-7f;
 
@@ -205,13 +234,40 @@ namespace RLGC {
             return 1.0f;
         }
 
+        float ComputeFirstTouchQualityMultiplier(const Vec& prevBallVel, const Vec& currBallVel) const {
+            // Detect rough/aggressive first touches based on velocity change
+            // Soft touch (controlled): Small velocity change
+            // Rough touch (aggressive): Large velocity change (especially with boost held)
+
+            float prevSpeed = prevBallVel.Length();
+            float currSpeed = currBallVel.Length();
+            float velocityChange = currSpeed - prevSpeed;
+
+            if (velocityChange > ROUGH_TOUCH_VELOCITY_THRESHOLD) {
+                // Aggressive touch: reduce entry bonus
+                return ROUGH_TOUCH_PENALTY;
+            }
+
+            return 1.0f; // Soft/controlled touch
+        }
+
     public:
         struct AirDribbleAccuracyMetrics {
+            // Raw counters
             int attempts = 0;
             int onTarget = 0;
             int inScoringZone = 0;
             int overshotCount = 0;
             double rewardSum = 0.0;
+            int roughTouchCount = 0;
+            int totalTouches = 0;
+
+            // Computed metrics (5 core metrics)
+            double avgSequenceLength = 0.0;         // Avg touches per attempt
+            double softTouchRatio = 0.0;            // % of soft (non-rough) first touches
+            double completionRate = 0.0;            // % of attempts that made progress
+            double scoringZoneEfficiency = 0.0;     // % of scoring zone attempts that didn't overshoot
+            double touchQualityScore = 0.0;         // Combined [0-1] quality indicator
         };
 
         inline static std::atomic<int> s_attempts{ 0 };
@@ -219,6 +275,8 @@ namespace RLGC {
         inline static std::atomic<int> s_inScoringZone{ 0 };
         inline static std::atomic<int> s_overshot{ 0 };
         inline static std::atomic<long long> s_rewardMilli{ 0 };
+        inline static std::atomic<int> s_roughTouches{ 0 };
+        inline static std::atomic<int> s_totalTouches{ 0 };
 
         static AirDribbleAccuracyMetrics GetAndResetMetrics() {
             AirDribbleAccuracyMetrics m;
@@ -226,8 +284,40 @@ namespace RLGC {
             m.onTarget = s_onTarget.exchange(0);
             m.inScoringZone = s_inScoringZone.exchange(0);
             m.overshotCount = s_overshot.exchange(0);
+            m.roughTouchCount = s_roughTouches.exchange(0);
+            m.totalTouches = s_totalTouches.exchange(0);
             long long r = s_rewardMilli.exchange(0);
             m.rewardSum = double(r) / 1000.0;
+
+            // Compute 5 core metrics
+            if (m.attempts > 0) {
+                // 1. Average sequence length
+                m.avgSequenceLength = (double)m.totalTouches / m.attempts;
+
+                // 2. Soft touch ratio (%)
+                int softTouches = m.attempts - m.roughTouchCount;
+                m.softTouchRatio = ((double)softTouches / m.attempts) * 100.0;
+
+                // 3. Completion rate (%)
+                m.completionRate = ((double)m.onTarget / m.attempts) * 100.0;
+
+                // 4. Scoring zone efficiency (%)
+                if (m.inScoringZone > 0) {
+                    int completedInZone = m.inScoringZone - m.overshotCount;
+                    m.scoringZoneEfficiency = ((double)completedInZone / m.inScoringZone) * 100.0;
+                }
+                else {
+                    m.scoringZoneEfficiency = 0.0; // No scoring zone entries to evaluate
+                }
+
+                // 5. Touch quality score (combined [0-1])
+                // Normalize each metric to [0-1] and average
+                double normalizedSoftTouch = m.softTouchRatio / 100.0;
+                double normalizedCompletion = m.completionRate / 100.0;
+                double normalizedZoneEff = m.scoringZoneEfficiency / 100.0;
+                m.touchQualityScore = (normalizedSoftTouch + normalizedCompletion + normalizedZoneEff) / 3.0;
+            }
+
             return m;
         }
 
@@ -242,6 +332,9 @@ namespace RLGC {
             seqMinHeight.clear();
             inScoringZone.clear();
             enteredFinishingZone.clear();
+            firstTouchBallPos.clear();
+            firstTouchBallVel.clear();
+            firstTouchProcessed.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -260,7 +353,37 @@ namespace RLGC {
                 seqMinHeight.erase(id);
                 inScoringZone.erase(id);
                 enteredFinishingZone.erase(id);
+                firstTouchBallPos.erase(id);
+                firstTouchBallVel.erase(id);
+                firstTouchProcessed.erase(id);
                 return 0.0f;
+            }
+
+            // Check boost requirements
+            if (seqTime.find(id) == seqTime.end()) {
+                // New sequence: require minimum boost to initiate
+                if (player.boost < MINIMUM_BOOST_TO_INITIATE) {
+                    return 0.0f;
+                }
+            } else {
+                // Existing sequence: check if boost drops below continue threshold
+                if (player.boost < MINIMUM_BOOST_TO_CONTINUE) {
+                    // Reset sequence
+                    seqAccumReward.erase(id);
+                    seqTime.erase(id);
+                    seqTouchCount.erase(id);
+                    seqExhausted.erase(id);
+                    seqStartHeight.erase(id);
+                    seqMaxHeight.erase(id);
+                    seqMinHeight.erase(id);
+                    inScoringZone.erase(id);
+                    enteredFinishingZone.erase(id);
+                    firstTouchBallPos.erase(id);
+                    firstTouchBallVel.erase(id);
+                    firstTouchProcessed.erase(id);
+                    consecutiveAirTouches[id] = 0;
+                    return 0.0f;
+                }
             }
 
             if (!state.prev || !player.ballTouchedStep)
@@ -278,6 +401,9 @@ namespace RLGC {
                 seqMinHeight[id] = state.ball.pos.z;
                 inScoringZone[id] = false;
                 enteredFinishingZone[id] = false;
+                firstTouchProcessed[id] = false;
+                firstTouchBallPos[id] = state.ball.pos;
+                firstTouchBallVel[id] = state.prev ? state.prev->ball.vel : state.ball.vel;
             }
 
             seqTime[id] += dt;
@@ -366,11 +492,28 @@ namespace RLGC {
 
             // Entry/second-touch bonuses
             if (prevTouches == 0) {
-                reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul * heightPenalty);
+                // First touch: Check touch quality
+                float touchQualityMul = 1.0f;
+                if (!firstTouchProcessed[id]) {
+                    touchQualityMul = ComputeFirstTouchQualityMultiplier(
+                        firstTouchBallVel[id],
+                        state.ball.vel
+                    );
+                    firstTouchProcessed[id] = true;
+
+                    // Track rough touches for metrics
+                    if (touchQualityMul < 1.0f) { // Rough touch detected
+                        s_roughTouches.fetch_add(1);
+                    }
+                }
+                reward += ENTRY_BONUS * touchQualityMul * RS_MIN(1.0f, dirMul * heightPenalty);
             }
             else if (prevTouches == 1) {
                 reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul * heightPenalty);
             }
+
+            // Track total touches for metrics
+            s_totalTouches.fetch_add(1);
 
             if (reward <= EPS_REWARD_SKIP)
                 return 0.0f;

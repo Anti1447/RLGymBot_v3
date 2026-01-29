@@ -391,60 +391,60 @@ public:
 // - Rewards shots on target that originate from wall play
 // - Requires recent wall contact + ball touch + on-goal trajectory
 // ============================================================================
-class WallShotReward : public Reward {
-private:
-    float wallX = CommonValues::SIDE_WALL_X;
-    float wallTolerance = 180.0f;
-
-    float recentWallWindow = 0.35f; // slightly longer than pop
-
-    mutable std::map<uint32_t, float> timeSinceOnWall;
-
-public:
-    virtual void Reset(const GameState& initialState) override {
-        timeSinceOnWall.clear();
-    }
-
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        const float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-        const uint32_t id = player.carId;
-
-        const bool nearSideWall =
-            fabs(player.pos.x) > (wallX - wallTolerance);
-
-        const bool onWall =
-            nearSideWall && !player.isOnGround;
-
-        auto& tSinceWall = timeSinceOnWall[id];
-
-        if (onWall) {
-            tSinceWall = 0.0f;
-        }
-        else {
-            tSinceWall += dt;
-        }
-
-        if (!player.ballTouchedStep) return 0.0f;
-        if (tSinceWall > recentWallWindow) return 0.0f;
-
-        // Must be a real shot on goal
-        if (!RLGC::RewardMath::BallIntersectsOpponentGoalMouth(
-            player,
-            state,
-            2.5f,   // tMaxSec
-            true,   // require back-net confirmation
-            true    // gravity
-        )) {
-            return 0.0f;
-        }
-
-        // Scale by shot speed
-        const float speed = state.ball.vel.Length();
-        float speedFrac = RS_CLAMP((speed - 1000.0f) / 2500.0f, 0.0f, 1.0f);
-
-        return 10.0f + 10.0f * speedFrac; // 10..20
-    }
-};
+//class WallShotReward : public Reward {
+//private:
+//    float wallX = CommonValues::SIDE_WALL_X;
+//    float wallTolerance = 180.0f;
+//
+//    float recentWallWindow = 0.35f; // slightly longer than pop
+//
+//    mutable std::map<uint32_t, float> timeSinceOnWall;
+//
+//public:
+//    virtual void Reset(const GameState& initialState) override {
+//        timeSinceOnWall.clear();
+//    }
+//
+//    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+//        const float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+//        const uint32_t id = player.carId;
+//
+//        const bool nearSideWall =
+//            fabs(player.pos.x) > (wallX - wallTolerance);
+//
+//        const bool onWall =
+//            nearSideWall && !player.isOnGround;
+//
+//        auto& tSinceWall = timeSinceOnWall[id];
+//
+//        if (onWall) {
+//            tSinceWall = 0.0f;
+//        }
+//        else {
+//            tSinceWall += dt;
+//        }
+//
+//        if (!player.ballTouchedStep) return 0.0f;
+//        if (tSinceWall > recentWallWindow) return 0.0f;
+//
+//        // Must be a real shot on goal
+//        if (!RLGC::RewardMath::BallIntersectsOpponentGoalMouth(
+//            player,
+//            state,
+//            2.5f,   // tMaxSec
+//            true,   // require back-net confirmation
+//            true    // gravity
+//        )) {
+//            return 0.0f;
+//        }
+//
+//        // Scale by shot speed
+//        const float speed = state.ball.vel.Length();
+//        float speedFrac = RS_CLAMP((speed - 1000.0f) / 2500.0f, 0.0f, 1.0f);
+//
+//        return 10.0f + 10.0f * speedFrac; // 10..20
+//    }
+//};
 
 
 
@@ -617,74 +617,8 @@ public:
     }
 };
 
-
-// ============================================================================
-// HookShotReward
-// Detects a "hook shot" chip from ground:
-//  - Ball low (rolling / slight bounce), near ground
-//  - Pre-touch: ball not strongly going toward goal
-//  - Post-touch: ball moving strongly toward opponent goal with higher speed
-//  - Player near ground at touch
-// 2025-12-09 - Rev 1 (NJH)
-// ============================================================================
-class HookShotReward : public Reward {
-public:
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (!player.ballTouchedStep || !state.prev)
-            return 0.0f;
-
-        // Only consider low balls
-        if (state.ball.pos.z > 200.0f)
-            return 0.0f;
-
-        // Player should be essentially grounded at touch
-        if (!player.isOnGround && player.pos.z > 150.0f)
-            return 0.0f;
-
-        Vec targetGoal = (player.team == Team::BLUE)
-            ? CommonValues::ORANGE_GOAL_BACK
-            : CommonValues::BLUE_GOAL_BACK;
-
-        Vec toGoal = (targetGoal - state.ball.pos).Normalized();
-
-        Vec prevVel = state.prev->ball.vel;
-        Vec curVel = state.ball.vel;
-
-        float prevSpeed = prevVel.Length();
-        float curSpeed = curVel.Length();
-
-        if (curSpeed < 800.0f)
-            return 0.0f;
-
-        if (prevSpeed < 200.0f)
-            return 0.0f;
-
-        Vec prevDir = prevVel / prevSpeed;
-        Vec curDir = curVel / curSpeed;
-
-        float prevAlign = prevDir.Dot(toGoal);
-        float curAlign = curDir.Dot(toGoal);
-
-        // Before: ball not really going straight at goal
-        if (prevAlign > 0.5f)
-            return 0.0f;
-
-        // After: ball strongly toward goal
-        if (curAlign < 0.7f)
-            return 0.0f;
-
-        // Speed gain: hooked it hard
-        float speedGain = curSpeed - prevSpeed;
-        if (speedGain < 400.0f)
-            return 0.0f;
-
-        float alignScore = RS_CLAMP((curAlign - 0.7f) / 0.3f, 0.0f, 1.0f);
-        float speedScore = RS_CLAMP(speedGain / 1000.0f, 0.0f, 1.0f);
-
-        float reward = 4.0f * alignScore * speedScore;
-        return RS_CLAMP(reward, 0.0f, 6.0f);
-    }
-};
+// NOTE: HookShotReward is now implemented in HookshotReward.h
+// Use #include <RLGymCPP/Rewards/HookshotReward.h> instead
 
 
 // 2025-12-17 | Rev 5 | NJH
