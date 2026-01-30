@@ -9,6 +9,7 @@
 #include "../ThreadPool.h"
 #include "../Utils/KickoffController.h"
 #include <RLGymCPP/Rewards/Reward.h>
+#include <map>
 
 namespace RLGC {
 
@@ -32,6 +33,7 @@ namespace RLGC {
 		bool saveRewards;
 		bool shuffleRewardSampling = true;
 		KickoffMode kickoffMode = KickoffMode::HARDCODED;  // ADD THIS
+		bool enableProfiling = false;
 	};
 
 	struct EnvState {
@@ -90,6 +92,31 @@ namespace RLGC {
 
 		EnvState state = {};
 
+	// Profiling data
+	struct ProfilingData {
+		std::vector<double> actionParsingTimes;
+		std::vector<double> physicsSimTimes;
+		std::vector<double> rewardCompTimes;
+		std::vector<double> obsBuilderTimes;
+		std::vector<double> actionMaskTimes;
+		std::vector<double> totalStepTimes;
+		std::vector<int> stepCounts;  // Number of steps accumulated
+		std::map<std::string, double> perRewardTimes;  // Individual reward function times
+
+		ProfilingData(int numArenas) {
+			actionParsingTimes.resize(numArenas, 0.0);
+			physicsSimTimes.resize(numArenas, 0.0);
+			rewardCompTimes.resize(numArenas, 0.0);
+			obsBuilderTimes.resize(numArenas, 0.0);
+			actionMaskTimes.resize(numArenas, 0.0);
+			totalStepTimes.resize(numArenas, 0.0);
+			stepCounts.resize(numArenas, 0);
+		}
+	} profiling;
+
+	// Pre-allocated temporary vectors for reward computation (one per arena)
+	std::vector<FList> tempRewardVectors;
+
 		EnvSet(const EnvSetConfig& config);
 
 		RG_NO_COPY(EnvSet);
@@ -111,5 +138,9 @@ namespace RLGC {
 		void Sync() { g_ThreadPool.WaitUntilDone(); }
 		void ResetArena(int index);
 		void Reset();
+
+	// Profiling support
+	void PrintProfilingData() const;
+	void ResetProfilingData();
 	};
 }

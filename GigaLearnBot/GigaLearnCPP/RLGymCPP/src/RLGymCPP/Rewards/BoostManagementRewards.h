@@ -1774,4 +1774,55 @@ namespace RLGC {
         }
     };
 
+    // ============================================================================
+    // SUPPORTING PLAYER BOOST MAINTENANCE REWARD
+    // Encourages supporting teammates (non-first-man) to maintain minimum 40 boost
+    // for team play effectiveness in 2v2 and 3v3 modes.
+    // ============================================================================
+    class SupportingPlayerBoostMaintenanceReward : public Reward {
+    public:
+        float minSupportingBoost = 40.0f;    // Threshold for "adequate" boost for support
+        float maxRewardBoost = 100.0f;       // Boost level for maximum reward
+
+        void Reset(const GameState& initialState) override {
+            // No state tracking - stateless reward
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Skip in 1v1 (only apply in 2v2+)
+            if (state.players.size() < 4) {
+                return 0.0f;
+            }
+
+            // Find closest teammate distance to ball
+            float closestTeammateDist = std::numeric_limits<float>::max();
+            for (const auto& teammate : state.players) {
+                if (teammate.team == player.team && teammate.carId != player.carId) {
+                    float dist = (teammate.pos - state.ball.pos).Length();
+                    closestTeammateDist = RS_MIN(closestTeammateDist, dist);
+                }
+            }
+
+            // Get this player's distance to ball
+            float distToBall = (player.pos - state.ball.pos).Length();
+
+            // Check if this player is supporting (not closest to ball)
+            if (distToBall <= closestTeammateDist) {
+                // This player IS closest - not supporting, no reward
+                return 0.0f;
+            }
+
+            // Player is supporting - check boost level
+            if (player.boost < minSupportingBoost) {
+                // Low boost - no reward, no penalty
+                return 0.0f;
+            }
+
+            // Supporting player with adequate boost - reward proportionally
+            // Scale from 0 at minSupportingBoost to 0.5 at maxRewardBoost
+            float reward = (player.boost - minSupportingBoost) / (maxRewardBoost - minSupportingBoost);
+            return RS_CLAMP(reward, 0.0f, 0.5f);
+        }
+    };
+
 } // namespace RLGC

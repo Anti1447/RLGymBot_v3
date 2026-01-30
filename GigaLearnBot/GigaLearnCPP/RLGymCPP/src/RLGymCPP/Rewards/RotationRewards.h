@@ -555,4 +555,111 @@ public:
 	}
 };
 
+// ============================================================================
+// DEFENSIVE POSITIONING CHALLENGE REWARD
+// Context-aware defensive reward: non-last-man should challenge aggressively,
+// last-man should maintain distance and delay opponent.
+// Applies only to 2v2+ team play and defensive phases (ball in own half).
+// ============================================================================
+class DefensivePositioningChallengeReward : public Reward {
+private:
+	static constexpr float AGGRESSIVE_CHALLENGE_DIST = 2000.0f;   // Threshold for aggressive positioning
+	static constexpr float DEFENSIVE_PATIENCE_DIST = 2500.0f;     // Threshold for patient positioning
+
+	Vec GetOwnGoalPosition(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::BLUE_GOAL_CENTER
+			: CommonValues::ORANGE_GOAL_CENTER;
+	}
+
+	Vec GetOpponentGoalPosition(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::ORANGE_GOAL_CENTER
+			: CommonValues::BLUE_GOAL_CENTER;
+	}
+
+	bool IsTeamDefending(const Player& player, const GameState& state) const {
+		// Check if ball is closer to own goal than opponent goal
+		Vec ownGoal = GetOwnGoalPosition(player.team);
+		Vec oppGoal = GetOpponentGoalPosition(player.team);
+
+		float distToOwnGoal = state.ball.pos.Dist(ownGoal);
+		float distToOppGoal = state.ball.pos.Dist(oppGoal);
+
+		return distToOwnGoal < distToOppGoal;
+	}
+
+	bool IsLastManBack(const Player& player, const GameState& state) const {
+		Vec ownGoal = GetOwnGoalPosition(player.team);
+		float playerDistToGoal = player.pos.Dist(ownGoal);
+
+		// Check all teammates' distances to own goal
+		for (const auto& teammate : state.players) {
+			if (teammate.team == player.team && teammate.carId != player.carId) {
+				float teammateDistToGoal = teammate.pos.Dist(ownGoal);
+				// If any teammate is closer to own goal, player is not last man
+				if (teammateDistToGoal < playerDistToGoal) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+public:
+	void Reset(const GameState& initialState) override {
+		// No state tracking - stateless reward
+	}
+
+	virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		// Skip in 1v1 (only apply in 2v2+)
+		if (state.players.size() < 4) {
+			return 0.0f;
+		}
+
+		// Only reward during defensive phase
+		if (!IsTeamDefending(player, state)) {
+			return 0.0f;
+		}
+
+		// Determine if player is last man back
+		bool isLastMan = IsLastManBack(player, state);
+
+		// Get distance to ball
+		float distToBall = (player.pos - state.ball.pos).Length();
+
+		if (isLastMan) {
+			// Last man should maintain defensive patience (distance from ball)
+			if (distToBall > DEFENSIVE_PATIENCE_DIST) {
+				// Good positioning - waiting for teammates to rotate
+				return 0.4f;
+			}
+			else if (distToBall > AGGRESSIVE_CHALLENGE_DIST) {
+				// Adequate - could back up more for better positioning
+				return 0.2f;
+			}
+			else {
+				// Too close - should retreat to allow rotation
+				return 0.0f;
+			}
+		}
+		else {
+			// Not last man - should challenge opponent aggressively
+			if (distToBall < AGGRESSIVE_CHALLENGE_DIST) {
+				// Excellent challenge positioning
+				return 0.6f;
+			}
+			else if (distToBall < DEFENSIVE_PATIENCE_DIST) {
+				// Adequate - could move up to challenge more
+				return 0.3f;
+			}
+			else {
+				// Too passive - should contest the ball
+				return 0.0f;
+			}
+		}
+	}
+};
+
 } // namespace RLGC

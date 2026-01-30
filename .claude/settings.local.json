@@ -3,7 +3,19 @@
     "allow": [
       "Bash(cmake --build:*)",
       "Bash(ls:*)",
-      "Bash(cmake:*)"
+      "Bash(cmake:*)",
+      "Bash(dos2unix:*)",
+      "Bash(timeout 20:*)",
+      "Bash(timeout:*)",
+      "Bash(./bin/GigaLearnBot.exe)",
+      "Bash(export PYTHONHOME=\"C:\\\\Users\\\\nhafe\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\":*)",
+      "Bash(export PYTHONPATH=\"$PYTHONHOME\\\\Lib;$PYTHONHOME\\\\DLLs\")",
+      "Bash(cmd /c \"cd C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\build && set PYTHONHOME=C:\\\\Users\\\\nhafe\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311 && set PYTHONPATH=%PYTHONHOME%\\\\Lib;%PYTHONHOME%\\\\DLLs && timeout 180 bin\\\\GigaLearnBot.exe 2>&1\")",
+      "Bash(cmd /c \"cd /d C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\build && set PYTHONHOME=C:\\\\Users\\\\nhafe\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311 && bin\\\\GigaLearnBot.exe\")",
+      "Bash(find:*)",
+      "Bash(taskkill:*)",
+      "Bash(bin/GigaLearnBot.exe)",
+      "Bash(wc:*)"
     ]
   }
 }

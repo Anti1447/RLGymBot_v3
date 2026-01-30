@@ -30,7 +30,7 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.0325f;
+        cfg.entropyScale = 0.030f;
         cfg.policyLR = 1.75e-4f;
         cfg.criticLR = 1.75e-4f;
         cfg.noTouchTimeout = 12.0f;
@@ -38,6 +38,7 @@ PhaseConfig GetPhaseConfig() {
         cfg.randomStateChance = 0.5f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
+        cfg.enableProfiling = true;  // CHANGE THIS TO true/false TO ENABLE/DISABLE PROFILING
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
@@ -179,7 +180,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.99175;
+    cfg.ppo.gaeGamma = 0.99;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

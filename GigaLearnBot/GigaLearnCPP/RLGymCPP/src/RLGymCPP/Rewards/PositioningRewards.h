@@ -279,4 +279,175 @@ public:
     }
 };
 
+// ============================================================================
+// ActiveSupportingPositionReward
+// Rewards active upfield positioning for the 2nd man (supporting role)
+// - Encourages positioning near opponent's net for passing opportunities
+// - Only rewards if team has possession (closest player is teammate moving toward ball)
+// - Context-aware: different rewards based on distance to ball
+// - Stateless per-frame evaluation
+// ============================================================================
+class ActiveSupportingPositionReward : public Reward {
+private:
+    // Distance thresholds for supporting positioning
+    const float MIN_SUPPORT_DIST = 1500.0f;      // Too close = 1st man territory
+    const float OPTIMAL_SUPPORT_DIST = 2500.0f;  // Sweet spot for support
+    const float MAX_SUPPORT_DIST = 3500.0f;      // Too far = passive
+
+    // Possession and role detection
+    const float POSSESSION_VELOCITY_THRESHOLD = 100.0f;  // Min velocity dot to count as "moving toward ball"
+    const float MIN_GAME_SIZE = 4;  // Minimum players for team play (2v2)
+
+    inline static std::atomic<long long> s_rewardMilli{0};
+    inline static std::atomic<int> s_supportFrames{0};
+    inline static std::atomic<int> s_upfieldFrames{0};
+
+    // Enum for role detection (matching RoleAwarenessReward)
+    enum class SimpleRole {
+        CLOSEST,    // Closest to ball
+        MIDDLE,     // Middle distance (2nd man / supporting)
+        FURTHEST    // Furthest from ball
+    };
+
+    // Determine player's role based on distance to ball relative to teammates
+    SimpleRole DetermineRole(const Player& player, const GameState& state) const {
+        float distToBall = (player.pos - state.ball.pos).Length();
+
+        std::vector<float> teammateDists;
+        for (const auto& p : state.players) {
+            if (p.team == player.team && p.carId != player.carId) {
+                teammateDists.push_back((p.pos - state.ball.pos).Length());
+            }
+        }
+
+        if (teammateDists.empty()) {
+            return SimpleRole::CLOSEST;
+        }
+
+        std::sort(teammateDists.begin(), teammateDists.end());
+
+        // Determine role based on relative distance
+        if (distToBall < teammateDists[0]) {
+            return SimpleRole::CLOSEST;
+        }
+        else if (teammateDists.size() >= 2 && distToBall > teammateDists[1]) {
+            return SimpleRole::FURTHEST;
+        }
+        else {
+            return SimpleRole::MIDDLE;
+        }
+    }
+
+    // Check if team has possession (closest player is teammate moving toward ball)
+    bool DoesTeamHavePossession(const Player& player, const GameState& state) const {
+        float closestDistAllTeams = 1e10f;
+        Team closestTeam = Team::BLUE;  // Default
+        Vec closestPlayerVel = Vec(0, 0, 0);
+        Vec closestPlayerPos = Vec(0, 0, 0);
+
+        // Find closest player (any team)
+        for (const auto& p : state.players) {
+            float dist = (p.pos - state.ball.pos).Length();
+            if (dist < closestDistAllTeams) {
+                closestDistAllTeams = dist;
+                closestTeam = p.team;
+                closestPlayerVel = p.vel;
+                closestPlayerPos = p.pos;
+            }
+        }
+
+        // If opponent has closest player, they have possession
+        if (closestTeam != player.team) {
+            return false;
+        }
+
+        // Check if closest teammate is actively moving toward ball
+        Vec dirToBall = (state.ball.pos - closestPlayerPos).Normalized();
+        float movementTowardBall = closestPlayerVel.Dot(dirToBall);
+
+        return movementTowardBall > POSSESSION_VELOCITY_THRESHOLD;
+    }
+
+    // Check if player is positioned upfield (closer to opponent goal than ball)
+    bool IsPositionedUpfield(const Player& player, const GameState& state) const {
+        Vec oppGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_CENTER : CommonValues::BLUE_GOAL_CENTER;
+
+        float playerDistToOppGoal = (player.pos - oppGoal).Length();
+        float ballDistToOppGoal = (state.ball.pos - oppGoal).Length();
+
+        return playerDistToOppGoal < ballDistToOppGoal;
+    }
+
+public:
+    struct Metrics {
+        double totalReward = 0.0;
+        int supportFrames = 0;
+        int upfieldFrames = 0;
+        int optimalPositioningFrames = 0;
+    };
+
+    static Metrics GetAndResetMetrics() {
+        Metrics m;
+        long long r = s_rewardMilli.exchange(0);
+        m.totalReward = double(r) / 1000.0;
+        m.supportFrames = s_supportFrames.exchange(0);
+        m.upfieldFrames = s_upfieldFrames.exchange(0);
+        // optimalPositioningFrames tracked implicitly in reward frames
+        return m;
+    }
+
+    virtual void Reset(const GameState& initialState) override {
+        // No state needed - stateless per-frame evaluation
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Skip 1v1 (only reward in 2v2+)
+        if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) {
+            return 0.0f;
+        }
+
+        // Check if team has possession
+        // (Closest player must be teammate AND moving toward ball)
+        if (!DoesTeamHavePossession(player, state)) {
+            return 0.0f;  // Opponent has possession - play defense instead
+        }
+
+        // Determine player's role
+        SimpleRole role = DetermineRole(player, state);
+
+        // Only reward 2nd man (supporting / MIDDLE role)
+        if (role != SimpleRole::MIDDLE) {
+            return 0.0f;  // Not supporting role
+        }
+
+        // Check if positioned upfield
+        if (!IsPositionedUpfield(player, state)) {
+            return 0.0f;  // Not positioned upfield
+        }
+
+        // Check distance to ball (should be in supporting range)
+        float distToBall = (player.pos - state.ball.pos).Length();
+
+        if (distToBall < MIN_SUPPORT_DIST || distToBall > MAX_SUPPORT_DIST) {
+            return 0.0f;  // Outside supporting range
+        }
+
+        // Calculate reward based on how close to optimal distance
+        // Maximum reward when at optimal distance
+        float deviation = std::abs(distToBall - OPTIMAL_SUPPORT_DIST);
+        float reward = 0.4f * (1.0f - (deviation / OPTIMAL_SUPPORT_DIST));
+        reward = RS_CLAMP(reward, 0.0f, 0.4f);
+
+        // Track metrics
+        s_supportFrames.fetch_add(1);
+        s_upfieldFrames.fetch_add(1);
+        if (reward > 0.0f) {
+            s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
+        }
+
+        return reward;
+    }
+};
+
 } // namespace RLGC

@@ -454,62 +454,149 @@ namespace RLGC {
     //   moving away from challenger, with optional pop and optional powerslide bonus.
     // - Uses player.handbrakeVal as powerslide signal (RocketSim CarState). :contentReference[oaicite:4]{index=4}
     // ============================================================================
+    // ============================================================================
+    // OPTIMIZED CutOutplayReward - Multi-Branch Response Detection
+    // Clearly distinguishes CUT, POP, and FAKE responses to opponent challenges.
+    // Additive reward system: responses can combine for multi-technique execution.
+    // ============================================================================
     class CutOutplayReward : public Reward {
     private:
-        float minBallSpeedAfter = 700.0f;
+        // Threat verification thresholds
+        const float THREAT_DISTANCE = 1500.0f;      // Opponent must be within this distance
+        const float THREAT_VELOCITY = 100.0f;        // Opponent velocity component toward ball (dot product)
+
+        // Response detection thresholds
+        const float MIN_BALL_SPEED = 700.0f;
+        const float ANGLE_THRESHOLD_CUT = 0.40f;     // Direction change required for CUT
+        const float ANGLE_THRESHOLD_FAKE = 0.30f;    // Direction change required for FAKE
+        const float VELOCITY_DROP_THRESHOLD = 0.90f; // Velocity must drop to this ratio for FAKE
+        const float POP_MIN_VELOCITY_Z = 300.0f;     // Minimum vertical velocity for POP
+        const float POP_MIN_HEIGHT_GAIN = 10.0f;     // Minimum height gain for POP
 
     public:
         virtual void Reset(const GameState& initialState) override {}
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (!state.prev) return 0.0f;
-            if (!player.ballTouchedStep) return 0.0f;
+            // === VALIDATION & SETUP ===
+            if (!state.prev || !player.ballTouchedStep) return 0.0f;
+            if (state.ball.pos.z > 260.0f) return 0.0f;  // Ground-level only
 
-            // Cuts are usually ground-ish
-            if (state.ball.pos.z > 260.0f) return 0.0f;
-
+            // === THREAT VERIFICATION ===
+            // Check if opponent is actually challenging with proximity AND velocity
             ChallengeInfo ci = GetChallengeInfo(player, state);
             if (!ci.active) return 0.0f;
 
+            // Verify opponent is close enough AND moving toward ball
+            if (!IsOpponentThreatening(ci, state)) {
+                return 0.0f;
+            }
+
+            // Get ball velocities
             const Vec prevV = state.prev->ball.vel;
             const Vec curV = state.ball.vel;
             const float curSpd = curV.Length();
-            if (curSpd < minBallSpeedAfter) return 0.0f;
 
-            // Direction change strength
+            if (curSpd < MIN_BALL_SPEED) return 0.0f;
+
+            // === RESPONSE TYPE DETECTION (Additive System) ===
+            // Multiple responses can be detected and combined
+            float totalReward = 0.0f;
+
+            // 1. CUT RESPONSE (60% angle + 40% away-movement)
+            float cutReward = DetectCut(player, state, prevV, curV, ci);
+            totalReward += cutReward;
+
+            // 2. POP RESPONSE (50% velocity + 30% height + 20% angle)
+            float popReward = DetectPop(player, state, prevV, curV);
+            totalReward += popReward;
+
+            // 3. FAKE RESPONSE (30% maximum, velocity drop signature)
+            float fakeReward = DetectFake(prevV, curV);
+            totalReward += fakeReward;
+
+            // Clamp final reward to 0-1.0 range
+            return RS_CLAMP(totalReward, 0.0f, 1.0f);
+        }
+
+    private:
+        // === THREAT VERIFICATION ===
+        // Returns true if opponent is genuinely threatening (close + moving toward ball)
+        bool IsOpponentThreatening(const ChallengeInfo& ci, const GameState& state) const {
+            // Must be within threat distance
+            if (ci.oppDistToBall > THREAT_DISTANCE) return false;
+
+            // Must be moving toward ball with sufficient velocity
+            if (ci.oppVelTowardBall < THREAT_VELOCITY) return false;
+
+            return true;
+        }
+
+        // === RESPONSE TYPE 1: CUT ===
+        // Direction change on ground, moving away from opponent
+        // Reward: 0.4-0.9 based on angle + away-movement
+        float DetectCut(const Player& player, const GameState& state,
+                        const Vec& prevV, const Vec& curV, const ChallengeInfo& ci) const {
             float ang01 = AngleChange01(prevV, curV);
-            if (ang01 < 0.20f) return 0.0f;
+            if (ang01 < ANGLE_THRESHOLD_CUT) return 0.0f;
 
-            // Moving away from opponent
+            // Must be ground-level
+            if (!player.isOnGround) return 0.0f;
+
+            // Must be moving away from opponent
             Vec toOpp = ci.oppPos - state.ball.pos;
-            float away = 0.0f;
             float toOppLen = toOpp.Length();
-            if (toOppLen > 1e-3f) {
-                away = RS_CLAMP((-curV.Dot(toOpp / toOppLen)) / 2000.0f, 0.0f, 1.0f);
+            if (toOppLen < 1e-3f) return 0.0f;
+
+            float awayComponent = RS_CLAMP((-curV.Dot(toOpp / toOppLen)) / 2000.0f, 0.0f, 1.0f);
+            float angleComponent = RS_CLAMP(ang01, 0.0f, 1.0f);
+
+            // CUT: 60% angle strength + 40% away-movement
+            return (0.6f * angleComponent) + (0.4f * awayComponent);
+        }
+
+        // === RESPONSE TYPE 2: POP ===
+        // Vertical velocity gain + height gain + direction change
+        // Reward: 0.3-0.8 based on vertical velocity, height, and angle
+        float DetectPop(const Player& player, const GameState& state,
+                        const Vec& prevV, const Vec& curV) const {
+            float verticalVel = curV.z;
+            float heightGain = state.ball.pos.z - state.prev->ball.pos.z;
+
+            // Must show pop signature: vertical velocity OR height gain
+            if (verticalVel < POP_MIN_VELOCITY_Z && heightGain < POP_MIN_HEIGHT_GAIN) {
+                return 0.0f;
             }
 
-            // Pop/chip shaping (optional)
-            float pop = 0.0f;
-            float dz = state.ball.pos.z - state.prev->ball.pos.z;
-            if (curV.z > 250.0f) pop += RS_CLAMP(curV.z / 1500.0f, 0.0f, 1.0f) * 0.6f;
-            if (dz > 5.0f)      pop += RS_CLAMP(dz / 80.0f, 0.0f, 1.0f) * 0.4f;
-            pop = RS_CLAMP(pop, 0.0f, 1.0f);
+            // Direction change must exist
+            float ang01 = AngleChange01(prevV, curV);
+            if (ang01 < ANGLE_THRESHOLD_CUT) return 0.0f;
 
-            // Powerslide bonus (optional)
-            float slideBonus = 0.0f;
-            if (player.isOnGround && player.handbrakeVal > 0.55f) {
-                slideBonus = 0.25f;
-            }
+            // POP: 50% vertical velocity + 30% height gain + 20% angle
+            float velComponent = RS_CLAMP(verticalVel / 1500.0f, 0.0f, 1.0f);
+            float heightComponent = RS_CLAMP(heightGain / 80.0f, 0.0f, 1.0f);
+            float angleComponent = RS_CLAMP(ang01, 0.0f, 1.0f);
 
-            float score =
-                (0.55f * RS_CLAMP(ang01 * 1.25f, 0.0f, 1.0f)) +
-                (0.35f * away) +
-                (0.25f * pop) +
-                slideBonus;
+            return (0.5f * velComponent) + (0.3f * heightComponent) + (0.2f * angleComponent);
+        }
 
-            score = RS_CLAMP(score, 0.0f, 1.25f);
+        // === RESPONSE TYPE 3: FAKE ===
+        // Direction change with velocity DROP (characteristic fake signature)
+        // Reward: 0.2-0.3 based on velocity drop (riskier, less effective than cut/pop)
+        float DetectFake(const Vec& prevV, const Vec& curV) const {
+            float ang01 = AngleChange01(prevV, curV);
+            if (ang01 < ANGLE_THRESHOLD_FAKE) return 0.0f;
 
-            return 10.0f * score;
+            float prevSpd = prevV.Length();
+            float curSpd = curV.Length();
+
+            // FAKE signature: velocity must DROP after the touch
+            // (fake = touch ball to change direction but slow it down)
+            if (curSpd >= prevSpd * VELOCITY_DROP_THRESHOLD) return 0.0f;
+
+            // FAKE: lower reward than cut/pop (riskier, less effective)
+            // Scale based on how much velocity was lost
+            float velocityDrop = 1.0f - RS_CLAMP(curSpd / (prevSpd * VELOCITY_DROP_THRESHOLD), 0.0f, 1.0f);
+            return 0.3f * velocityDrop;  // Max 0.3 for FAKE
         }
     };
 

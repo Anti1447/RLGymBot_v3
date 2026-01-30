@@ -29,16 +29,16 @@ namespace RLGC {
 		// =====================================================================
 
 		// Ball rolling requirements
-		float minHorizontalSpeed = 600.0f;      // Very lenient
+		float minHorizontalSpeed = 400.0f;      // Very lenient
 		float maxHorizontalSpeed = 2000.0f;     // Very lenient
-		float maxBallHeight = 150.0f;           // Lenient
+		float maxBallHeight = 250.0f;           // Lenient
 
 		// Redirect requirements (minimal)
-		float minSpeedChange = -300.0f;         // Very lenient
-		float maxSpeedChange = 300.0f;          // Very lenient
+		float minSpeedChange = -200.0f;         // Very lenient
+		float maxSpeedChange = 200.0f;          // Very lenient
 
 		// Goal safety
-		float minAwayFromOwnGoal = 0.3f;        // Lenient
+		float minAwayFromOwnGoal = 0.4f;        // Lenient
 
 		// =====================================================================
 		// METRICS STRUCTURE
@@ -169,14 +169,14 @@ namespace RLGC {
 		// Ball state requirements
 		float minBallSpeed = 600.0f;           // Very lenient
 		float maxBallSpeed = 2000.0f;          // Very lenient
-		float maxBallHeight = 150.0f;          // Lenient
+		float maxBallHeight = 250.0f;          // Lenient
 
 		// Touch requirements
 		float minSpeedIncrease = 0.0f;         // Any positive gain
-		float minUpwardVelocity = 200.0f;      // Much more lenient: 300 instead of 400/500
+		float minUpwardVelocity = 100.0f;      // Much more lenient: 300 instead of 400/500
 
 		// Direction requirements
-		float minGoalAlignment = 0.3f;         // Very lenient: 0.3 instead of 0.4/0.5
+		float minGoalAlignment = 0.4f;         // Very lenient: 0.3 instead of 0.4/0.5
 
 		// Pre-touch validation
 		float maxPreTouchGoalAlignment = 0.5f; // Much more lenient: 0.5 instead of 0.4

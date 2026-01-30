@@ -2682,275 +2682,119 @@ public:
 // 2025-01-04 | Rev 1.0 | NJH
 // ============================================================================
 
+// =========================================================================
+// LONG SHOT REWARD - Simplified Stateless Implementation
+// =========================================================================
+// Rewards fast shots directed toward opponent's goal.
+//
+// Core Mechanic:
+// - Ball traveling toward goal (dot > 0.5, ±60° off-center)
+// - Ball speed >= 1500 uu/s
+// - Reward scales proportionally with speed: (speed - 1500) / 1000, clamped 0-1
+//
+// 2025-01-28 - Optimized: Removed 4-phase state machine, ~65% code reduction
+// =========================================================================
+
 class LongShotReward : public Reward {
-private:
-    struct LongShotConfig {
-        // Distance thresholds (UU)
-        float minShotDistance = 2000.0f;           // Minimum distance to count as "long shot"
-        float goodShotDistance = 3500.0f;          // Good long shot
-        float greatShotDistance = 5000.0f;         // Great long shot
-        float maxShotDistance = 8000.0f;           // Max reasonable distance
+public:
 
-        // Velocity thresholds (UU/s)
-        float minBallVelocity = 1000.0f;           // Minimum shot speed
-        float goodBallVelocity = 1500.0f;          // Good shot speed
-        float greatBallVelocity = 2000.0f;         // Great shot speed
-        float insaneBallVelocity = 2500.0f;        // Insane shot speed
+	// =====================================================================
+	// CONFIGURATION
+	// =====================================================================
 
-        // Accuracy thresholds
-        float maxAngleToGoal = 0.2f;            // ±30 degrees to center of goal
-        float goodAngleToGoal = 0.1f;           // ±15 degrees (tighter)
+	float minBallSpeed = 1500.0f;        // Minimum speed threshold
+	float goalAlignment = 0.5f;          // Dot product threshold (±60° off-center)
 
-        // Goal dimensions (Rocket League)
-        float goalWidth = 1792.0f;                 // Total goal width
-        float goalHeight = 642.775f;               // Goal height
-        float goalDepth = 250.0f;                  // Goal depth
+	// =====================================================================
+	// METRICS STRUCTURE
+	// =====================================================================
 
-        // Shot detection window
-        float ballContactDistance = 150.0f;        // Distance at which ball is "contacted"
-        float shotDetectionTime = 0.5f;            // Time window to detect shot after contact
+	struct LongShotMetrics {
+		int attempts = 0;
+		int successful = 0;
+		float totalRewardSum = 0.0f;
 
-        // Ball trajectory check
-        float minHeightGain = 50.0f;               // Ball must be traveling upward (lob) or straight
-        float maxHeightForPowerShot = 300.0f;      // Height constraint for power shots
-    };
+		void Reset() {
+			attempts = 0;
+			successful = 0;
+			totalRewardSum = 0.0f;
+		}
 
-    enum ShotPhase {
-        PHASE_IDLE,
-        PHASE_APPROACH,     // Getting into position
-        PHASE_CONTACT,      // About to hit ball
-        PHASE_SHOOTING      // Ball traveling toward goal
-    };
+		float GetSuccessRate() const {
+			return attempts > 0 ? float(successful) / float(attempts) : 0.0f;
+		}
 
-    mutable std::map<uint32_t, ShotPhase> currentPhase;
-    mutable std::map<uint32_t, float> phaseTimer;
-    mutable std::map<uint32_t, Vec> ballVelAtContact;
-    mutable std::map<uint32_t, Vec> ballPosAtContact;
+		float GetAverageReward() const {
+			return attempts > 0 ? totalRewardSum / float(attempts) : 0.0f;
+		}
+	};
 
-    LongShotConfig config;
+	// =====================================================================
+	// INITIALIZATION
+	// =====================================================================
 
-    Vec GetGoalPosition(Team team) const {
-        // Blue goal at -Y, Orange goal at +Y
-        if (team == Team::BLUE) {
-            return Vec(0.0f, -5120.0f, 321.3875f);  // Goal center
-        }
-        else {
-            return Vec(0.0f, 5120.0f, 321.3875f);
-        }
-    }
+	void Reset(const GameState& state) override {
+		// No state to reset (stateless design)
+	}
 
-    float ComputeAngleToGoal(const Vec& ballPos, const Vec& goalPos) const {
-        Vec toGoal = goalPos - ballPos;
-        Vec ballDir2D = Vec(toGoal.x, toGoal.y, 0).Normalized();
+	// =====================================================================
+	// REWARD COMPUTATION
+	// =====================================================================
 
-        if (toGoal.Length() < 1.0f) return 0.0f;
+	virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		// Only reward on actual ball touches
+		if (!player.ballTouchedStep || !state.prev)
+			return 0.0f;
 
-        return acos(RS_CLAMP(ballDir2D.Dot(Vec(0, 1, 0)), -1.0f, 1.0f));
-    }
+		// Get ball velocity
+		Vec curVel = state.ball.vel;
 
-    float ComputeDistanceToGoal(const Vec& ballPos, const Vec& goalPos) const {
-        return ballPos.Dist(goalPos);
-    }
+		// Calculate ball speed (horizontal component for consistency)
+		float ballSpeed = Vec(curVel.x, curVel.y, 0.0f).Length();
 
-    bool IsBallTravelingTowardGoal(const Vec& ballVel, const Vec& ballPos, const Vec& goalPos) const {
-        Vec toGoal = (goalPos - ballPos).Normalized();
-        Vec ballDir = ballVel.Normalized();
+		// Must exceed speed threshold
+		if (ballSpeed < minBallSpeed)
+			return 0.0f;
 
-        if (ballVel.Length() < 100.0f) return false;
+		// Get goal position for this player's team
+		Vec targetGoal = (player.team == Team::BLUE)
+			? CommonValues::ORANGE_GOAL_CENTER
+			: CommonValues::BLUE_GOAL_CENTER;
 
-        float dotProduct = ballDir.Dot(toGoal);
-        return dotProduct > 0.2f;  // At least somewhat toward goal
-    }
+		// Check direction toward goal
+		if (ballSpeed < 1e-3f)
+			return 0.0f;
 
-    bool IsInGoalBox(const Vec& ballPos, const Vec& goalPos, Team team) const {
-        // Check if ball is approaching goal area (box in front of goal)
-        float dist = ballPos.Dist(goalPos);
+		Vec ballDir = Vec(curVel.x, curVel.y, 0.0f) / ballSpeed;
+		Vec toGoal = (targetGoal - state.ball.pos).Normalized();
+		float goalDot = ballDir.Dot(toGoal);
 
-        if (team == Team::BLUE) {
-            // Blue attacking goal at -Y
-            return ballPos.y < -4500.0f && dist < 3000.0f;
-        }
-        else {
-            // Orange attacking goal at +Y
-            return ballPos.y > 4500.0f && dist < 3000.0f;
-        }
-    }
+		if (goalDot < goalAlignment)
+			return 0.0f;
+
+		// Proportional reward based on speed
+		// Scale from 0 at minBallSpeed to 1.0 at minBallSpeed + 1000
+		float speedBonus = RS_CLAMP((ballSpeed - minBallSpeed) / 1000.0f, 0.0f, 1.0f);
+
+		// Update metrics
+		metrics.attempts++;
+		if (speedBonus > 0.0f) {
+			metrics.successful++;
+		}
+		metrics.totalRewardSum += speedBonus;
+
+		return speedBonus;
+	}
 
 public:
-    LongShotReward() : config() {}
 
-    explicit LongShotReward(const LongShotConfig& cfg) : config(cfg) {}
+	inline static LongShotMetrics metrics;
 
-    virtual void Reset(const GameState& initialState) override {
-        currentPhase.clear();
-        phaseTimer.clear();
-        ballVelAtContact.clear();
-        ballPosAtContact.clear();
-    }
-
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        Vec goalPos = GetGoalPosition(player.team);
-        float distToGoal = ComputeDistanceToGoal(state.ball.pos, goalPos);
-        float ballSpeed = state.ball.vel.Length();
-
-        // Initialize state
-        if (currentPhase.find(player.carId) == currentPhase.end()) {
-            currentPhase[player.carId] = PHASE_IDLE;
-            phaseTimer[player.carId] = 0.0f;
-            ballVelAtContact[player.carId] = state.ball.vel;
-            ballPosAtContact[player.carId] = state.ball.pos;
-            return 0.0f;
-        }
-
-        ShotPhase& phase = currentPhase[player.carId];
-        float& timer = phaseTimer[player.carId];
-        timer += CommonValues::TICK_TIME;
-
-        float carBallDist = player.pos.Dist(state.ball.pos);
-        float angleToGoal = ComputeAngleToGoal(state.ball.pos, goalPos);
-        bool travelingToGoal = IsBallTravelingTowardGoal(state.ball.vel, state.ball.pos, goalPos);
-
-        float reward = 0.0f;
-
-        // =====================================================================
-        // PHASE 1: APPROACH - Get into shooting position from far away
-        // =====================================================================
-        if (phase == PHASE_IDLE || phase == PHASE_APPROACH) {
-            if (distToGoal > config.minShotDistance &&
-                distToGoal < config.maxShotDistance &&
-                carBallDist < 300.0f) {
-
-                // Reward being in position far from goal
-                float distQuality = 0.0f;
-                if (distToGoal >= config.greatShotDistance) {
-                    distQuality = 1.0f;
-                }
-                else if (distToGoal >= config.goodShotDistance) {
-                    float t = (distToGoal - config.goodShotDistance) / (config.greatShotDistance - config.goodShotDistance);
-                    distQuality = 0.6f + 0.4f * t;
-                }
-                else {
-                    float t = (distToGoal - config.minShotDistance) / (config.goodShotDistance - config.minShotDistance);
-                    distQuality = 0.3f + 0.3f * t;
-                }
-
-                reward = distQuality * 0.4f;
-
-                phase = PHASE_APPROACH;
-                timer = 0.0f;
-                return reward;
-            }
-        }
-
-        // =====================================================================
-        // PHASE 2: CONTACT - About to shoot the ball
-        // =====================================================================
-        if (phase == PHASE_APPROACH) {
-            if (player.ballTouchedStep && carBallDist < config.ballContactDistance) {
-                // Ball was just hit
-                ballVelAtContact[player.carId] = state.ball.vel;
-                ballPosAtContact[player.carId] = state.ball.pos;
-
-                phase = PHASE_CONTACT;
-                timer = 0.0f;
-                return 0.5f;  // Small reward for making contact
-            }
-        }
-
-        // =====================================================================
-        // PHASE 3: SHOOTING - Ball traveling toward goal with velocity
-        // =====================================================================
-        if (phase == PHASE_CONTACT) {
-            // Check if still in detection window
-            if (timer > config.shotDetectionTime) {
-                phase = PHASE_IDLE;
-                timer = 0.0f;
-                return 0.0f;
-            }
-
-            // Ball must be traveling toward goal
-            if (!travelingToGoal) {
-                phase = PHASE_IDLE;
-                timer = 0.0f;
-                return -0.5f;  // Penalize shots away from goal
-            }
-
-            // ========== VELOCITY REWARD ==========
-            float velocityReward = 0.0f;
-            if (ballSpeed >= config.insaneBallVelocity) {
-                velocityReward = 1.0f;
-            }
-            else if (ballSpeed >= config.greatBallVelocity) {
-                float t = (ballSpeed - config.greatBallVelocity) / (config.insaneBallVelocity - config.greatBallVelocity);
-                velocityReward = 0.7f + 0.3f * t;
-            }
-            else if (ballSpeed >= config.goodBallVelocity) {
-                float t = (ballSpeed - config.goodBallVelocity) / (config.greatBallVelocity - config.goodBallVelocity);
-                velocityReward = 0.45f + 0.25f * t;
-            }
-            else if (ballSpeed >= config.minBallVelocity) {
-                float t = (ballSpeed - config.minBallVelocity) / (config.goodBallVelocity - config.minBallVelocity);
-                velocityReward = 0.2f + 0.25f * t;
-            }
-
-            // ========== ACCURACY REWARD ==========
-            float accuracyReward = 0.0f;
-            if (angleToGoal < config.goodAngleToGoal) {
-                // Very accurate (±15°)
-                float accuracy = 1.0f - (angleToGoal / config.goodAngleToGoal);
-                accuracyReward = accuracy * 0.8f;
-            }
-            else if (angleToGoal < config.maxAngleToGoal) {
-                // Decent accuracy (±30°)
-                float accuracy = 1.0f - (angleToGoal / config.maxAngleToGoal);
-                accuracyReward = accuracy * 0.4f;
-            }
-
-            // ========== DISTANCE BONUS ==========
-            float distanceBonus = 0.0f;
-            if (distToGoal >= config.greatShotDistance) {
-                distanceBonus = 0.25f;
-            }
-            else if (distToGoal >= config.goodShotDistance) {
-                float t = (distToGoal - config.goodShotDistance) / (config.greatShotDistance - config.goodShotDistance);
-                distanceBonus = 0.1f + 0.15f * t;
-            }
-
-            // ========== TRAJECTORY BONUS ==========
-            float trajectoryBonus = 0.0f;
-            if (state.ball.vel.z > 0) {
-                // Ball going upward (lob shot) - harder to defend
-                trajectoryBonus = RS_CLAMP(state.ball.vel.z / 1000.0f, 0.0f, 0.2f);
-            }
-            else if (state.ball.vel.z > -500.0f) {
-                // Ball going straight - good power shot
-                trajectoryBonus = 0.15f;
-            }
-
-            // ========== COMBINE REWARDS ==========
-            reward = (velocityReward * 0.5f +
-                accuracyReward * 0.3f +
-                distanceBonus * 0.15f +
-                trajectoryBonus * 0.05f) * 2.0f;
-
-            phase = PHASE_SHOOTING;
-            return reward;
-        }
-
-        return 0.0f;
-    }
-
-    // Getters/Setters for tuning
-    void SetMinShotDistance(float dist) { config.minShotDistance = dist; }
-    void SetGoodShotDistance(float dist) { config.goodShotDistance = dist; }
-    void SetGreatShotDistance(float dist) { config.greatShotDistance = dist; }
-    void SetMinBallVelocity(float vel) { config.minBallVelocity = vel; }
-    void SetGoodBallVelocity(float vel) { config.goodBallVelocity = vel; }
-    void SetGreatBallVelocity(float vel) { config.greatBallVelocity = vel; }
-    void SetAngleTolerance(float goodAngle, float maxAngle) {
-        config.goodAngleToGoal = goodAngle;
-        config.maxAngleToGoal = maxAngle;
-    }
+	static LongShotMetrics GetAndResetMetrics() {
+		LongShotMetrics m = metrics;
+		metrics.Reset();
+		return m;
+	}
 };
 
 // ============================================================================

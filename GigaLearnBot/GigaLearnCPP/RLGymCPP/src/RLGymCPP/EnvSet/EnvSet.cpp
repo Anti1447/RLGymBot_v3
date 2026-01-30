@@ -1,5 +1,7 @@
 #include "EnvSet.h"
 #include  "../Rewards/ZeroSumReward.h"
+#include <chrono>
+#include <iomanip>
 
 template<bool RLGC::PlayerEventState::* DATA_VAR>
 void IncPlayerCounter(Car* car, void* userInfoPtr) {
@@ -43,7 +45,7 @@ void _BumpCallback(Arena* arena, Car* bumper, Car* victim, bool isDemo, void* us
 
 /////////////////////////////
 
-RLGC::EnvSet::EnvSet(const EnvSetConfig& config) : config(config) {
+RLGC::EnvSet::EnvSet(const EnvSetConfig& config) : config(config), profiling(config.numArenas) {
 
 	RG_ASSERT(config.tickSkip > 0);
 	RG_ASSERT(config.actionDelay >= 0 && config.actionDelay <= config.tickSkip);
@@ -113,6 +115,12 @@ RLGC::EnvSet::EnvSet(const EnvSetConfig& config) : config(config) {
 		kickoff_controllers.push_back(KickoffController(config.kickoffMode));  // Pass mode
 		kickoff_indices.push_back(std::vector<int>(arenas[i]->_cars.size(), -1));
 	}
+
+	// Initialize temporary vectors for reward computation
+	for (int i = 0; i < config.numArenas; i++) {
+		int numPlayers = arenas[i]->_cars.size();
+		tempRewardVectors.push_back(FList(numPlayers, 0.0f));
+	}
 	
 }
 
@@ -139,15 +147,18 @@ void RLGC::EnvSet::StepFirstHalf(bool async) {
 void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 
 	auto fnStepArenas = [&](int arenaIdx) {
+		auto totalStepStart = std::chrono::high_resolution_clock::now();
 
 		Arena* arena = arenas[arenaIdx];
 		auto& gs = state.gameStates[arenaIdx];
 		int playerStartIdx = state.arenaPlayerStartIdx[arenaIdx];
-			
+		int numPlayers = gs.players.size();
+
 		// Parse and set actions
-		auto actions = std::vector<Action>(gs.players.size());
+		auto start = std::chrono::high_resolution_clock::now();
+		auto actions = std::vector<Action>(numPlayers);
 		auto carItr = arena->_cars.begin();
-		for (int i = 0; i < gs.players.size(); i++, carItr++) {
+		for (int i = 0; i < numPlayers; i++, carItr++) {
 			auto& player = gs.players[i];
 			auto& kickoff = kickoff_controllers[arenaIdx];
 			auto& kickoff_idx = kickoff_indices[arenaIdx];
@@ -182,9 +193,14 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 			car->controls = (CarControls)action;
 			actions[i] = action;
 		}
+		if (config.enableProfiling) {
+			auto elapsed = std::chrono::high_resolution_clock::now() - start;
+			profiling.actionParsingTimes[arenaIdx] += std::chrono::duration<double, std::milli>(elapsed).count();
+		}
 
 		// Step arena with new actions we got from observing the last state
 		// Update the gamestate after
+		start = std::chrono::high_resolution_clock::now();
 		{
 			arena->Step(config.tickSkip - config.actionDelay);
 
@@ -196,6 +212,10 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 				gsPrev = NULL;
 
 			gs.UpdateFromArena(arena, actions, gsPrev);
+		}
+		if (config.enableProfiling) {
+			auto elapsed = std::chrono::high_resolution_clock::now() - start;
+			profiling.physicsSimTimes[arenaIdx] += std::chrono::duration<double, std::milli>(elapsed).count();
 		}
 
 		// Update terminal
@@ -220,20 +240,31 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 			}
 			state.terminals[arenaIdx] = terminalType;
 		}
-		
+
 		// Pre-step rewards
 		{
 			for (auto& weighted : rewards[arenaIdx])
 				weighted.reward->PreStep(gs);
 		}
 
-		// Update rewards
+		// Update rewards - use pre-allocated vector and reuse
+		start = std::chrono::high_resolution_clock::now();
 		{
-			FList allRewards = FList(gs.players.size(), 0);
-			for (int rewardIdx = 0; rewardIdx < rewards[arenaIdx].size(); rewardIdx++) {
+			auto& allRewards = tempRewardVectors[arenaIdx];
+			std::fill(allRewards.begin(), allRewards.end(), 0.0f);
+
+			for (size_t rewardIdx = 0; rewardIdx < rewards[arenaIdx].size(); rewardIdx++) {
 				auto& weightedReward = rewards[arenaIdx][rewardIdx];
+
+				auto rewardStart = config.enableProfiling ? std::chrono::high_resolution_clock::now() : std::chrono::high_resolution_clock::time_point();
 				FList output = weightedReward.reward->GetAllRewards(gs, terminalType);
-				for (int i = 0; i < gs.players.size(); i++)
+				if (config.enableProfiling) {
+					auto elapsed = std::chrono::high_resolution_clock::now() - rewardStart;
+					std::string rewardName = weightedReward.reward->GetName();
+					profiling.perRewardTimes[rewardName] += std::chrono::duration<double, std::milli>(elapsed).count();
+				}
+
+				for (int i = 0; i < numPlayers; i++)
 					allRewards[i] += output[i] * weightedReward.weight;
 
 				// Save the reward
@@ -244,8 +275,8 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 					} else {
 						// Find player with the lowest id
 						playerSampleIndex = 0;
-						int lowestID = gs.players[0].carId;
-						for (int i = 1; i < gs.players.size(); i++) {
+						uint32_t lowestID = gs.players[0].carId;
+						for (int i = 1; i < numPlayers; i++) {
 							auto id = gs.players[i].carId;
 							if (id < lowestID) {
 								lowestID = id;
@@ -255,7 +286,7 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 					}
 					// We will only take the reward from a random player
 					float rewardToSave = output[playerSampleIndex];
-						
+
 					// If zero-sum, use the inner reward
 					if (ZeroSumReward* zeroSum = dynamic_cast<ZeroSumReward*>(weightedReward.reward))
 						rewardToSave = zeroSum->_lastRewards[playerSampleIndex];
@@ -268,20 +299,40 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 				}
 			}
 
-			for (int i = 0; i < gs.players.size(); i++)
+			for (int i = 0; i < numPlayers; i++)
 				state.rewards[playerStartIdx + i] = allRewards[i];
+		}
+		if (config.enableProfiling) {
+			auto elapsed = std::chrono::high_resolution_clock::now() - start;
+			profiling.rewardCompTimes[arenaIdx] += std::chrono::duration<double, std::milli>(elapsed).count();
 		}
 
 		// Update observations
+		start = std::chrono::high_resolution_clock::now();
 		{
-			for (int i = 0; i < gs.players.size(); i++)
+			for (int i = 0; i < numPlayers; i++)
 				state.obs.Set(playerStartIdx + i, obsBuilders[arenaIdx]->BuildObs(gs.players[i], gs));
+		}
+		if (config.enableProfiling) {
+			auto elapsed = std::chrono::high_resolution_clock::now() - start;
+			profiling.obsBuilderTimes[arenaIdx] += std::chrono::duration<double, std::milli>(elapsed).count();
 		}
 
 		// Update action masks
+		start = std::chrono::high_resolution_clock::now();
 		{
-			for (int i = 0; i < gs.players.size(); i++)
+			for (int i = 0; i < numPlayers; i++)
 				state.actionMasks.Set(playerStartIdx + i, actionParsers[arenaIdx]->GetActionMask(gs.players[i], gs));
+		}
+		if (config.enableProfiling) {
+			auto elapsed = std::chrono::high_resolution_clock::now() - start;
+			profiling.actionMaskTimes[arenaIdx] += std::chrono::duration<double, std::milli>(elapsed).count();
+		}
+
+		if (config.enableProfiling) {
+			auto totalElapsed = std::chrono::high_resolution_clock::now() - totalStepStart;
+			profiling.totalStepTimes[arenaIdx] += std::chrono::duration<double, std::milli>(totalElapsed).count();
+			profiling.stepCounts[arenaIdx]++;
 		}
 	};
 
@@ -320,6 +371,80 @@ void RLGC::EnvSet::ResetArena(int index) {
 
 	// Remove previous state
 	state.prevGameStates[index].MakeEmpty();
+}
+
+void RLGC::EnvSet::PrintProfilingData() const {
+	if (!config.enableProfiling) {
+		// Log a message that profiling is disabled
+		return;
+	}
+
+	// Calculate statistics
+	double avgActionParsing = 0, avgPhysicsSim = 0, avgRewardComp = 0;
+	double avgObsBuilder = 0, avgActionMask = 0, avgTotal = 0;
+	int totalSteps = 0;
+
+	for (int i = 0; i < arenas.size(); i++) {
+		if (profiling.stepCounts[i] > 0) {
+			avgActionParsing += profiling.actionParsingTimes[i] / profiling.stepCounts[i];
+			avgPhysicsSim += profiling.physicsSimTimes[i] / profiling.stepCounts[i];
+			avgRewardComp += profiling.rewardCompTimes[i] / profiling.stepCounts[i];
+			avgObsBuilder += profiling.obsBuilderTimes[i] / profiling.stepCounts[i];
+			avgActionMask += profiling.actionMaskTimes[i] / profiling.stepCounts[i];
+			avgTotal += profiling.totalStepTimes[i] / profiling.stepCounts[i];
+			totalSteps++;
+		}
+	}
+
+	int numArenas = arenas.size();
+	if (totalSteps > 0) {
+		avgActionParsing /= totalSteps;
+		avgPhysicsSim /= totalSteps;
+		avgRewardComp /= totalSteps;
+		avgObsBuilder /= totalSteps;
+		avgActionMask /= totalSteps;
+		avgTotal /= totalSteps;
+	}
+
+	char buffer[1024];
+	snprintf(buffer, sizeof(buffer),
+		"\n[EnvSet Profiling] %d arenas\n"
+		"  Action Parsing:    %.3f ms (%.1f%%)\n"
+		"  Physics Sim:       %.3f ms (%.1f%%)\n"
+		"  Reward Comp:       %.3f ms (%.1f%%)\n"
+		"  Obs Builder:       %.3f ms (%.1f%%)\n"
+		"  Action Mask:       %.3f ms (%.1f%%)\n"
+		"  Total Step Time:   %.3f ms\n",
+		numArenas,
+		avgActionParsing, (avgActionParsing / avgTotal) * 100.0,
+		avgPhysicsSim, (avgPhysicsSim / avgTotal) * 100.0,
+		avgRewardComp, (avgRewardComp / avgTotal) * 100.0,
+		avgObsBuilder, (avgObsBuilder / avgTotal) * 100.0,
+		avgActionMask, (avgActionMask / avgTotal) * 100.0,
+		avgTotal);
+	RG_LOG(buffer);
+
+	// Print per-reward timing if available
+	if (!profiling.perRewardTimes.empty()) {
+		RG_LOG("  Per-Reward Breakdown:");
+		for (const auto& [name, time] : profiling.perRewardTimes) {
+			double percent = (time / (avgRewardComp * arenas.size() * (profiling.stepCounts[0] > 0 ? profiling.stepCounts[0] : 1))) * 100.0;
+			RG_LOG("    " << name << ": " << std::fixed << std::setprecision(3) << time << " ms");
+		}
+	}
+
+	std::cout << std::flush;
+}
+
+void RLGC::EnvSet::ResetProfilingData() {
+	std::fill(profiling.actionParsingTimes.begin(), profiling.actionParsingTimes.end(), 0.0);
+	std::fill(profiling.physicsSimTimes.begin(), profiling.physicsSimTimes.end(), 0.0);
+	std::fill(profiling.rewardCompTimes.begin(), profiling.rewardCompTimes.end(), 0.0);
+	std::fill(profiling.obsBuilderTimes.begin(), profiling.obsBuilderTimes.end(), 0.0);
+	std::fill(profiling.actionMaskTimes.begin(), profiling.actionMaskTimes.end(), 0.0);
+	std::fill(profiling.totalStepTimes.begin(), profiling.totalStepTimes.end(), 0.0);
+	std::fill(profiling.stepCounts.begin(), profiling.stepCounts.end(), 0);
+	profiling.perRewardTimes.clear();
 }
 
 void RLGC::EnvSet::Reset() {

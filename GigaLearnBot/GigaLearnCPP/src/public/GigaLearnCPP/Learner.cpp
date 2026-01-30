@@ -90,6 +90,7 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		envSetConfig.actionDelay = config.actionDelay;
 		envSetConfig.saveRewards = config.addRewardsToMetrics;
 		envSetConfig.kickoffMode = config.kickoffMode;  // ADD THIS
+		envSetConfig.enableProfiling = false;  // Enable profiling
 		envSet = new RLGC::EnvSet(envSetConfig);
 		obsSize = envSet->state.obs.size[1];
 		numActions = envSet->actionParsers[0]->GetActionAmount();
@@ -976,6 +977,10 @@ void GGL::Learner::Start() {
 				report["Collection Steps/Second"] = stepsCollected / collectionTime;
 				report["Consumption Steps/Second"] = stepsCollected / consumptionTime;
 				report["Overall Steps/Second"] = stepsCollected / (collectionTime + consumptionTime);
+
+				// Add profiling metrics to report
+				envSet->PrintProfilingData();
+				envSet->ResetProfilingData();
 
 				uint64_t prevTimesteps = totalTimesteps;
 				totalTimesteps += stepsCollected;

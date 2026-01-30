@@ -1383,14 +1383,16 @@ namespace RLGC {
     // Rewards changing ball direction by large angles with ball speed maintained
     // Useful for: advanced redirects, flip resets, high-angle saves
     // 2025-12-23 | Rev 1.0 | NJH
+	// 2026-01-29 | Rev 1.1 | NJH - Added speed retention check
     // ============================================================================
     class BallRedirectReward : public Reward {
     private:
         mutable std::map<uint32_t, Vec> lastBallVel;
         mutable std::map<uint32_t, float> lastBallSpeed;
 
-        static constexpr float HIGH_SPEED_THRESHOLD = 1500.0f; // Speed requirement for redirect bonus
-        static constexpr float SPEED_RETENTION_MIN = 0.85f;    // Keep at least 85% of speed
+        static constexpr float HIGH_SPEED_THRESHOLD = 1500.0f;  // Only high-speed redirects
+        static constexpr float SPEED_RETENTION_MIN = 0.85f;     // Keep 85%+ speed
+        static constexpr float ANGLE_THRESHOLD = 0.349f;        // ~20 degrees minimum
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -1404,7 +1406,7 @@ namespace RLGC {
             auto velIt = lastBallVel.find(player.carId);
             auto speedIt = lastBallSpeed.find(player.carId);
 
-            // Initialize
+            // Initialize on first call
             if (velIt == lastBallVel.end()) {
                 lastBallVel[player.carId] = state.ball.vel;
                 lastBallSpeed[player.carId] = currentSpeed;
@@ -1414,35 +1416,41 @@ namespace RLGC {
             Vec lastVel = velIt->second;
             float lastSpeed = speedIt->second;
 
+            // Update for next step
             lastBallVel[player.carId] = state.ball.vel;
             lastBallSpeed[player.carId] = currentSpeed;
 
-            // Only reward high-speed redirects
+            // Only reward high-speed contact redirects
             if (lastSpeed < HIGH_SPEED_THRESHOLD) {
                 return 0.0f;
             }
 
-            // Speed must be maintained (not decelerated significantly)
+            // Speed must be maintained (no significant deceleration)
             float speedRetention = currentSpeed / RS_MAX(lastSpeed, 1.0f);
             if (speedRetention < SPEED_RETENTION_MIN) {
-                return 0.0f; // Ball lost too much speed, not a good redirect
+                return 0.0f;  // Ball lost too much speed
             }
 
-            // Compute direction change
+            // Calculate direction change
             float dotProduct = lastVel.Normalized().Dot(state.ball.vel.Normalized());
             dotProduct = RS_CLAMP(dotProduct, -1.0f, 1.0f);
             float angleChange = acos(dotProduct);
 
-            // Reward sharp direction changes with maintained speed
-            // Maximum reward at 90+ degrees
-            float sharpness = RS_CLAMP(angleChange / 1.571f, 0.0f, 1.0f);
-            float speedBonus = RS_CLAMP(speedRetention, SPEED_RETENTION_MIN, 1.2f) - SPEED_RETENTION_MIN;
+            // Minimum angle threshold (no reward for tiny deflections)
+            if (angleChange < ANGLE_THRESHOLD) {
+                return 0.0f;
+            }
 
-            float reward = sharpness * (2.0f + speedBonus);
+            // Reward formula:
+            // - Angle matters: sharp changes (90°+) get 1.0x multiplier
+            // - Speed matters: well-maintained speed adds bonus (0-0.35)
+            float sharpness = RS_CLAMP(angleChange / 1.571f, 0.0f, 1.0f);  // Max at 90°
+            float speedBonus = RS_CLAMP(speedRetention - SPEED_RETENTION_MIN, 0.0f, 0.35f);
 
-            return reward;
+            return sharpness * (2.0f + speedBonus);  // 0-2.35 reward range
         }
     };
+
 
 
     // ============================================================================
