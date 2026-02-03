@@ -578,6 +578,10 @@ namespace RLGC {
         float entryBonus = 0.1f;   // smaller one-off bonus at start
         float rewardScale = 1.0f;    // global multiplier
 
+        // NEW: opponent proximity penalty for risky dribbles
+        float opponentDangerRange = 500.0f;   // penalty zone for dribbling near opponents
+        float maxOpponentPenalty = 0.5f;      // max penalty amount (reduces reward by 50%)
+
         mutable std::map<uint32_t, float> sustainedTime;
         mutable std::map<uint32_t, bool>  wasOnCar;
 
@@ -712,6 +716,28 @@ namespace RLGC {
             float dirMultiplier = (towardOpp > 0.1f) ? 1.0f : 0.5f;
 
             reward *= dirMultiplier;
+
+            // --- NEW: Opponent proximity penalty for risky dribbles ---
+            // Penalize dribbling when opponents are close (< 500 UU away)
+            // This discourages risky dribbling under pressure
+            float closestOpponentDist = 999999.0f;
+            for (const auto& opponent : state.players) {
+                if (opponent.team == player.team) continue;  // Ignore teammates
+
+                float distToOpp = (opponent.pos - player.pos).Length();
+                closestOpponentDist = RS_MIN(closestOpponentDist, distToOpp);
+            }
+
+            // Apply penalty if opponent is within danger range
+            if (closestOpponentDist < opponentDangerRange) {
+                // Graduated penalty: closer opponent = harsher penalty
+                // At 0 UU: full penalty (50% reduction)
+                // At 500 UU: no penalty (0% reduction)
+                float opponentProximityFactor = closestOpponentDist / opponentDangerRange;  // 0..1
+                float opponentPenalty = maxOpponentPenalty * (1.0f - opponentProximityFactor);  // 0..0.5
+
+                reward *= (1.0f - opponentPenalty);  // Reduce reward by penalty amount
+            }
 
             return reward * rewardScale;
         }
