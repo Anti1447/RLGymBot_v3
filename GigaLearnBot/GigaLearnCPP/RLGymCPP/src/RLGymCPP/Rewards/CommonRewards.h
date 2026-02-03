@@ -334,7 +334,198 @@ namespace RLGC {
 		}
 	};
 
+	// ============================================================================
+	// AdvancedWavedashReward - Rev 1.0 (2025-02-02)
+	// Comprehensive wavedash detection with multi-factor scoring:
+	// - Controlled airtime (small hop/fall)
+	// - 2-wheel contact geometry detection
+	// - Flip timing and cancellation
+	// - Tangential velocity gain
+	// - Penalties for failed attempts
+	// ============================================================================
+	class AdvancedWavedashReward : public Reward {
+	private:
+		struct WDState {
+			bool wasOnGround = true;
+			bool wasFlipping = false;
+			Vec prevVel = Vec(0, 0, 0);
+		};
 
+		mutable std::map<uint32_t, WDState> st;
+
+		// Geometry thresholds
+		float nearSurfaceEps = 140.0f;      // Distance to detect near-surface
+		float wheelsFacingThresh = 0.55f;   // carDown dot normal threshold
+		float tiltThresh = 0.08f;           // Minimum forward/right component along normal
+		float minSpeedGain = 25.0f;         // Minimum speed gain to reward
+
+		Vec EstimateSurfaceNormal(const Vec& pos) const {
+			Vec n(0, 0, 1);
+
+			const float dx = CommonValues::SIDE_WALL_X - fabsf(pos.x);
+			const float dy = CommonValues::BACK_WALL_Y - fabsf(pos.y);
+			const float dzCeil = CommonValues::CEILING_Z - pos.z;
+
+			if (dx < nearSurfaceEps) {
+				n = Vec((pos.x >= 0.0f) ? 1.0f : -1.0f, 0.0f, 0.0f);
+			}
+			if (dy < nearSurfaceEps && dy < dx) {
+				n = Vec(0.0f, (pos.y >= 0.0f) ? 1.0f : -1.0f, 0.0f);
+			}
+			if (dzCeil < nearSurfaceEps && dzCeil < dx && dzCeil < dy) {
+				n = Vec(0.0f, 0.0f, -1.0f);
+			}
+
+			return n;
+		}
+
+		// Count wheels in contact
+		int CountWheelsInContact(const Player& player) const {
+			int count = 0;
+			if (player.wheelContact[0]) count++;
+			if (player.wheelContact[1]) count++;
+			if (player.wheelContact[2]) count++;
+			if (player.wheelContact[3]) count++;
+			return count;
+		}
+
+	public:
+		virtual void Reset(const GameState& initialState) override {
+			st.clear();
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!player.prev) return 0.0f;
+
+			auto& s = st[player.carId];
+			float reward = 0.0f;
+
+			const bool onGroundNow = player.isOnGround;
+			const bool onGroundPrev = s.wasOnGround;
+			const bool landedThisTick = (onGroundNow && !onGroundPrev);
+
+			s.wasOnGround = onGroundNow;
+
+			// ====================================================================
+			// 1. Detect surface normal under the car (any arena surface)
+			// ====================================================================
+			Vec surfaceN = EstimateSurfaceNormal(player.prev->pos);
+
+			// Velocity components
+			float vPerp = player.vel.Dot(surfaceN);
+			Vec vTangent = player.vel - surfaceN * vPerp;
+			Vec prevTangent = player.prev->vel - surfaceN * (player.prev->vel.Dot(surfaceN));
+
+			// ====================================================================
+			// 2. Controlled airtime (small hop or fall)
+			// ====================================================================
+			// Small perpendicular velocity (going into surface, not away) is good
+			float airPrep = expf(-fabsf(vPerp));
+			reward += 1.0f * airPrep;
+
+			// ====================================================================
+			// 3. Orientation reward for setting up a 2-wheel landing
+			// ====================================================================
+			Vec carDown = player.rotMat.up * -1.0f;
+			Vec carFwd = player.rotMat.forward;
+			Vec carRight = player.rotMat.right;
+
+			float downDotN = carDown.Dot(surfaceN);
+			float fwdDotN = carFwd.Dot(surfaceN);
+			float rightDotN = carRight.Dot(surfaceN);
+
+			// Reward when wheels face surface and car is tilted
+			float wheelOrient = expf(-(downDotN + 0.55f) * (downDotN + 0.55f));  // Peaks near -0.55
+			float carTilt = RS_MAX(fabsf(fwdDotN), fabsf(rightDotN));
+			float tiltReward = expf(-(carTilt - tiltThresh) * (carTilt - tiltThresh));
+
+			reward += 2.0f * wheelOrient * tiltReward;
+
+			// ====================================================================
+			// 4. Detect 2-wheel contact event
+			// ====================================================================
+			int wheelCountNow = CountWheelsInContact(player);
+			int wheelCountPrev = CountWheelsInContact(*player.prev);
+
+			bool twoWheelEvent = (wheelCountNow == 2 && wheelCountPrev < 2);
+
+			if (twoWheelEvent) {
+				reward += 5.0f;
+			}
+
+			// ====================================================================
+			// 5. Flip timing reward (flip input near 2-wheel contact)
+			// ====================================================================
+			bool flipInputNow = player.isFlipping;
+			bool flipInputPrev = player.prev->isFlipping;
+
+			if (twoWheelEvent && flipInputNow) {
+				reward += 8.0f;
+			}
+
+			// ====================================================================
+			// 6. Flip cancel reward (flip interrupted by surface contact)
+			// ====================================================================
+			bool flipCanceled = (flipInputPrev && !flipInputNow && wheelCountNow >= 1);
+
+			if (flipCanceled) {
+				reward += 10.0f;
+			}
+
+			// ====================================================================
+			// 7. Tangential velocity gain reward
+			// ====================================================================
+			float speedGain = vTangent.Length() - prevTangent.Length();
+			if (speedGain > 0.0f) {
+				reward += 2.0f * speedGain;
+			}
+
+			// ====================================================================
+			// 8. Landing success bonus (landed + had good geometry + good outcome)
+			// ====================================================================
+			if (landedThisTick && flipInputPrev) {
+				// Successfully landed after a flip
+				float prevSpeed = player.prev->vel.Length();
+				float curSpeed = player.vel.Length();
+				float netGain = curSpeed - prevSpeed;
+
+				if (netGain > minSpeedGain) {
+					float gainFrac = RS_CLAMP((netGain - minSpeedGain) / 350.0f, 0.0f, 1.0f);
+					reward += 3.0f * gainFrac;  // Bonus for efficient wavedash
+				}
+			}
+
+			// ====================================================================
+			// 9. Penalties
+			// ====================================================================
+
+			// Too much airtime (encourages ground contact)
+			if (!onGroundNow && onGroundPrev) {
+				float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+				reward -= 0.1f * dt;
+			}
+
+			// Full flip that wasn't canceled (wasted flip)
+			if (flipInputPrev && !flipInputNow && wheelCountNow < 1) {
+				reward -= 5.0f;
+			}
+
+			// Flat 4-wheel landing (bad geometry for wavedash)
+			if (wheelCountNow == 4 && wheelCountPrev < 4) {
+				reward -= 3.0f;
+			}
+
+			// Discourage boosting during dash (wavedash shouldn't need boost)
+			if (player.prevAction.boost > 0.5f) {
+				reward -= 0.5f;
+			}
+
+			s.wasFlipping = flipInputNow;
+			s.prevVel = player.vel;
+
+			return reward;
+		}
+	};
 
 	class PickupBoostReward : public Reward {
 	public:
