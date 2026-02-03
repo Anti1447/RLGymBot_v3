@@ -482,10 +482,10 @@ public:
 
 // ============================================================================
 // WallToAerialReward
-// Rewards launching from wall into aerial plays
+// Simple reward for attempting to hit airborne ball after leaving wall
 // - Detects wall contact → aerial launch
-// - Tracks aerial control quality (air dribble, power shot, backboard setup)
-// - Progressive rewards for launch quality, aerial control, and outcome
+// - Rewards attempts to hit airborne ball after launching from wall
+// - Focus on simplicity: just reward wall-to-aerial-attempt execution
 // ============================================================================
 class WallToAerialReward : public Reward {
 private:
@@ -493,25 +493,13 @@ private:
         enum Phase {
             NONE,
             ON_WALL,           // Player on wall
-            LAUNCHED,          // Launched from wall
-            AERIAL_CONTROL,    // Controlling ball in air
-            COMPLETED
-        };
-
-        enum PlayType {
-            AIR_DRIBBLE,      // Multiple aerial touches
-            POWER_SHOT,       // Single strong aerial hit
-            BACKBOARD_SETUP   // Setting up for double tap
+            LAUNCHED,          // Launched from wall (in air)
+            ATTEMPTED          // Attempted to hit airborne ball
         };
 
         Phase phase = NONE;
-        PlayType playType = AIR_DRIBBLE;
         float phaseStartTime = 0.0f;
-        Vec launchPos;
-        Vec launchVel;
-        int aerialTouches = 0;
-        float maxHeight = 0.0f;
-        bool launchedWithFlip = false;
+        bool hitAttempted = false;
     };
 
     mutable std::map<uint32_t, WallAerialSequence> sequences;
@@ -519,12 +507,7 @@ private:
 
     const float WALL_DIST_THRESHOLD = 250.0f;
     const float AERIAL_HEIGHT_MIN = 350.0f;
-    const float SEQUENCE_TIMEOUT = 5.0f;
-
-    inline static std::atomic<int> s_airDribbleCount{0};
-    inline static std::atomic<int> s_powerShotCount{0};
-    inline static std::atomic<int> s_backboardSetupCount{0};
-    inline static std::atomic<long long> s_rewardMilli{0};
+    const float SEQUENCE_TIMEOUT = 3.0f;
 
     bool IsOnWall(const Player& player) const {
         if (player.isOnGround) return false;
@@ -543,30 +526,12 @@ private:
         return (nearSideWall || nearBackWall) && hasWheelContact;
     }
 
-    bool IsNearBackboard(const Vec& pos, Team playerTeam) const {
-        float targetY = (playerTeam == Team::BLUE) ?
-            CommonValues::BACK_WALL_Y : -CommonValues::BACK_WALL_Y;
-        return (abs(pos.y - targetY) < 400.0f && pos.z > 500.0f);
+    bool IsBallAirborne(const GameState& state) const {
+        // Ball is airborne if it's above a certain height and not on the ground
+        return state.ball.pos.z > 150.0f;
     }
 
 public:
-    struct Metrics {
-        int airDribbles = 0;
-        int powerShots = 0;
-        int backboardSetups = 0;
-        double totalReward = 0.0;
-    };
-
-    static Metrics GetAndResetMetrics() {
-        Metrics m;
-        m.airDribbles = s_airDribbleCount.exchange(0);
-        m.powerShots = s_powerShotCount.exchange(0);
-        m.backboardSetups = s_backboardSetupCount.exchange(0);
-        long long r = s_rewardMilli.exchange(0);
-        m.totalReward = double(r) / 1000.0;
-        return m;
-    }
-
     virtual void Reset(const GameState& initialState) override {
         sequences.clear();
         currentTime = 0.0f;
@@ -589,13 +554,11 @@ public:
             seq.phase = WallAerialSequence::NONE;
         }
 
-        Vec oppGoal = (player.team == Team::BLUE) ?
-            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
         // PHASE 1: ON WALL
         if (IsOnWall(player) && seq.phase == WallAerialSequence::NONE) {
             seq.phase = WallAerialSequence::ON_WALL;
             seq.phaseStartTime = currentTime;
+            seq.hitAttempted = false;
         }
 
         // PHASE 2: LAUNCH FROM WALL
@@ -603,106 +566,30 @@ public:
             // Player left wall - check if it's an aerial launch
             if (!player.isOnGround && player.pos.z > AERIAL_HEIGHT_MIN) {
                 seq.phase = WallAerialSequence::LAUNCHED;
-                seq.launchPos = player.pos;
-                seq.launchVel = player.vel;
                 seq.phaseStartTime = currentTime;
-                seq.aerialTouches = 0;
-                seq.maxHeight = player.pos.z;
-                seq.launchedWithFlip = player.isFlipping;
 
-                // Launch reward
-                float launchReward = 2.0f;
-                if (seq.launchedWithFlip) launchReward += 1.5f;
-
-                reward += launchReward;
+                // Reward for launching off wall into air
+                reward += 2.0f;
             } else {
                 seq.phase = WallAerialSequence::NONE;
             }
         }
 
-        // PHASE 3: AERIAL CONTROL
-        if ((seq.phase == WallAerialSequence::LAUNCHED ||
-             seq.phase == WallAerialSequence::AERIAL_CONTROL) &&
-            player.ballTouchedStep) {
+        // PHASE 3: ATTEMPT TO HIT AIRBORNE BALL
+        if (seq.phase == WallAerialSequence::LAUNCHED && player.ballTouchedStep) {
+            // Only reward if ball is airborne (not on ground)
+            if (IsBallAirborne(state) && !seq.hitAttempted) {
+                seq.phase = WallAerialSequence::ATTEMPTED;
+                seq.hitAttempted = true;
 
-            if (!player.isOnGround && player.pos.z > AERIAL_HEIGHT_MIN) {
-                seq.phase = WallAerialSequence::AERIAL_CONTROL;
-                seq.aerialTouches++;
-
-                // Track max height
-                if (state.ball.pos.z > seq.maxHeight) {
-                    seq.maxHeight = state.ball.pos.z;
-                }
-
-                // Determine play type based on context
-                Vec toGoal = (oppGoal - state.ball.pos).Normalized();
-                float alignment = state.ball.vel.Normalized().Dot(toGoal);
-                float ballSpeed = state.ball.vel.Length();
-                bool nearBackboard = IsNearBackboard(state.ball.pos, player.team);
-
-                float touchReward = 0.0f;
-
-                // AIR DRIBBLE: Multiple touches, moderate speed
-                if (seq.aerialTouches >= 2 && ballSpeed > 400.0f && ballSpeed < 1800.0f) {
-                    seq.playType = WallAerialSequence::AIR_DRIBBLE;
-                    touchReward = 3.0f + (seq.aerialTouches * 1.5f);
-
-                    // Control bonus (staying close to ball)
-                    float distToBall = (state.ball.pos - player.pos).Length();
-                    if (distToBall < 300.0f) {
-                        touchReward += 2.0f;
-                    }
-
-                    if (seq.aerialTouches == 2) {
-                        s_airDribbleCount.fetch_add(1);
-                    }
-                }
-                // POWER SHOT: Strong hit toward goal
-                else if (ballSpeed > 1500.0f && alignment > 0.6f) {
-                    seq.playType = WallAerialSequence::POWER_SHOT;
-                    touchReward = 8.0f;
-
-                    // Speed bonus
-                    float speedBonus = RS_CLAMP((ballSpeed - 1500.0f) / 800.0f, 0.0f, 1.0f) * 4.0f;
-                    touchReward += speedBonus;
-
-                    // Alignment bonus
-                    float alignBonus = RS_CLAMP((alignment - 0.6f) / 0.4f, 0.0f, 1.0f) * 3.0f;
-                    touchReward += alignBonus;
-
-                    s_powerShotCount.fetch_add(1);
-                }
-                // BACKBOARD SETUP: Hit toward backboard
-                else if (nearBackboard && ballSpeed > 700.0f) {
-                    seq.playType = WallAerialSequence::BACKBOARD_SETUP;
-                    touchReward = 6.0f;
-
-                    // Height bonus (higher backboard touches are better)
-                    float heightBonus = RS_CLAMP((state.ball.pos.z - 500.0f) / 1000.0f, 0.0f, 1.0f) * 3.0f;
-                    touchReward += heightBonus;
-
-                    s_backboardSetupCount.fetch_add(1);
-                }
-
-                reward += touchReward;
-
-                // Check for completion
-                if (player.isOnGround || seq.aerialTouches >= 5) {
-                    seq.phase = WallAerialSequence::COMPLETED;
-                }
-            } else {
-                // Lost aerial control
-                seq.phase = WallAerialSequence::COMPLETED;
+                // Reward for successfully hitting airborne ball after wall launch
+                reward += 5.0f;
             }
         }
 
-        // Reset after completion
-        if (seq.phase == WallAerialSequence::COMPLETED) {
+        // Reset after completion or timeout
+        if (seq.phase == WallAerialSequence::ATTEMPTED) {
             seq.phase = WallAerialSequence::NONE;
-        }
-
-        if (reward > 0.0f) {
-            s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
         }
 
         return reward;
@@ -746,15 +633,12 @@ public:
     static void PrintMetrics() {
         auto dt = AdvancedDoubleTapReward::GetAndResetMetrics();
         auto wp = WallPassReward::GetAndResetMetrics();
-        auto wa = WallToAerialReward::GetAndResetMetrics();
 
         printf("=== ADVANCED PLAY METRICS ===\n");
         printf("Double Taps: %d setups, %d finishes, %d goals (%.2f reward)\n",
                dt.setupTouches, dt.finishTouches, dt.goals, dt.totalReward);
         printf("Wall Passes: %d self, %d team (%.2f reward)\n",
                wp.selfPasses, wp.teamPasses, wp.totalReward);
-        printf("Wall Aerials: %d dribbles, %d shots, %d setups (%.2f reward)\n",
-               wa.airDribbles, wa.powerShots, wa.backboardSetups, wa.totalReward);
     }
 };
 

@@ -418,25 +418,109 @@ namespace RLGC {
     // Rewards attacking/ball contact with low boost (<30).
     // Encourages making plays without relying on boost.
     // ============================================================================
+    // ========================================================================
+    // LOW BOOST OFFENSE PENALTY REWARD - Rev 2.0
+    // ========================================================================
+    // Penalizes being low on boost (<12) in the opponent half
+    //
+    // Strategic reasoning:
+    // - Low boost in opponent half = drastically reduced options
+    // - Can't rotate back safely, can't attack effectively
+    // - Makes team vulnerable to counterattacks
+    // - Forces teammates to play more defensively (they cover)
+    // - Much harder to win 50/50s or create space
+    //
+    // Key improvements:
+    // 1. Base threshold: 12 boost (not 30) - only punish REALLY low boost
+    // 2. Checks actual opponent half proximity (not arbitrary scoring range)
+    // 3. Scoring opportunity exception - allow risky low-boost shots
+    // 4. Team support awareness - reduce penalty if teammate backing up
+    // 5. Graduated severity - penalty scales with how low boost is
+    // ========================================================================
     class LowBoostOffenseReward : public Reward {
+    private:
+        static constexpr float LOW_BOOST_THRESHOLD = 12.0f;
+        static constexpr float OPPONENT_HALF_DISTANCE = 5120.0f;  // Half of field length
+        static constexpr float SCORE_OPPORTUNITY_RANGE = 3000.0f;  // Ignore penalty if near goal with ball
+        static constexpr float TEAMMATE_SUPPORT_RANGE = 4000.0f;   // Range to check for defensive teammates
+
+        // Penalty amounts
+        static constexpr float BASE_PENALTY = 0.5f;           // Base penalty for low boost offense
+        static constexpr float SOLO_PENALTY_MULTIPLIER = 1.5f;    // Worse alone (1.5x)
+        static constexpr float TEAMMATE_SUPPORT_REDUCTION = 0.6f; // Better with support (60% penalty)
+
     public:
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (player.boost > 30.0f) return 0.0f;
-
-            Vec theirGoal = (player.team == Team::BLUE) ?
-                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-            float ballDistToGoal = (state.ball.pos - theirGoal).Length();
-            float myDistToBall = (player.pos - state.ball.pos).Length();
-
-            if (ballDistToGoal < 3000.0f && myDistToBall < 1500.0f) {
-                if (player.ballTouchedStep) {
-                    return 8.0f;
-                }
-                return 2.0f;
+            // If boost is healthy (>12), no penalty
+            if (player.boost > LOW_BOOST_THRESHOLD) {
+                return 0.0f;
             }
 
-            return 0.0f;
+            // Determine opponent goal position
+            Vec opponentGoal = (player.team == Team::BLUE)
+                ? CommonValues::ORANGE_GOAL_BACK
+                : CommonValues::BLUE_GOAL_BACK;
+
+            float distToOpponentGoal = (player.pos - opponentGoal).Length();
+
+            // Only penalize if in opponent half (close to their goal)
+            if (distToOpponentGoal > OPPONENT_HALF_DISTANCE) {
+                return 0.0f;  // Safe - in own half despite low boost
+            }
+
+            // ===================================================================
+            // EXCEPTION: SCORING OPPORTUNITY
+            // If we're in position to score immediately, ignore the penalty
+            // (sometimes it's worth taking the risk for a goal)
+            // ===================================================================
+            float ballDistToGoal = (state.ball.pos - opponentGoal).Length();
+            float myDistToBall = (player.pos - state.ball.pos).Length();
+
+            if (ballDistToGoal < SCORE_OPPORTUNITY_RANGE &&
+                myDistToBall < SCORE_OPPORTUNITY_RANGE) {
+                return 0.0f;  // Scoring opportunity - ignore low boost penalty
+            }
+
+            // ===================================================================
+            // TEAM SUPPORT CHECK
+            // If a teammate is backing us up defensively, reduce the penalty
+            // We're less vulnerable if someone has our back
+            // ===================================================================
+            float penaltyMultiplier = SOLO_PENALTY_MULTIPLIER;  // Default: solo (vulnerable)
+
+            for (const auto& teammate : state.players) {
+                if (teammate.team != player.team || teammate.carId == player.carId) {
+                    continue;  // Skip opponents and self
+                }
+
+                float distToTeammate = (teammate.pos - player.pos).Length();
+
+                // Teammate is nearby
+                if (distToTeammate < TEAMMATE_SUPPORT_RANGE) {
+                    // Check if teammate is actually behind us (defensive position)
+                    Vec toTeammate = teammate.pos - player.pos;
+                    Vec toGoal = opponentGoal - player.pos;
+
+                    float backwardness = -toTeammate.Dot(toGoal.Normalized());  // Negative dot = behind
+
+                    if (backwardness > 1000.0f) {  // Teammate is significantly behind (covering)
+                        penaltyMultiplier = TEAMMATE_SUPPORT_REDUCTION;
+                        break;  // Found supporting teammate
+                    }
+                }
+            }
+
+            // ===================================================================
+            // APPLY GRADUATED PENALTY
+            // Severity scales with how critically low the boost is
+            // Empty (0 boost) = worst, 12 boost = no penalty
+            // ===================================================================
+            float boostRatio = player.boost / LOW_BOOST_THRESHOLD;  // 0.0-1.0
+            float severityFactor = 1.0f - boostRatio;              // 0.0-1.0 (inverse)
+
+            float penalty = BASE_PENALTY * severityFactor * penaltyMultiplier;
+
+            return -penalty;  // Negative reward (punishment)
         }
     };
 
@@ -1172,104 +1256,104 @@ namespace RLGC {
     // WALL DASH REWARD (Lenient)
     // Rewards wall dash technique with intermediate rewards for partial success.
     // ============================================================================
-    class WallDashReward : public Reward {
-    private:
-        struct WallDashState {
-            bool on_wall_last_frame = false;
-            int consecutive_jumps = 0;
-            float last_jump_time = 0.0f;
-            float wall_entry_speed = 0.0f;
-            bool giving_reward_this_attempt = false;
-        };
+    //class WallDashReward : public Reward {
+    //private:
+    //    struct WallDashState {
+    //        bool on_wall_last_frame = false;
+    //        int consecutive_jumps = 0;
+    //        float last_jump_time = 0.0f;
+    //        float wall_entry_speed = 0.0f;
+    //        bool giving_reward_this_attempt = false;
+    //    };
 
-        mutable std::map<uint32_t, WallDashState> playerStates;
+    //    mutable std::map<uint32_t, WallDashState> playerStates;
 
-        // Lenient thresholds
-        static constexpr float WALL_TILT_MIN = 0.087f;     // ~5 degrees (very lenient)
-        static constexpr float WALL_PITCH_MAX = 0.349f;    // ~20 degrees (very lenient)
-        static constexpr float WALL_DASH_MIN_SPEED = 1800.0f;
-        static constexpr float JUMP_SPAM_RATE = 0.15f;     // 150ms window (3 frames at 120 Hz)
-        static constexpr float SPEED_GAIN_THRESHOLD = 1.05f;  // Only 5% speed gain needed
+    //    // Lenient thresholds
+    //    static constexpr float WALL_TILT_MIN = 0.087f;     // ~5 degrees (very lenient)
+    //    static constexpr float WALL_PITCH_MAX = 0.349f;    // ~20 degrees (very lenient)
+    //    static constexpr float WALL_DASH_MIN_SPEED = 1800.0f;
+    //    static constexpr float JUMP_SPAM_RATE = 0.15f;     // 150ms window (3 frames at 120 Hz)
+    //    static constexpr float SPEED_GAIN_THRESHOLD = 1.05f;  // Only 5% speed gain needed
 
-        bool is_on_wall_lenient(const Player& player) const {
-            if (!player.isOnGround) return false;
+    //    bool is_on_wall_lenient(const Player& player) const {
+    //        if (!player.isOnGround) return false;
 
-            RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
-            float pitch = std::abs(carAngle.pitch);
-            float roll = std::abs(carAngle.roll);
+    //        RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
+    //        float pitch = std::abs(carAngle.pitch);
+    //        float roll = std::abs(carAngle.roll);
 
-            // Very lenient: any tilt counts
-            return (pitch > WALL_TILT_MIN || roll > WALL_TILT_MIN) && player.isOnGround;
-        }
+    //        // Very lenient: any tilt counts
+    //        return (pitch > WALL_TILT_MIN || roll > WALL_TILT_MIN) && player.isOnGround;
+    //    }
 
-        bool is_car_aligned_to_wall(const Player& player) const {
-            RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
-            return std::abs(carAngle.pitch) < WALL_PITCH_MAX;
-        }
+    //    bool is_car_aligned_to_wall(const Player& player) const {
+    //        RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
+    //        return std::abs(carAngle.pitch) < WALL_PITCH_MAX;
+    //    }
 
-    public:
-        virtual void Reset(const GameState& initialState) override {
-            playerStates.clear();
-        }
+    //public:
+    //    virtual void Reset(const GameState& initialState) override {
+    //        playerStates.clear();
+    //    }
 
-        void register_jump(const Player& player, float currentTime) {
-            if (playerStates.find(player.carId) == playerStates.end()) {
-                playerStates[player.carId] = WallDashState();
-            }
+    //    void register_jump(const Player& player, float currentTime) {
+    //        if (playerStates.find(player.carId) == playerStates.end()) {
+    //            playerStates[player.carId] = WallDashState();
+    //        }
 
-            auto& wState = playerStates[player.carId];
+    //        auto& wState = playerStates[player.carId];
 
-            if (currentTime - wState.last_jump_time < JUMP_SPAM_RATE) {
-                wState.consecutive_jumps++;
-            }
-            else {
-                wState.consecutive_jumps = 1;
-            }
+    //        if (currentTime - wState.last_jump_time < JUMP_SPAM_RATE) {
+    //            wState.consecutive_jumps++;
+    //        }
+    //        else {
+    //            wState.consecutive_jumps = 1;
+    //        }
 
-            wState.last_jump_time = currentTime;
-        }
+    //        wState.last_jump_time = currentTime;
+    //    }
 
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (playerStates.find(player.carId) == playerStates.end()) {
-                playerStates[player.carId] = WallDashState();
-            }
+    //    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+    //        if (playerStates.find(player.carId) == playerStates.end()) {
+    //            playerStates[player.carId] = WallDashState();
+    //        }
 
-            auto& wState = playerStates[player.carId];
-            bool on_wall = is_on_wall_lenient(player);
-            bool aligned = is_car_aligned_to_wall(player);
-            float speed = player.vel.Length();
-            bool high_speed = speed > WALL_DASH_MIN_SPEED;
+    //        auto& wState = playerStates[player.carId];
+    //        bool on_wall = is_on_wall_lenient(player);
+    //        bool aligned = is_car_aligned_to_wall(player);
+    //        float speed = player.vel.Length();
+    //        bool high_speed = speed > WALL_DASH_MIN_SPEED;
 
-            float reward = 0.0f;
+    //        float reward = 0.0f;
 
-            // Intermediate reward 1: Just being on wall with decent alignment
-            if (on_wall && aligned && high_speed && !wState.on_wall_last_frame) {
-                reward += 0.1f;  // Small reward for entering wall dash state
-                wState.wall_entry_speed = speed;
-            }
+    //        // Intermediate reward 1: Just being on wall with decent alignment
+    //        if (on_wall && aligned && high_speed && !wState.on_wall_last_frame) {
+    //            reward += 0.1f;  // Small reward for entering wall dash state
+    //            wState.wall_entry_speed = speed;
+    //        }
 
-            // Intermediate reward 2: Jump attempts on wall
-            if (on_wall && aligned && wState.consecutive_jumps >= 1) {
-                reward += 0.05f * std::min(wState.consecutive_jumps, 5);  // Reward up to 5 jumps
-            }
+    //        // Intermediate reward 2: Jump attempts on wall
+    //        if (on_wall && aligned && wState.consecutive_jumps >= 1) {
+    //            reward += 0.05f * std::min(wState.consecutive_jumps, 5);  // Reward up to 5 jumps
+    //        }
 
-            // Final reward: Sustained speed or speed gain
-            if (on_wall && speed >= wState.wall_entry_speed * SPEED_GAIN_THRESHOLD) {
-                reward += 0.15f;  // Maintained or gained speed
-            }
+    //        // Final reward: Sustained speed or speed gain
+    //        if (on_wall && speed >= wState.wall_entry_speed * SPEED_GAIN_THRESHOLD) {
+    //            reward += 0.15f;  // Maintained or gained speed
+    //        }
 
-            // Alignment bonus
-            RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
-            float pitch_offset = std::abs(carAngle.pitch);
-            if (pitch_offset < 0.087f) {  // ~5 degrees
-                reward += 0.08f;
-            }
+    //        // Alignment bonus
+    //        RocketSim::Angle carAngle = RocketSim::Angle::FromRotMat(player.rotMat);
+    //        float pitch_offset = std::abs(carAngle.pitch);
+    //        if (pitch_offset < 0.087f) {  // ~5 degrees
+    //            reward += 0.08f;
+    //        }
 
-            wState.on_wall_last_frame = on_wall;
+    //        wState.on_wall_last_frame = on_wall;
 
-            return reward;
-        }
-    };
+    //        return reward;
+    //    }
+    //};
     // Incentivizes denying opponent boost to control game pace.
     // Continuous reward while opponent boost is below threshold.
     // ============================================================================

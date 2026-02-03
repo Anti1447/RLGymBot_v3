@@ -24,7 +24,9 @@
 #include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
 #include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
 #include <RLGymCPP/Rewards/HookshotReward.h>
-// DirectionChangeReward and HookShotReward defined in HookshotReward.h
+#include <RLGymCPP/Rewards/WallDashReward.h>
+#include <RLGymCPP/Rewards/OptionControlReward.h>
+#include <RLGymCPP/Rewards/OptionGatingWrappers.h>
 
 using namespace RLGC;
 

@@ -128,12 +128,13 @@ namespace RLGC {
     public:
         float rewardAmount;
         int touchCooldownTicks;
+        bool includeTeammates;  // Include teammate positioning
 
         // Per-player state
         mutable std::unordered_map<uint32_t, int> lastTouchTick;
 
-        FirstToBallReward(float reward = 1.0f, int cooldown = 60)
-            : rewardAmount(reward), touchCooldownTicks(cooldown) {
+        FirstToBallReward(float reward = 1.0f, int cooldown = 60, bool teamplay = true)
+            : rewardAmount(reward), touchCooldownTicks(cooldown), includeTeammates(teamplay) {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -154,9 +155,33 @@ namespace RLGC {
                 }
             }
 
+            // Base reward for getting there first
+            float reward = rewardAmount;
+
+            // TEAMPLAY: Bonus if teammate is also nearby and ready
+            if (includeTeammates) {
+                bool hasSupportingTeammate = false;
+                for (const auto& other : state.players) {
+                    if (other.team != player.team) continue;
+                    if (other.carId == player.carId) continue;
+
+                    // Check if teammate is in supporting position (within ~3000 UU)
+                    float teammateDist = (state.ball.pos - other.pos).Length();
+                    if (teammateDist < 3000.0f && !other.isOnGround) {
+                        // Teammate is nearby and airborne - good support
+                        hasSupportingTeammate = true;
+                        break;
+                    }
+                }
+
+                if (hasSupportingTeammate) {
+                    reward *= 1.3f;  // +30% for having a teammate ready
+                }
+            }
+
             // We got there first!
             lastTouchTick[player.carId] = 0;
-            return rewardAmount;
+            return reward;
         }
 
         virtual void Reset(const GameState& initialState) override {
@@ -421,6 +446,156 @@ namespace RLGC {
     // ============================================================================
     // Rewards attacking 50/50s with speed rather than arriving passively
     // Rev 1.0 (2025-01-11, NJH)
+    // ============================================================================
+    // EARLY AERIAL REWARD
+    // ============================================================================
+    // Rewards bots for attempting aerials early instead of waiting for bounces
+    // Encourages proactive aerial play rather than reactive wall/ceiling bounces
+    // Rev 1.0 (2025-01-31, NJH)
+    class EarlyAerialReward : public Reward {
+    public:
+        float ballHeightThreshold;  // Height at which we reward attempting aerial
+        float minAerialHeight;      // Minimum height for aerial to count
+        float cooldownSeconds;      // Cooldown duration in seconds
+
+        mutable std::unordered_map<uint32_t, uint64_t> lastAerialTick;
+
+        EarlyAerialReward(float ballHeight = 300.0f, float minHeight = 200.0f, float cooldown = 0.5f)
+            : ballHeightThreshold(ballHeight), minAerialHeight(minHeight), cooldownSeconds(cooldown) {
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Check if player is in air (attempting aerial)
+            if (player.isOnGround || player.pos.z < minAerialHeight) {
+                return 0.0f;
+            }
+
+            // Only reward if we haven't recently gotten this reward (cooldown)
+            auto it = lastAerialTick.find(player.carId);
+            if (it != lastAerialTick.end()) {
+                uint64_t ticksSinceLast = state.lastTickCount - it->second;
+                float secondsSinceLast = ticksSinceLast * state.deltaTime;  // Approximate time elapsed
+                if (secondsSinceLast < cooldownSeconds) {
+                    return 0.0f;  // Cooldown active
+                }
+            }
+
+            // Check if ball is still relatively low (not bounced off wall/ceiling yet)
+            // We want to reward early attempts, not waiting for high bounces
+            if (state.ball.pos.z > 1000.0f) {
+                return 0.0f;  // Ball already very high, too late
+            }
+
+            // Ball is at intermediate height - reward early aerial attempt
+            if (state.ball.pos.z >= ballHeightThreshold) {
+                lastAerialTick[player.carId] = state.lastTickCount;
+
+                // Reward scales with how early the attempt is
+                // Earlier aerials (lower ball height) get more reward
+                float earlinessBonus = RS_CLAMP(
+                    (ballHeightThreshold - state.ball.pos.z) / ballHeightThreshold,
+                    0.0f, 1.0f
+                );
+
+                return 0.5f + (earlinessBonus * 0.5f);  // 0.5 to 1.0 reward
+            }
+
+            return 0.0f;
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            lastAerialTick.clear();
+        }
+    };
+
+    // ============================================================================
+    // OPPONENT PASS INTERCEPTION REWARD
+    // ============================================================================
+    // Rewards bots for intercepting passes between opponents
+    // Detects when opponent A passes to opponent B and we intercept it
+    // Rev 1.0 (2025-01-31, NJH)
+    class OpponentPassInterceptionReward : public Reward {
+    public:
+        float passInterceptionDistance;  // How close the pass needs to be to our intercept
+        float minPassSpeed;              // Minimum speed to count as a pass
+        float cooldownSeconds;          // Cooldown duration in seconds
+
+        mutable std::unordered_map<uint32_t, uint64_t> lastInterceptTick;
+
+        OpponentPassInterceptionReward(float distance = 500.0f, float minSpeed = 1000.0f, float cooldown = 0.3f)
+            : passInterceptionDistance(distance), minPassSpeed(minSpeed), cooldownSeconds(cooldown) {
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!player.ballTouchedStep) return 0.0f;
+
+            // Cooldown check
+            auto it = lastInterceptTick.find(player.carId);
+            if (it != lastInterceptTick.end()) {
+                uint64_t ticksSinceLast = state.lastTickCount - it->second;
+                float secondsSinceLast = ticksSinceLast * state.deltaTime;  // Approximate time elapsed
+                if (secondsSinceLast < cooldownSeconds) {
+                    return 0.0f;
+                }
+            }
+
+            // Check if ball velocity is high enough to be a pass
+            float ballSpeed = state.ball.vel.Length();
+            if (ballSpeed < minPassSpeed) {
+                return 0.0f;
+            }
+
+            // Find if this ball came from an opponent recently
+            bool passFromOpponent = false;
+            float passAccuracy = 0.0f;
+
+            for (const auto& other : state.players) {
+                if (other.team == player.team) continue;  // Not an opponent
+                if (!other.ballTouchedStep) continue;     // Didn't touch ball this frame
+
+                // They just touched the ball - is it heading toward their teammate?
+                bool hasTeammate = false;
+                float distToClosestTeammate = 10000.0f;
+
+                for (const auto& teammate : state.players) {
+                    if (teammate.team != other.team) continue;
+                    if (teammate.carId == other.carId) continue;
+
+                    float distToTeammate = (state.ball.pos - teammate.pos).Length();
+                    if (distToTeammate < distToClosestTeammate) {
+                        distToClosestTeammate = distToTeammate;
+                        hasTeammate = true;
+                    }
+                }
+
+                // If this opponent touched the ball and has a teammate nearby, it's likely a pass
+                if (hasTeammate && distToClosestTeammate < 3000.0f) {
+                    passFromOpponent = true;
+
+                    // Accuracy bonus: how well we intercepted (closer = better interception)
+                    float distToTeammate = distToClosestTeammate;
+                    passAccuracy = RS_CLAMP(
+                        1.0f - (distToTeammate / 3000.0f),
+                        0.0f, 1.0f
+                    );
+                    break;
+                }
+            }
+
+            if (!passFromOpponent) return 0.0f;
+
+            lastInterceptTick[player.carId] = state.lastTickCount;
+
+            // Reward: base 1.5 + accuracy bonus
+            float reward = 1.5f + (passAccuracy * 1.0f);  // 1.5 to 2.5
+            return reward;
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            lastInterceptTick.clear();
+        }
+    };
+
     class FiftyAggressionReward : public Reward {
     public:
         float fiftyProximity;

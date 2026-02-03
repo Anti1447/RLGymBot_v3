@@ -15,7 +15,9 @@
       "Bash(find:*)",
       "Bash(taskkill:*)",
       "Bash(bin/GigaLearnBot.exe)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(msbuild:*)",
+      "Bash(git add:*)"
     ]
   }
 }

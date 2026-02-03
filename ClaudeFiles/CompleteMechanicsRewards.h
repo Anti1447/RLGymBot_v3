@@ -1122,7 +1122,7 @@ public:
 class LowBoostOffenseReward : public Reward {
 public:
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (player.boost > 30.0f) return 0.0f;
+        if (player.boost > 20.0f) return 0.0f;
 
         Vec theirGoal = (player.team == Team::BLUE) ?
             CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;

@@ -1865,31 +1865,45 @@ public:
         if (player.ballTouchedStep && !ballOnCar && tOnCar >= minOnCarTime) {
             if (!state.prev) { tOnCar = 0.0f; return 0.0f; }
 
-            // Ball velocity after flick
+            // Ball velocity AFTER flick
             Vec ballVel = state.ball.vel;
             float ballSpeed = ballVel.Length();
 
-            // SPEED GATE: Heavily reward fast flicks, penalize slow ones
-            if (ballSpeed < minFlickSpeed) {
+            // Ball velocity BEFORE flick (from previous state)
+            Vec prevBallVel = state.prev->ball.vel;
+            float prevBallSpeed = prevBallVel.Length();
+
+            // ACCELERATION: Calculate velocity change imparted to ball
+            float velocityChange = ballSpeed - prevBallSpeed;
+
+            // SPEED GATE: Reward based on acceleration, not absolute final speed
+            if (velocityChange < 200.0f) {
+                // Weak flick - minimal acceleration
                 tOnCar = 0.0f;
-                return -0.5f; // Penalize weak flicks
+                return 0.0f; // No penalty, just no reward for weak acceleration
             }
 
+            // Acceleration-based reward (prioritize how much speed was ADDED)
             float speedReward = 0.0f;
-            if (ballSpeed >= insaneFlickSpeed) {
+            const float minAccel = 200.0f;     // Minimum acceleration to reward
+            const float goodAccel = 1000.0f;   // Good acceleration
+            const float greatAccel = 1500.0f;  // Great acceleration
+            const float insaneAccel = 2000.0f; // Insane acceleration
+
+            if (velocityChange >= insaneAccel) {
                 speedReward = maxFlickReward;
             }
-            else if (ballSpeed >= greatFlickSpeed) {
-                float t = (ballSpeed - greatFlickSpeed) / (insaneFlickSpeed - greatFlickSpeed);
+            else if (velocityChange >= greatAccel) {
+                float t = (velocityChange - greatAccel) / (insaneAccel - greatAccel);
                 speedReward = maxFlickReward * (0.70f + 0.30f * t); // 70-100%
             }
-            else if (ballSpeed >= goodFlickSpeed) {
-                float t = (ballSpeed - goodFlickSpeed) / (greatFlickSpeed - goodFlickSpeed);
+            else if (velocityChange >= goodAccel) {
+                float t = (velocityChange - goodAccel) / (greatAccel - goodAccel);
                 speedReward = maxFlickReward * (0.45f + 0.25f * t); // 45-70%
             }
             else {
-                // minFlickSpeed to goodFlickSpeed
-                float t = (ballSpeed - minFlickSpeed) / (goodFlickSpeed - minFlickSpeed);
+                // minAccel to goodAccel
+                float t = (velocityChange - minAccel) / (goodAccel - minAccel);
                 speedReward = maxFlickReward * (0.20f + 0.25f * t); // 20-45%
             }
 

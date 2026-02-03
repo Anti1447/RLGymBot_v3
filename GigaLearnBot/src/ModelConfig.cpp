@@ -42,9 +42,9 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
-        cfg.entropyScale = 0.035f;
-        cfg.policyLR = 1.6e-4f;
-        cfg.criticLR = 1.6e-4f;
+        cfg.entropyScale = 0.030f;
+        cfg.policyLR = 1.4e-4f;
+        cfg.criticLR = 1.4e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.6f;
