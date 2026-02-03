@@ -187,31 +187,67 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // ====================================================================
                 // Encourages bot to move into positions with many viable plays
                 // Very low weight as standalone; mainly used for gating other rewards
-                //WeightedReward(optionControl, 0.25f),  // Low weight - primarily for gating
+                WeightedReward(optionControl, 0.5f),  // Low weight - primarily for gating
 
                 // ====================================================================
                 // EXAMPLE WRAPPER USAGE: Gating scoring rewards with option control
                 // ====================================================================
                 // This demonstrates how to wrap any scoring reward with option-based gating
-                //WeightedReward(
-                //    new ScoringRewardWrapper(
-                //        new AdvancedFlickReward(),
-                //        optionControl
-                //    ),
-                //    6.0f  // Same weight as original AdvancedFlickReward
-                //),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new ScoringRewardWrapper(
+                            new AdvancedFlickReward(),
+                            optionControl
+                        ),
+                        0.3f
+                    ),
+                    6.0f
+                ),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new ScoringRewardWrapper(
+                            new DribbleMasteryReward(),
+                            optionControl
+                        ),
+                        0.3f
+                    ),
+                    1.5f
+                ),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new ScoringRewardWrapper(
+                            new CutOutplayReward(),
+                            optionControl
+                        ),
+                        0.3f
+                    ),
+                    30.0f
+                ),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new ScoringRewardWrapper(
+                            new FakeChallengeOffenseReward(),
+                            optionControl
+                        ),
+                        0.3f
+                    ),
+                    1.0f
+                ),
 
                 // ====================================================================
                 // EXAMPLE WRAPPER USAGE: Gating passing rewards with option control
                 // ====================================================================
                 // This demonstrates how to wrap any passing reward with option-based gating
-                //WeightedReward(
-                //    new PassingRewardWrapper(
-                //        new PassingAccuracyReward(),
-                //        optionControl
-                //    ),
-                //    20.0f  // Same weight as original PassingAccuracyReward
-                //),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new PassingRewardWrapper(
+                            new PassingAccuracyReward(),
+                            optionControl
+                        ),
+                        1.0f
+                    ),
+                    20.0f
+                ),
 
                 // ====================================================================
                 // REMAINING PLATINUM PHASE REWARDS
@@ -238,7 +274,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
 
                 // NEW: Dribbling
                 //WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 1.0f),
-                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.2f), 1.0f),
+                // NOTE: DribbleMasteryReward is now wrapped with option control above
                 WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 0.5f),
                 //WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.0f),
                 //WeightedReward(new ZeroSumReward(new FlickReward(), 0.3f), 3.0f),
@@ -271,8 +307,8 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // Basic Shots and Outplays
                 WeightedReward(new ZeroSumReward(new HookShotReward(), 0.3f), 20.0f),
                 WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 20.0f),
-                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 30.0f), // updated reward on 01/30/26
-                WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.0f),
+                //WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 30.0f), // updated reward on 01/30/26. Added to Option Control above
+                //WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.0f), Added to Option Control above
                 WeightedReward(new ZeroSumReward(new AirRollShotReward(), 0.3f), 10.0f),
 
                 // NEW: Minor possession shaping and defense
