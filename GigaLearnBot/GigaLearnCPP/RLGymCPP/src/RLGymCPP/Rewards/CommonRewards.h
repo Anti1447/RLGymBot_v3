@@ -382,10 +382,10 @@ namespace RLGC {
 		// Count wheels in contact
 		int CountWheelsInContact(const Player& player) const {
 			int count = 0;
-			if (player.wheelContact[0]) count++;
-			if (player.wheelContact[1]) count++;
-			if (player.wheelContact[2]) count++;
-			if (player.wheelContact[3]) count++;
+			if (player.wheelsWithContact[0]) count++;
+			if (player.wheelsWithContact[1]) count++;
+			if (player.wheelsWithContact[2]) count++;
+			if (player.wheelsWithContact[3]) count++;
 			return count;
 		}
 
