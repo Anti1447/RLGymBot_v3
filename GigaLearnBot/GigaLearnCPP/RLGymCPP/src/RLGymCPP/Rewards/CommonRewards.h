@@ -421,7 +421,7 @@ namespace RLGC {
 			// ====================================================================
 			// Small perpendicular velocity (going into surface, not away) is good
 			float airPrep = expf(-fabsf(vPerp));
-			reward += 1.0f * airPrep;
+			reward += 0.05f * airPrep;  // REDUCED from 1.0f
 
 			// ====================================================================
 			// 3. Orientation reward for setting up a 2-wheel landing
@@ -439,7 +439,7 @@ namespace RLGC {
 			float carTilt = RS_MAX(fabsf(fwdDotN), fabsf(rightDotN));
 			float tiltReward = expf(-(carTilt - tiltThresh) * (carTilt - tiltThresh));
 
-			reward += 2.0f * wheelOrient * tiltReward;
+			reward += 0.1f * wheelOrient * tiltReward;  // REDUCED from 2.0f
 
 			// ====================================================================
 			// 4. Detect 2-wheel contact event
@@ -450,7 +450,7 @@ namespace RLGC {
 			bool twoWheelEvent = (wheelCountNow == 2 && wheelCountPrev < 2);
 
 			if (twoWheelEvent) {
-				reward += 5.0f;
+				reward += 0.25f;  // REDUCED from 5.0f
 			}
 
 			// ====================================================================
@@ -460,7 +460,7 @@ namespace RLGC {
 			bool flipInputPrev = player.prev->isFlipping;
 
 			if (twoWheelEvent && flipInputNow) {
-				reward += 8.0f;
+				reward += 0.4f;  // REDUCED from 8.0f
 			}
 
 			// ====================================================================
@@ -469,7 +469,7 @@ namespace RLGC {
 			bool flipCanceled = (flipInputPrev && !flipInputNow && wheelCountNow >= 1);
 
 			if (flipCanceled) {
-				reward += 10.0f;
+				reward += 0.5f;  // REDUCED from 10.0f
 			}
 
 			// ====================================================================
@@ -477,7 +477,7 @@ namespace RLGC {
 			// ====================================================================
 			float speedGain = vTangent.Length() - prevTangent.Length();
 			if (speedGain > 0.0f) {
-				reward += 2.0f * speedGain;
+				reward += 0.002f * speedGain;  // DRASTICALLY REDUCED from 2.0f (was 800 for 400 UU/s!)
 			}
 
 			// ====================================================================
@@ -491,7 +491,7 @@ namespace RLGC {
 
 				if (netGain > minSpeedGain) {
 					float gainFrac = RS_CLAMP((netGain - minSpeedGain) / 350.0f, 0.0f, 1.0f);
-					reward += 3.0f * gainFrac;  // Bonus for efficient wavedash
+					reward += 0.15f * gainFrac;  // REDUCED from 3.0f
 				}
 			}
 
@@ -502,22 +502,22 @@ namespace RLGC {
 			// Too much airtime (encourages ground contact)
 			if (!onGroundNow && onGroundPrev) {
 				float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-				reward -= 0.1f * dt;
+				reward -= 0.005f * dt;  // REDUCED from 0.1f
 			}
 
 			// Full flip that wasn't canceled (wasted flip)
 			if (flipInputPrev && !flipInputNow && wheelCountNow < 1) {
-				reward -= 5.0f;
+				reward -= 0.25f;  // REDUCED from 5.0f
 			}
 
 			// Flat 4-wheel landing (bad geometry for wavedash)
 			if (wheelCountNow == 4 && wheelCountPrev < 4) {
-				reward -= 3.0f;
+				reward -= 0.15f;  // REDUCED from 3.0f
 			}
 
 			// Discourage boosting during dash (wavedash shouldn't need boost)
 			if (player.prevAction.boost > 0.5f) {
-				reward -= 0.5f;
+				reward -= 0.025f;  // REDUCED from 0.5f
 			}
 
 			s.wasFlipping = flipInputNow;
