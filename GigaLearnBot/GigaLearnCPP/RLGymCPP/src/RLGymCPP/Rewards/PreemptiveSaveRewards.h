@@ -198,6 +198,7 @@ namespace RLGC {
     // GOALPOST POSITIONING REWARD
     // Rewards positioning at the "far post" during defensive situations.
     // This is optimal positioning for saves and prevents most goals.
+    // Also rewards facing toward the inner part of the goal (toward the net).
     // ============================================================================
     class GoalpostPositioningReward : public Reward {
     private:
@@ -205,6 +206,7 @@ namespace RLGC {
         static constexpr float BALL_THREAT_DISTANCE = 3500.0f;  // Ball must be threatening
         static constexpr float BASE_REWARD = 0.5f;
         static constexpr float PERFECT_POSITION_BONUS = 0.5f;
+        static constexpr float FACING_GOAL_BONUS = 0.3f;
 
         // Get the "far post" position (opposite side from ball)
         Vec GetFarPostPosition(const Player& player, const GameState& state) const {
@@ -223,6 +225,22 @@ namespace RLGC {
             float farPostY = (player.team == Team::BLUE) ? (goalY + 200.0f) : (goalY - 200.0f);
 
             return Vec(farPostX, farPostY, 17.0f);  // Ground level
+        }
+
+        // Get the inner goal center (facing direction should point toward this)
+        Vec GetGoalInnerPoint(const Player& player) const {
+            return (player.team == Team::BLUE) ?
+                CommonValues::BLUE_GOAL_CENTER : CommonValues::ORANGE_GOAL_CENTER;
+        }
+
+        // Check if player is facing toward the goal (into the net coverage area)
+        float CalculateGoalFacingAlignment(const Player& player, const GameState& state) const {
+            Vec goalInner = GetGoalInnerPoint(player);
+            Vec toGoal = (goalInner - player.pos).Normalized();
+            Vec carForward = player.rotMat.forward;
+
+            // How well the car is facing toward the goal
+            return carForward.Dot(toGoal);
         }
 
     public:
@@ -256,7 +274,18 @@ namespace RLGC {
                     reward += PERFECT_POSITION_BONUS;
                 }
 
-                // Bonus for facing the ball
+                // Bonus for facing toward the goal interior (covering the net)
+                float goalFacingAlignment = CalculateGoalFacingAlignment(player, state);
+                if (goalFacingAlignment > 0.5f) {
+                    // Facing toward the goal - good coverage
+                    reward += FACING_GOAL_BONUS;
+                }
+                else if (goalFacingAlignment < -0.5f) {
+                    // Facing away from goal - bad coverage, penalize
+                    reward *= 0.5f;
+                }
+
+                // Bonus for facing the ball (secondary bonus)
                 Vec toBall = (state.ball.pos - player.pos).Normalized();
                 Vec carForward = player.rotMat.forward;
                 float facingAlignment = carForward.Dot(toBall);
@@ -476,6 +505,116 @@ namespace RLGC {
             }
 
             return 0.0f;
+        }
+    };
+
+    // ============================================================================
+    // MULTI-AIR TOUCH REWARD
+    // Rewards multiple consecutive touches on the ball in the air before it hits ground.
+    // Teaches combo plays, aerial control, and ball possession in the air.
+    // ============================================================================
+    class MultiAirTouchReward : public Reward {
+    private:
+        struct AirTouchMemory {
+            int touchCount = 0;           // Number of touches in current air sequence
+            int lastTouchStep = 0;        // Step number of last touch
+            float highestAltitude = 0.0f; // Highest altitude reached
+            bool ballWasInAir = false;    // Was ball in air on last frame?
+        };
+
+        std::unordered_map<uint32_t, AirTouchMemory> memory;
+        int currentStep = 0;
+
+        static constexpr float BALL_GROUND_THRESHOLD = 150.0f;  // Height considered "on ground"
+        static constexpr float MIN_TOUCH_HEIGHT = 300.0f;       // Only count touches above this height
+        static constexpr float TOUCH_TIMEOUT_STEPS = 120;        // Reset if no touch for 1 sec (at 120 ticks/sec)
+        static constexpr float MIN_TOUCH_DELAY_STEPS = 60;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
+        static constexpr float SINGLE_TOUCH_REWARD = 0.1f;
+        static constexpr float DOUBLE_TOUCH_REWARD = 0.3f;
+        static constexpr float TRIPLE_PLUS_REWARD = 0.5f;
+        static constexpr float CONSISTENCY_BONUS = 0.2f;         // For spacing touches well
+        static constexpr float HEIGHT_BONUS = 0.15f;             // For high aerial touches
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            memory.clear();
+            currentStep = 0;
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            auto& mem = memory[player.carId];
+            float reward = 0.0f;
+
+            bool ballInAir = state.ball.pos.z > BALL_GROUND_THRESHOLD;
+
+            // Check if ball has landed (was in air, now not) - reset sequence
+            if (mem.ballWasInAir && !ballInAir) {
+                // Sequence ended, ball hit ground
+                mem.touchCount = 0;
+                mem.highestAltitude = 0.0f;
+                mem.ballWasInAir = false;
+                return 0.0f;
+            }
+
+            // Check if touch timeout exceeded (too long without touch)
+            if (mem.touchCount > 0 && (currentStep - mem.lastTouchStep) > TOUCH_TIMEOUT_STEPS) {
+                // Reset if we haven't touched in a while (ball likely hit ground or sequence broke)
+                mem.touchCount = 0;
+                mem.highestAltitude = 0.0f;
+            }
+
+            // Detect NEW touch
+            if (player.ballTouchedStep && ballInAir && player.pos.z > MIN_TOUCH_HEIGHT) {
+                // Check if this is a new touch (not the same touch as last frame)
+                // AND ensure minimum 0.5s delay between touches
+                if (currentStep != mem.lastTouchStep &&
+                    (currentStep - mem.lastTouchStep) >= MIN_TOUCH_DELAY_STEPS) {
+                    mem.touchCount++;
+                    mem.lastTouchStep = currentStep;
+
+                    // Track highest altitude of touches
+                    mem.highestAltitude = RS_MAX(mem.highestAltitude, player.pos.z);
+
+                    // Reward based on touch count
+                    if (mem.touchCount == 1) {
+                        reward = SINGLE_TOUCH_REWARD;
+                    }
+                    else if (mem.touchCount == 2) {
+                        reward = DOUBLE_TOUCH_REWARD;
+                    }
+                    else if (mem.touchCount >= 3) {
+                        reward = TRIPLE_PLUS_REWARD;
+                    }
+
+                    // Bonus for well-spaced touches (consistency)
+                    // We want touches spread out, not rapid-fire
+                    if (mem.touchCount >= 2) {
+                        reward += CONSISTENCY_BONUS * 0.3f;  // Small bonus per touch
+                    }
+
+                    // Bonus for high altitude touches
+                    if (mem.highestAltitude > 1500.0f) {
+                        reward += HEIGHT_BONUS;
+                    }
+                }
+            }
+
+            mem.ballWasInAir = ballInAir;
+
+            return reward;
+        }
+
+        void PreStep(const GameState& state) override {
+            currentStep++;
+        }
+
+        // Helper to get current touch count for a player (useful for debugging/logging)
+        int GetCurrentTouchCount(uint32_t carId) const {
+            auto it = memory.find(carId);
+            if (it != memory.end()) {
+                return it->second.touchCount;
+            }
+            return 0;
         }
     };
 

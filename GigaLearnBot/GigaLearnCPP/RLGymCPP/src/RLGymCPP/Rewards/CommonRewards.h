@@ -170,8 +170,52 @@ namespace RLGC {
 
 	// ============================================================================
 	// WavedashReward
-	// 2026-1-5 | Rev 1.4 | NJH
-	// - Simplified back to original reward
+	// 2026-2-3 | Rev 1.5 | NJH
+	// - Added directional speed gain reward (only reward forward-facing wavedashes)
+	// - Teaches intentional acceleration, not random bounces
+	// ============================================================================
+	//class WavedashBasicReward : public Reward {
+	//private:
+	//	static constexpr float MIN_SPEED_GAIN = 25.0f;     // Minimum forward speed gain to reward
+	//	static constexpr float MAX_BONUS_SPEED = 500.0f;   // Speed gain for max bonus
+	//	static constexpr float MAX_BONUS = 0.5f;           // Maximum bonus amplitude
+	//	static constexpr float BASE_REWARD = 1.0f;         // Base reward for landing flip
+
+	//public:
+	//	virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+	//		if (!player.prev)
+	//			return 0;
+
+	//		// Check if landing from flip
+	//		if (!(player.isOnGround && (player.prev->isFlipping && !player.prev->isOnGround))) {
+	//			return 0;
+	//		}
+
+	//		// Calculate speed gain in forward direction
+	//		Vec oldVel = player.prev->vel;
+	//		Vec newVel = player.vel;
+	//		Vec carForward = player.rotMat.forward;
+
+	//		// Speed gain projected onto car's forward direction
+	//		float oldSpeedForward = oldVel.Dot(carForward);
+	//		float newSpeedForward = newVel.Dot(carForward);
+	//		float speedGainForward = newSpeedForward - oldSpeedForward;
+
+	//		// Only reward positive forward acceleration
+	//		if (speedGainForward < MIN_SPEED_GAIN) {
+	//			return 0.0f;  // Didn't gain enough forward speed
+	//		}
+
+	//		// Scale reward: base 1.0 + bonus for good acceleration
+	//		// 25 UU/s gain = 1.0, 500+ UU/s = 1.5 max
+	//		float bonus = RS_CLAMP(speedGainForward / MAX_BONUS_SPEED, 0.0f, MAX_BONUS);
+	//		return BASE_REWARD + bonus;
+	//	}
+	//};
+	// ============================================================================
+	// WavedashReward
+	// 2026-2-4 | Rev 1.6 | NJH
+	// - Basic GigaLearn-style wavedash reward (no speed bonus)
 	// ============================================================================
 	class WavedashBasicReward : public Reward {
 	public:
@@ -721,6 +765,37 @@ namespace RLGC {
 			} else {
 				return 0;
 			}
+		}
+	};
+
+	// https://github.com/AechPro/rocket-league-gym-sim/blob/main/rlgym_sim/utils/reward_functions/common_rewards/player_ball_rewards.py
+	// Rewards movement toward closest opponent (light demo/bump shaping)
+	class PlayerVelocityToOpponentReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+			// Find closest opponent
+			float closestDist = FLT_MAX;
+			int closestIdx = -1;
+
+			for (size_t i = 0; i < state.players.size(); i++) {
+				const Player& opponent = state.players[i];
+				if (opponent.team == player.team)
+					continue;
+
+				float dist = (opponent.pos - player.pos).Length();
+				if (dist < closestDist) {
+					closestDist = dist;
+					closestIdx = (int)i;
+				}
+			}
+
+			// No opponents found
+			if (closestIdx == -1)
+				return 0.0f;
+
+			Vec dirToOpponent = (state.players[closestIdx].pos - player.pos).Normalized();
+			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
+			return dirToOpponent.Dot(normVel);
 		}
 	};
 }

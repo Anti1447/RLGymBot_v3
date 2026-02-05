@@ -1214,6 +1214,61 @@ public:
     }
 };
 
+// ============================================================================
+// Shot accuracy - checking if shot is within goal boundaries (ball radius adjusted)
+// ============================================================================
+
+// Multiplier reward for shot accuracy based on goal placement
+// Returns 1.5x for in-bounds shots, 0.7x for out-of-bounds (encourages precision)
+// Subtracts ball radius from left/right and top boundaries
+// NOTE: Use as a multiplier for shot rewards via MathRewardWrapper::MULTIPLY
+class ShotAccuracyInBoundsReward : public Reward {
+private:
+    mutable std::map<uint32_t, Vec> lastBallPos;
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        lastBallPos.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Track ball position for goal checking
+        lastBallPos[player.carId] = state.ball.pos;
+
+        // Check if goal scored this frame
+        if (!state.goalScored) {
+            return 1.0f; // No goal - neutral multiplier (no effect)
+        }
+
+        // Determine which team scored (check ball position at goal line)
+        // Ball in positive Y goal = ORANGE scored, negative Y goal = BLUE scored
+        bool orangeScored = (state.ball.pos.y > 0);
+        bool playerTeamScored = (player.team == Team::ORANGE && orangeScored) ||
+                                (player.team == Team::BLUE && !orangeScored);
+
+        // Only reward if this player's team scored
+        if (!playerTeamScored) {
+            return 1.0f; // Opposing team scored - neutral multiplier
+        }
+
+        // Get last ball position before it reset/moved
+        Vec ballPos = lastBallPos[player.carId];
+
+        // Goal boundary constants (with ball radius subtracted)
+        // Ball center must be within these bounds for a "good" shot
+        const float ADJUSTED_WIDTH = CommonValues::GOAL_WIDTH_FROM_CENTER - CommonValues::BALL_RADIUS;  // ±800.005f
+        const float ADJUSTED_HEIGHT = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS; // 550.025f
+
+        // Check if shot is within adjusted boundaries (X and Z axes)
+        bool withinLeftRight = std::abs(ballPos.x) <= ADJUSTED_WIDTH;
+        bool withinHeight = ballPos.z >= 0.0f && ballPos.z <= ADJUSTED_HEIGHT;
+
+        if (withinLeftRight && withinHeight) {
+            return 1.5f; // In-bounds shot - 1.5x multiplier bonus!
+        }
+        return 0.7f; // Out-of-bounds shot - 0.7x multiplier penalty
+    }
+};
 
 // ============================================================================
 // REWARD CONFIGURATION: SpeedScaledShot multiplied by ShotAccuracy
