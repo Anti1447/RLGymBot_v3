@@ -5,6 +5,7 @@
 
 #include <RLGymCPP/TerminalConditions/NoTouchCondition.h>
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
+#include <RLGymCPP/TerminalConditions/DemoCountCondition.h>
 #include <RLGymCPP/OBSBuilders/AdvancedObsPadded.h>
 #include <RLGymCPP/StateSetters/KickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
@@ -15,6 +16,7 @@
 #include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
 #include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
 #include <RLGymCPP/Rewards/HookshotReward.h>
+
 
 using namespace GGL;
 using namespace RLGC;
@@ -41,7 +43,9 @@ EnvCreateResult EnvCreateFunc(int index) {
 
     std::vector<TerminalCondition*> terminalConditions = {
         new NoTouchCondition(phaseCfg.noTouchTimeout),
-        new GoalScoreCondition()
+        new GoalScoreCondition(),
+		//NEW: Add more terminal conditions here if needed
+		//new DemoCountCondition(3)  // End episode on 3 demos
     };
 
     // Sample game mode based on environment index

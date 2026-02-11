@@ -53,12 +53,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.029f;
-        cfg.policyLR = 1.5e-4f;
-        cfg.criticLR = 1.5e-4f;
+        cfg.entropyScale = 0.031f;
+        cfg.policyLR = 1.4e-4f;
+        cfg.criticLR = 1.4e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.5f;
+        cfg.randomStateChance = 0.65f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
         break;
@@ -127,11 +127,11 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // === CHECKPOINTS ===
     // Use absolute path to ensure it works regardless of working directory
     cfg.checkpointFolder = "C:\\Projects\\RLGymBot_v3\\GigaLearnBot\\build\\checkpoints";
-    cfg.tsPerSave = 100'000'000ULL;      // Save every 100M steps
+    cfg.tsPerSave = 150'000'000ULL;      // Save every 100M steps
     cfg.checkpointsToKeep = 128;
 
     // === POLICY VERSIONS ===
-    cfg.tsPerVersion = 200'000'000ULL;   // New version every 200M steps
+    cfg.tsPerVersion = 300'000'000ULL;   // New version every 200M steps
     cfg.maxOldVersions = 64;
 
     cfg.trainAgainstOldVersions = true;
@@ -144,7 +144,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // This ensures the skill rating reflects performance across all modes
     cfg.skillTracker.enabled = true;
     cfg.skillTracker.numArenas = 32;       // Sufficient for mixed-mode evaluation
-    cfg.skillTracker.simTime = 45.f;       // Per-arena sim time
+    cfg.skillTracker.simTime = 60.f;       // Per-arena sim time
     cfg.skillTracker.maxSimTime = 240.f;
     cfg.skillTracker.updateInterval = 8;
     cfg.skillTracker.ratingInc = 5.f;
@@ -171,7 +171,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 456;
 
     // === PPO CONFIG ===
-    int tsPerItr = 200'000;
+    int tsPerItr = 300'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -180,7 +180,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.99;
+    cfg.ppo.gaeGamma = 0.9901;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

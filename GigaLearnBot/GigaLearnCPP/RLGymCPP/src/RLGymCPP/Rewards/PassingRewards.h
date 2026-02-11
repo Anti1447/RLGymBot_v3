@@ -22,6 +22,24 @@ class BackPassReward : public Reward {
 private:
     mutable std::map<uint32_t, Vec> lastTouchPos;
 
+    // Helper: Check if player is in opponent's half (attacking)
+    bool IsInOpponentHalf(const Player& player) const {
+        if (player.team == Team::BLUE) {
+            return player.pos.y > 0;  // BLUE attacks +Y (toward ORANGE goal)
+        } else {
+            return player.pos.y < 0;  // ORANGE attacks -Y (toward BLUE goal)
+        }
+    }
+
+    // Helper: Check if player is in own half (defending)
+    bool IsInOwnHalf(const Player& player) const {
+        if (player.team == Team::BLUE) {
+            return player.pos.y < 0;  // BLUE defends -Y
+        } else {
+            return player.pos.y > 0;  // ORANGE defends +Y
+        }
+    }
+
 public:
     virtual void Reset(const GameState& initialState) override {
         lastTouchPos.clear();
@@ -34,6 +52,14 @@ public:
         lastTouchPos[player.carId] = player.pos;
 
         if (!state.prev) return 0.0f;
+
+        // ====================================================================
+        // NEW: Only reward if passer is in OPPONENT'S HALF
+        // This ensures we're rewarding tactical retreat from attacking positions
+        // ====================================================================
+        if (!IsInOpponentHalf(player)) {
+            return 0.0f;  // Passer is not in opponent's half - no reward
+        }
 
         // Check if ball moved backward (toward own goal)
         Vec ballMovement = state.ball.pos - state.prev->ball.pos;
@@ -48,6 +74,8 @@ public:
         if (backPassAlignment > 0.5f) {
             // Check if there's a teammate behind to receive
             float minTeammateDistance = 999999.0f;
+            bool receiverInOwnHalf = false;
+
             for (const auto& other : state.players) {
                 if (other.carId == player.carId || other.team != player.team) continue;
 
@@ -58,12 +86,24 @@ public:
 
                 if (alignment > 0.3f) {  // Behind enough
                     minTeammateDistance = RS_MIN(minTeammateDistance, dist);
+
+                    // ================================================================
+                    // NEW: Check if closest receiver is in OWN HALF
+                    // Only consider teammates who are in defensive position
+                    // ================================================================
+                    if (IsInOwnHalf(other)) {
+                        receiverInOwnHalf = true;
+                    }
                 }
             }
 
-            if (minTeammateDistance < 2000.0f) {  // Reasonable back pass distance
+            // ====================================================================
+            // NEW: Only reward if receiver is in own half AND within reasonable distance
+            // This ensures back passes are to players ready to defend
+            // ====================================================================
+            if (minTeammateDistance < 2000.0f && receiverInOwnHalf) {  // Reasonable back pass distance
                 float distance_factor = 1.0f - RS_CLAMP(minTeammateDistance / 2000.0f, 0.0f, 1.0f);
-                return 5.0f * distance_factor;  // 0-5 reward for safe back pass
+                return 5.0f * distance_factor;  // 0-5 reward for strategic back pass
             }
         }
 
@@ -78,9 +118,8 @@ public:
 // ============================================================================
 class ForwardPassReward : public Reward {
 private:
-    static constexpr float MIN_PASS_DISTANCE = 500.0f;
-    static constexpr float MAX_PASS_DISTANCE = 3000.0f;
-    static constexpr float TEAMMATE_POSITIONING_RANGE = 2500.0f;
+    static constexpr float MIN_PASS_DISTANCE = 300.0f;  // Lowered from 500
+    static constexpr float TEAMMATE_POSITIONING_RANGE = 3000.0f;  // Increased from 2500
 
 public:
     virtual void Reset(const GameState& initialState) override {}
@@ -92,44 +131,39 @@ public:
         // Check forward direction (toward opponent goal)
         Vec opponentGoal = (player.team == Team::BLUE) ?
             CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-        Vec toGoal = (opponentGoal - player.pos).Normalized();
+        Vec toGoal = (opponentGoal - state.ball.pos).Normalized();  // From ball, not player
 
         // Ball movement analysis
-        Vec ballMovement = (state.ball.pos - state.prev->ball.pos).Normalized();
-        float forwardAlignment = ballMovement.Dot(toGoal);
+        Vec ballMovement = state.ball.pos - state.prev->ball.pos;
+        float ballDistance = ballMovement.Length();
 
-        // Must move forward
-        if (forwardAlignment < 0.3f) return 0.0f;
-
-        // Ball must travel a meaningful distance
-        float ballDistance = (state.ball.pos - state.prev->ball.pos).Length();
+        // Must move with meaningful distance
         if (ballDistance < MIN_PASS_DISTANCE) return 0.0f;
 
-        // Check teammate positioning for pass reception
-        float bestTeammateScore = 0.0f;
+        // Relaxed forward alignment check (0.1 instead of 0.3)
+        float forwardAlignment = ballMovement.Normalized().Dot(toGoal);
+        if (forwardAlignment < 0.1f) return 0.0f;
+
+        // Find best teammate ahead of ball
+        float bestTeammateDistance = FLT_MAX;
         for (const auto& other : state.players) {
             if (other.carId == player.carId || other.team != player.team) continue;
 
-            // Teammate ahead of passer
-            Vec toTeammate = (other.pos - player.pos);
+            // Vector from ball to teammate
+            Vec toTeammate = (other.pos - state.ball.pos);
             float distanceToTeammate = toTeammate.Length();
 
-            if (distanceToTeammate < 0.1f) continue;  // Too close
-
+            // Teammate must be "ahead" (toward goal direction): 0.2+ dot product (relaxed from 0.4)
             float aheadAlignment = toTeammate.Normalized().Dot(toGoal);
-
-            // Teammate in good position (ahead, in forward direction)
-            if (aheadAlignment > 0.4f && distanceToTeammate < TEAMMATE_POSITIONING_RANGE) {
-                // Score based on positioning
-                float positionScore = aheadAlignment * (1.0f - RS_CLAMP(distanceToTeammate / TEAMMATE_POSITIONING_RANGE, 0.0f, 1.0f));
-                bestTeammateScore = RS_MAX(bestTeammateScore, positionScore);
+            if (aheadAlignment > 0.2f && distanceToTeammate < TEAMMATE_POSITIONING_RANGE) {
+                bestTeammateDistance = RS_MIN(bestTeammateDistance, distanceToTeammate);
             }
         }
 
-        // Reward only if teammate is well-positioned
-        if (bestTeammateScore > 0.2f) {
-            float distance_factor = 1.0f - RS_CLAMP((ballDistance - MIN_PASS_DISTANCE) / (MAX_PASS_DISTANCE - MIN_PASS_DISTANCE), 0.0f, 1.0f);
-            return 8.0f * bestTeammateScore * distance_factor;  // 0-8 reward
+        // Simple distance-based reward (no scoring threshold)
+        if (bestTeammateDistance < FLT_MAX) {
+            float distance_factor = 1.0f - RS_CLAMP(bestTeammateDistance / TEAMMATE_POSITIONING_RANGE, 0.0f, 1.0f);
+            return 6.0f * distance_factor;  // Max: 6.0 (lowered from 8.0)
         }
 
         return 0.0f;
@@ -143,8 +177,7 @@ public:
 // ============================================================================
 class HighPassReward : public Reward {
 private:
-    static constexpr float HIGH_BALL_THRESHOLD = 200.0f;  // Ball above this height
-    static constexpr float SCORING_ANGLE_THRESHOLD = 45.0f;  // Degrees toward goal
+    static constexpr float HIGH_BALL_THRESHOLD = 100.0f;  // Lowered from 200
 
 public:
     virtual void Reset(const GameState& initialState) override {}
@@ -153,43 +186,54 @@ public:
         if (!player.ballTouchedStep) return 0.0f;
         if (!state.prev) return 0.0f;
 
+        // Ball movement analysis
+        Vec ballMovement = state.ball.pos - state.prev->ball.pos;
+        float ballSpeed = ballMovement.Length();
+
+        // Require minimum ball speed for realistic passes
+        if (ballSpeed < 200.0f) return 0.0f;
+
         // Ball must be elevated after touch
         float heightGain = state.ball.pos.z - state.prev->ball.pos.z;
-        if (heightGain < 50.0f) return 0.0f;  // Must lift ball significantly
+        if (heightGain < 50.0f) return 0.0f;
 
+        // Lowered ball height threshold (100 instead of 200)
         if (state.ball.pos.z < HIGH_BALL_THRESHOLD) return 0.0f;
 
-        // Check passing direction toward goal
+        // Check passing direction toward goal (relaxed from 0.5 to 0.3)
         Vec opponentGoal = (player.team == Team::BLUE) ?
             CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-        Vec ballVel = state.ball.vel.Normalized();
         Vec toGoal = (opponentGoal - state.ball.pos).Normalized();
-        float goalAlignment = ballVel.Dot(toGoal);
+        float goalAlignment = ballMovement.Normalized().Dot(toGoal);
 
-        if (goalAlignment < 0.5f) return 0.0f;  // Ball must go toward goal
+        if (goalAlignment < 0.3f) return 0.0f;  // Relaxed from 0.5f
 
-        // Check teammate positioning for aerial reception
-        float bestAerialPositionScore = 0.0f;
+        // Find best teammate in aerial reception position
+        float bestAerialDistance = FLT_MAX;
         for (const auto& other : state.players) {
             if (other.carId == player.carId || other.team != player.team) continue;
 
-            // Can teammate hit this aerial?
+            // Distance from ball to teammate
             Vec toTeammate = (other.pos - state.ball.pos);
-            float distanceToAerialBall = toTeammate.Length();
+            float distance = toTeammate.Length();
 
-            // Teammate should be within aerial range
-            if (distanceToAerialBall < 1500.0f && distanceToAerialBall > 200.0f) {
-                // Bonus if teammate is aerial-capable (positioned high/mid)
-                float heightAlignment = RS_MAX(0.0f, other.pos.z - state.ball.pos.z);  // Teammate below ball
-                float positionScore = (1.0f - RS_CLAMP(distanceToAerialBall / 1500.0f, 0.0f, 1.0f)) *
-                                    RS_CLAMP(heightAlignment / 500.0f, 0.0f, 1.0f);
-                bestAerialPositionScore = RS_MAX(bestAerialPositionScore, positionScore);
+            // Teammate must be within aerial range (200-1500 units)
+            if (distance < 1500.0f && distance > 200.0f) {
+                // FIXED: Correct height calculation - teammate below ball is good
+                // Calculate how far below the ball the teammate is
+                float heightBelowBall = RS_MAX(0.0f, state.ball.pos.z - other.pos.z);
+
+                // Reward teammate within reasonable catch height (0-400 units below)
+                if (heightBelowBall < 400.0f) {
+                    bestAerialDistance = RS_MIN(bestAerialDistance, distance);
+                }
             }
         }
 
-        if (bestAerialPositionScore > 0.2f) {
-            return 12.0f * bestAerialPositionScore;  // 0-12 reward for high passes
+        if (bestAerialDistance < FLT_MAX) {
+            // Simple distance-based calculation
+            float distance_factor = 1.0f - RS_CLAMP(bestAerialDistance / 1500.0f, 0.0f, 1.0f);
+            return 8.0f * distance_factor;  // Max: 8.0 (lowered from 12.0)
         }
 
         return 0.0f;

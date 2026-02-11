@@ -537,24 +537,25 @@ private:
 
     struct BoardState {
         float lastBackboardTime = -1.0f;
-        Vec   lastBackboardPos;
+        Vec lastBackboardPos;
+        uint32_t lastBackboardPlayerId = 0;  // Track which player triggered backboard rebound
     };
 
-    mutable std::map<Team, BoardState> boardStates;
+    mutable std::map<uint32_t, BoardState> boardStates;  // Per-player tracking instead of per-team
 
     bool IsNearOpponentBackboard(const Vec& pos, Team playerTeam) const {
         // Opponent back wall Y
         float oppY = (playerTeam == Team::BLUE) ? CommonValues::BACK_WALL_Y
             : -CommonValues::BACK_WALL_Y;
-        // Close in Y, above ground a bit
-        return (std::fabs(pos.y - oppY) < 300.0f && pos.z > 300.0f);
+        // Close in Y, above ground a bit, but not too high (avoid ceiling bounces)
+        return (std::fabs(pos.y - oppY) < 300.0f && pos.z > 300.0f && pos.z < 2500.0f);
     }
 
     bool IsInScoringZone(const Vec& pos, Team playerTeam) const {
         float goalY = (playerTeam == Team::BLUE) ? CommonValues::BACK_WALL_Y
             : -CommonValues::BACK_WALL_Y;
-        // Close to goal region in front of net
-        return (std::fabs(pos.x) < 1500.0f && std::fabs(pos.y - goalY) < 2000.0f);
+        // Widened X constraint to allow off-angle shots from wall bounce setups
+        return (std::fabs(pos.x) < 2000.0f && std::fabs(pos.y - goalY) < 2000.0f);
     }
 
 public:
@@ -568,21 +569,24 @@ public:
         currentTime += dt;
 
         Team playerTeam = player.team;
-        Team oppTeam = (playerTeam == Team::BLUE) ? Team::ORANGE : Team::BLUE;
-
-        auto& bs = boardStates[oppTeam]; // track backboard of opponent's side
+        auto& bs = boardStates[player.carId];  // Per-player state
 
         // Track when ball is near opponent backboard
         if (IsNearOpponentBackboard(state.ball.pos, playerTeam)) {
             bs.lastBackboardTime = currentTime;
             bs.lastBackboardPos = state.ball.pos;
+            bs.lastBackboardPlayerId = player.carId;
         }
 
         if (!player.ballTouchedStep)
             return 0.0f;
 
-        // Require recent backboard contact
-        if (bs.lastBackboardTime < 0.0f || (currentTime - bs.lastBackboardTime) > 2.0f)
+        // Require recent backboard contact AND same player who triggered it
+        if (bs.lastBackboardTime < 0.0f || (currentTime - bs.lastBackboardTime) > 2.5f)
+            return 0.0f;
+
+        // Only credit the player who initiated the backboard rebound
+        if (bs.lastBackboardPlayerId != player.carId)
             return 0.0f;
 
         // Player touch after backboard: check if this is near scoring zone
@@ -595,7 +599,7 @@ public:
 
         Vec toGoal = (targetGoal - state.ball.pos).Normalized();
         float speed = state.ball.vel.Length();
-        if (speed < 900.0f)
+        if (speed < 1200.0f)  // Increased threshold from 900 to 1200 UU/s
             return 0.0f;
 
         Vec dir = state.ball.vel / speed;

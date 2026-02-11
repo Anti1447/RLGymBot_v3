@@ -405,7 +405,7 @@ namespace RLGC {
         float maxHeight;  // height where reward = 1
 
     public:
-        HighBallTouchReward(float minH = CommonValues::BALL_RADIUS,
+        HighBallTouchReward(float minH = (CommonValues::BALL_RADIUS+400.0f),
             float maxH = CommonValues::CEILING_Z - 200.0f)
             : minHeight(minH), maxHeight(maxH) {
         }
@@ -1415,18 +1415,28 @@ namespace RLGC {
     private:
         mutable std::map<uint32_t, Vec> lastBallVel;
         mutable std::map<uint32_t, float> lastBallSpeed;
+        mutable std::map<uint32_t, uint32_t> lastBallTouchedBy;  // Track who last touched the ball
 
         static constexpr float HIGH_SPEED_THRESHOLD = 1500.0f;  // Only high-speed redirects
         static constexpr float SPEED_RETENTION_MIN = 0.85f;     // Keep 85%+ speed
         static constexpr float ANGLE_THRESHOLD = 0.349f;        // ~20 degrees minimum
+        static constexpr float GOAL_ALIGNMENT_THRESHOLD = 0.3f; // Min alignment toward goal
 
     public:
         virtual void Reset(const GameState& initialState) override {
             lastBallVel.clear();
             lastBallSpeed.clear();
+            lastBallTouchedBy.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Track who last touched the ball (all players update this)
+            for (const auto& p : state.players) {
+                if (p.ballTouchedStep) {
+                    lastBallTouchedBy[0] = p.carId;
+                }
+            }
+
             float currentSpeed = state.ball.vel.Length();
 
             auto velIt = lastBallVel.find(player.carId);
@@ -1467,13 +1477,45 @@ namespace RLGC {
                 return 0.0f;
             }
 
+            // NEW: Validate redirect is toward opponent goal
+            Vec opponentGoal = (player.team == Team::BLUE) ?
+                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+            Vec ballToGoal = (opponentGoal - state.ball.pos).Normalized();
+            Vec ballDir = state.ball.vel.Normalized();
+            float goalAlignment = ballDir.Dot(ballToGoal);
+
+            if (goalAlignment < GOAL_ALIGNMENT_THRESHOLD) {
+                return 0.0f;  // Not redirecting toward goal
+            }
+
             // Reward formula:
             // - Angle matters: sharp changes (90°+) get 1.0x multiplier
             // - Speed matters: well-maintained speed adds bonus (0-0.35)
             float sharpness = RS_CLAMP(angleChange / 1.571f, 0.0f, 1.0f);  // Max at 90°
             float speedBonus = RS_CLAMP(speedRetention - SPEED_RETENTION_MIN, 0.0f, 0.35f);
+            float baseReward = sharpness * (2.0f + speedBonus);  // 0-2.35 reward range
 
-            return sharpness * (2.0f + speedBonus);  // 0-2.35 reward range
+            // NEW: Apply goal direction multiplier
+            float goalMultiplier = 1.5f;
+            if (goalAlignment > 0.7f) {
+                goalMultiplier = 2.0f;  // Directly toward goal
+            }
+
+            // NEW: Check if last touch was from a teammate
+            uint32_t lastToucher = lastBallTouchedBy[0];
+            bool lastTouchWasTeammate = false;
+
+            if (lastToucher != player.carId) {
+                for (const auto& other : state.players) {
+                    if (other.carId == lastToucher && other.team == player.team) {
+                        lastTouchWasTeammate = true;
+                        break;
+                    }
+                }
+            }
+
+            float teammateBonusMultiplier = lastTouchWasTeammate ? 2.0f : 1.0f;
+            return baseReward * goalMultiplier * teammateBonusMultiplier;  // 0-9.4 reward range
         }
     };
 
@@ -2359,6 +2401,55 @@ namespace RLGC {
             }
 
             return 0.0f;
+        }
+    };
+
+    // ============================================================================
+    // TURNOVER PENALTY
+    // Penalizes passing the ball to an opponent (turnovers/bad passes)
+    // Discourages poor ball control and interception-prone passes
+    // ============================================================================
+    class PassToOpponentPenalty : public Reward {
+    private:
+        static constexpr float BASE_PENALTY = -0.8f;
+        static constexpr float PASS_ALIGNMENT_THRESHOLD = 0.5f;  // 60 degrees toward opponent
+
+    public:
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!state.prev) return 0.0f;
+
+            // Only penalize when player just touched ball
+            if (!player.ballTouchedStep) return 0.0f;
+
+            float ballSpeed = state.ball.vel.Length();
+            if (ballSpeed < 500.0f) return 0.0f;  // Too slow to be a pass
+
+            // Find closest OPPONENT and check if ball is traveling toward them
+            float closestOpponentDist = FLT_MAX;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team) continue;  // Skip teammates
+
+                float dist = (opp.pos - player.pos).Length();
+                if (dist < closestOpponentDist) {
+                    closestOpponentDist = dist;
+
+                    // Check if ball velocity is aligned toward this opponent
+                    Vec ballDir = state.ball.vel.Normalized();
+                    Vec toOpponent = (opp.pos - player.pos).Normalized();
+                    float alignment = ballDir.Dot(toOpponent);
+
+                    if (alignment > PASS_ALIGNMENT_THRESHOLD) {
+                        // Ball is traveling toward opponent - this is a turnover!
+                        float proximityFactor = RS_CLAMP(1.0f - (closestOpponentDist / 2000.0f), 0.0f, 1.0f);
+                        float speedFactor = RS_CLAMP(ballSpeed / 2000.0f, 0.0f, 1.0f);
+
+                        // Penalty scales with opponent proximity and ball speed
+                        return BASE_PENALTY * proximityFactor * speedFactor;
+                    }
+                }
+            }
+
+            return 0.0f;  // Pass went to teammate or neutral
         }
     };
 

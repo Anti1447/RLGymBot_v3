@@ -67,7 +67,7 @@ namespace GGL {
 
 		float gaeLambda = 0.95f;
 		float gaeGamma = 0.99f;
-		float rewardClipRange = 10; // Clip range for normalized rewards, set 0 to disable
+		float rewardClipRange = 15; // Clip range for normalized rewards, set 0 to disable
 
 		bool useGuidingPolicy = false;
 		std::filesystem::path guidingPolicyPath = "guiding_policy/"; // Path of the guiding policy model(s)

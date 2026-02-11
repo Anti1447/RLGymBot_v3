@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include "../Math.h"
+#include "PositionAnalysis.h"
 #include <unordered_map>
 
 namespace RLGC {
@@ -222,6 +223,11 @@ namespace RLGC {
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
 			if (!player.prev)
 				return 0;
+
+			// Skip reward during kickoff (all players bunched together, no real wavedash learning)
+			if (PositionAnalysis::IsKickoffFormation(player, state)) {
+				return 0;
+			}
 
 			if (player.isOnGround && (player.prev->isFlipping && !player.prev->isOnGround)) {
 				return 1;

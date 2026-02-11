@@ -27,6 +27,15 @@
 #include <RLGymCPP/Rewards/WallDashReward.h>
 #include <RLGymCPP/Rewards/OptionControlReward.h>
 #include <RLGymCPP/Rewards/OptionGatingWrappers.h>
+#include <RLGymCPP/Rewards/AngleFlickRewards.h>
+#include <RLGymCPP/Rewards/DoomseeDisshShotReward.h>
+#include <RLGymCPP/Rewards/DefensiveClearingRewards.h>
+#include <RLGymCPP/Rewards/SpecializedFlickRewards.h>
+#include <RLGymCPP/Rewards/AerialRewards.h>
+#include <RLGymCPP/Rewards/IntelligentWavedashReward.h>
+#include <RLGymCPP/Rewards/KickoffStrategyReward.h>
+#include <RLGymCPP/Rewards/KickoffRandomizationReward.h>
+#include <RLGymCPP/Rewards/AirDribbleUtilities.h>
 
 using namespace RLGC;
 

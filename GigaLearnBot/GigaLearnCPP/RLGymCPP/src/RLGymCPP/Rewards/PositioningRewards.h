@@ -239,6 +239,60 @@ public:
 };
 
 // ============================================================================
+// OWN NET CENTERING PENALTY
+// Penalizes centering the ball near own goal (defensive danger zone)
+// Discourages risky centering plays in critical defensive positions
+// ============================================================================
+class OwnNetCenteringPenalty : public Reward {
+private:
+    static constexpr float DEFENSIVE_ZONE_Y = 2000.0f;  // Danger zone depth from own goal
+    static constexpr float CENTER_WIDTH = 2000.0f;       // ±1000 from X=0 is "center"
+    static constexpr float MAX_PENALTY_PER_TICK = -0.5f; // Maximum penalty per frame
+
+public:
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Get own goal location (the goal we're defending)
+        Vec ownGoal = (player.team == Team::BLUE) ?
+            CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+
+        // Check if ball is in our defensive zone
+        float distToOwnGoal = (state.ball.pos - ownGoal).Length();
+
+        // Must be close to own goal (within 2000 units = danger zone)
+        if (distToOwnGoal > DEFENSIVE_ZONE_Y) {
+            return 0.0f;  // Ball is not in danger zone
+        }
+
+        // Check if ball is "centered" (|X| < 1000 from field midline)
+        float ballX = fabs(state.ball.pos.x);
+        float halfCenterWidth = CENTER_WIDTH / 2.0f;
+
+        // Calculate centeredness (1.0 = perfectly centered, 0.0 = on wing)
+        float centeredness = 1.0f - RS_CLAMP(ballX / halfCenterWidth, 0.0f, 1.0f);
+
+        if (centeredness < 0.3f) {
+            return 0.0f;  // Ball is on the wing, not centered - acceptable
+        }
+
+        // Check if ball has low horizontal velocity (being centered, not being crossed)
+        float ballXVel = fabs(state.ball.vel.x);
+        bool isCentering = ballXVel < 500.0f;  // Low horizontal movement = centering action
+
+        if (!isCentering) {
+            return 0.0f;  // Ball is being crossed quickly, not centered slowly
+        }
+
+        // Penalty scales with:
+        // 1. Proximity to own goal (closer = worse)
+        // 2. Centeredness (more centered = worse)
+        float proximityFactor = 1.0f - RS_CLAMP(distToOwnGoal / DEFENSIVE_ZONE_Y, 0.0f, 1.0f);
+
+        // Return penalty scaled by both factors
+        return MAX_PENALTY_PER_TICK * proximityFactor * centeredness;
+    }
+};
+
+// ============================================================================
 // MasterOffensivePositioningReward
 // Combines corner penalty and center reward for optimal offensive positioning
 // ============================================================================

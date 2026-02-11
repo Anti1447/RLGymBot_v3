@@ -1,0 +1,238 @@
+================================================================================
+KICKOFF REWARD SYSTEMS - QUICK REFERENCE
+================================================================================
+
+INTEGRATION STATUS: ✅ COMPLETE
+BUILD STATUS: ✅ SUCCESS (Exit Code 0)
+LAST UPDATED: 2026-02-09
+
+================================================================================
+REWARD WEIGHTS (PHASE_5_DIAMOND)
+================================================================================
+
+KickoffStrategyReward:        15.0  (Teach diverse strategies)
+KickoffRandomizationReward:    8.0  (Prevent repetitive patterns)
+
+Location: RewardConfig.cpp, lines 458-460
+
+================================================================================
+STRATEGY TYPES & REWARDS
+================================================================================
+
+1V1 / FIRST PLAYER (Challenger):
+  STANDARD       3.0  pts  (speedflip boost kick, speed >2200)
+  DEMO           3.5  pts  (rush opponent for demo)
+  WAVEDASH       3.5  pts  (jump + wavedash into ball)
+  VARIATION      2.5  pts  (unusual dodge/jump pattern)
+  CORNER_BOOST   2.0  pts  (grab side boost instead)
+  FAKE           2.0  pts  (don't challenge, cover net)
+
+SUPPORT PLAYER (2V2/3V3):
+  SUPPORT_DEMO   3.0  pts  (support teammate demo)
+  SUPPORT_BOOST  2.5  pts  (grab boost while supporting)
+  SUPPORT_SAFE   2.0  pts  (between ball and net)
+
+SPEED BONUS:
+  Base + (0-30%) if maxSpeed > 2000 UU/s
+  Example: 3.0 × 1.3 = 3.9 max
+
+================================================================================
+EXPECTED REWARDS PER EPISODE
+================================================================================
+
+Per Single Kickoff:
+  Base reward:           2.0-3.5 pts
+  Speed bonus:          +0.0-1.0 pts
+  Novelty bonus:        +0.0-2.0 pts
+  Total per kickoff:     2.0-6.5 pts (rare max)
+  Typical per kickoff:   2.0-4.0 pts
+
+Per 5-Kickoff Episode:
+  Repetitive:           10-15 pts (same strategies)
+  Mixed:                12-20 pts (varied strategies)
+  Optimal:              18-25 pts (diverse + fast execution)
+
+================================================================================
+DETECTION THRESHOLDS
+================================================================================
+
+KICKOFF PHASE DETECTION:
+  Ball distance from center < 300 UU
+  Ball velocity < 500 UU/s
+  Duration limit: 10 seconds
+
+SPEED CLASSIFICATION:
+  STANDARD:      > 2200 UU/s
+  WAVEDASH:      1200-2200 UU/s
+  VARIATION:     1500-2200 UU/s
+  FAKE/SUPPORT:  < 1500 UU/s
+
+POSITIONING:
+  DEMO:          minDistToOpponent < 800 UU
+  CORNER_BOOST:  touched boost, didn't touch ball
+  SUPPORT_SAFE:  distToBall > 1500 UU, speed < 1500
+
+NOVELTY:
+  Angle tolerance: ±15°
+  History size: Last 5 kickoffs
+  Novelty reward: 2.0 × (different / total)
+
+================================================================================
+MONITORING CHECKLIST
+================================================================================
+
+□ Kickoff phase detection active (ball near center, stationary)
+□ Multiple strategy types appearing in logs
+□ Reward signals non-zero (not all 0.0)
+□ Speed bonuses activating (>3.0 rewards sometimes)
+□ Novelty component active (rewards vary, not always same)
+□ Agent mixing strategies (not 100% same kickoff every time)
+□ Performance unchanged (training speed stable)
+
+================================================================================
+DEBUGGING: IF YOU SEE THIS...
+================================================================================
+
+All kickoffs = 0.0 reward
+  → IsInKickoffPhase() check failing
+  → Verify ball position, speed, phase detection
+
+All kickoffs = same strategy
+  → Novelty not enforcing variety
+  → Check angle calculation (atan2 with forward/right)
+
+Only fake/support getting rewards
+  → Other strategies not detected
+  → Verify speed thresholds (STANDARD needs >2200)
+
+Rewards too high/low
+  → Adjust weights in RewardConfig.cpp
+  → Current: 15.0 (strategy), 8.0 (randomization)
+  → Try: 10.0/12.0 (lower), 20.0/10.0 (higher)
+
+No novelty rewards ever
+  → Check KickoffRandomizationReward instantiation
+  → Verify history tracking (rolling 5-entry vector)
+
+================================================================================
+FILES TO KNOW
+================================================================================
+
+Configuration:
+  /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.h
+  /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.cpp
+
+Reward Implementation:
+  RLGymCPP/Rewards/KickoffStrategyReward.h (294 lines)
+  RLGymCPP/Rewards/KickoffRandomizationReward.h (219 lines)
+
+Documentation:
+  KICKOFF_INTEGRATION_SUMMARY.md (comprehensive)
+  KICKOFF_REWARD_MONITORING.md (detailed guide)
+  SESSION_SUMMARY_2026_02_09.md (session notes)
+  KICKOFF_QUICK_REFERENCE.txt (this file)
+
+================================================================================
+BUILD & COMPILE
+================================================================================
+
+Build location: /c/Projects/RLGymBot_v3/GigaLearnBot/build
+Binary output: /c/Projects/RLGymBot_v3/GigaLearnBot/build/bin/GigaLearnBot.exe
+
+Build command:
+  cd /c/Projects/RLGymBot_v3/GigaLearnBot
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build --config Release
+
+Last build result: ✅ EXIT CODE 0 (SUCCESS)
+
+================================================================================
+TRAINING EXECUTION
+================================================================================
+
+Run training:
+  python train.py --phase PHASE_5_DIAMOND --episodes 100
+
+Monitor logs:
+  grep -i "kickoff" training.log | head -20
+
+Check reward distribution:
+  grep -o "STRATEGY_[A-Z_]*" training.log | sort | uniq -c
+
+Expected output (sample):
+  Episode 5, Kickoff 1: KickoffStrategy=3.2 KickoffRandomization=1.5
+  Episode 5, Kickoff 2: KickoffStrategy=2.5 KickoffRandomization=1.2
+  Total Strategy Rewards: ~15 pts/episode (with multiple kickoffs)
+  Total Randomization: ~5-10 pts/episode
+
+================================================================================
+SUCCESS INDICATORS
+================================================================================
+
+✅ Compilation succeeds (exit 0)
+✅ No new compilation errors
+✅ Rewards appear in logs (non-zero values)
+✅ Multiple strategy types observed
+✅ Speed bonuses sometimes active (some rewards >3.5)
+✅ Novelty prevents pure repetition (angles vary >15°)
+✅ No performance degradation
+✅ Agent still learning other skills
+
+If all above true after 50-100 episodes → INTEGRATION SUCCESSFUL
+
+================================================================================
+PARAMETER TUNING
+================================================================================
+
+If agent learns too fast / rewards too high:
+  KickoffStrategyReward: 15.0 → 10.0
+  KickoffRandomizationReward: 8.0 → 5.0
+
+If agent not responding / rewards too low:
+  KickoffStrategyReward: 15.0 → 20.0
+  KickoffRandomizationReward: 8.0 → 12.0
+
+If too much novelty enforcement (no repeated strategies):
+  ANGLE_SIMILARITY_THRESHOLD: 15.0° → 20.0°
+
+If too loose novelty (all strategies repeated):
+  ANGLE_SIMILARITY_THRESHOLD: 15.0° → 10.0°
+
+If speedflips never happening:
+  STRATEGY_STANDARD speed threshold: 2200 → 2000 UU/s
+
+If too many speedflips:
+  STRATEGY_STANDARD speed threshold: 2200 → 2400 UU/s
+
+Location of parameters:
+  Reward weights: RewardConfig.cpp lines 458-460
+  Speed thresholds: KickoffStrategyReward.h lines 74-78
+  Novelty threshold: KickoffRandomizationReward.h line 44
+
+================================================================================
+PHASING RECOMMENDATIONS
+================================================================================
+
+PHASE_1-2 (Bronze/Silver):  Disabled (focus on basics)
+PHASE_3-4 (Gold/Platinum):  Partial (randomization only, weight 2-5)
+PHASE_5-6 (Diamond/Champ):  Both active (15.0 + 8.0) ← CURRENT
+PHASE_7-8 (GC/SSL):         Both active, consider reducing randomization
+PHASE_9 (Pro):              Both active, increase strategy weight to 25.0
+
+================================================================================
+CREATED THIS SESSION
+================================================================================
+
+✅ Integration of KickoffStrategyReward into PHASE_5_DIAMOND
+✅ Integration of KickoffRandomizationReward into PHASE_5_DIAMOND
+✅ Verified clean build (Exit Code 0)
+✅ Created comprehensive documentation
+
+Build Command Used:
+  cd /c/Projects/RLGymBot_v3/GigaLearnBot
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build --config Release
+
+Result: ✅ SUCCESS - All binaries compiled, exit 0, ready for training
+
+================================================================================

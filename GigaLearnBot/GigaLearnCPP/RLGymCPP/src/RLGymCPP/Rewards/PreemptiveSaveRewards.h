@@ -20,6 +20,7 @@
 
 #include "Reward.h"
 #include "../Math.h"
+#include "AirDribbleUtilities.h"
 #include <map>
 #include <vector>
 #include <cmath>
@@ -208,23 +209,30 @@ namespace RLGC {
         static constexpr float PERFECT_POSITION_BONUS = 0.5f;
         static constexpr float FACING_GOAL_BONUS = 0.3f;
 
-        // Get the "far post" position (opposite side from ball)
-        Vec GetFarPostPosition(const Player& player, const GameState& state) const {
+        // Get the "back post" position (furthest goal post from ball)
+        // Back post positioning is critical for shot blocking - stand at the post
+        // furthest from the ball threat to maximize coverage of the goal line
+        Vec GetBackPostPosition(const Player& player, const GameState& state) const {
             Vec goalCenter = (player.team == Team::BLUE) ?
                 CommonValues::BLUE_GOAL_LINE_CENTER : CommonValues::ORANGE_GOAL_LINE_CENTER;
 
-            // Determine which side of goal the ball is on
-            float ballX = state.ball.pos.x;
-            float goalX = goalCenter.x;
+            // Rocket League goal width is approximately 1785.5 units
+            // Goal posts are at ±892.75 from center
+            const float POST_OFFSET = 892.75f;
 
-            // Far post is on opposite side from ball
-            float farPostX = (ballX > goalX) ? (goalX - 700.0f) : (goalX + 700.0f);
+            // Define both goal posts on the goal line
+            Vec leftPost = Vec(goalCenter.x - POST_OFFSET, goalCenter.y, 17.0f);
+            Vec rightPost = Vec(goalCenter.x + POST_OFFSET, goalCenter.y, 17.0f);
 
-            // Position slightly forward from goal line
-            float goalY = goalCenter.y;
-            float farPostY = (player.team == Team::BLUE) ? (goalY + 200.0f) : (goalY - 200.0f);
+            // Back post = the post furthest from the current ball position
+            float distToBallLeft = (leftPost - state.ball.pos).Length();
+            float distToBallRight = (rightPost - state.ball.pos).Length();
+            Vec backPost = (distToBallLeft > distToBallRight) ? leftPost : rightPost;
 
-            return Vec(farPostX, farPostY, 17.0f);  // Ground level
+            // Position slightly forward from goal line (toward net interior)
+            // This allows the car to drive forward toward the ball if needed
+            float forwardOffset = (player.team == Team::BLUE) ? 100.0f : -100.0f;
+            return Vec(backPost.x, backPost.y + forwardOffset, 17.0f);
         }
 
         // Get the inner goal center (facing direction should point toward this)
@@ -259,25 +267,25 @@ namespace RLGC {
                 return 0.0f;
             }
 
-            Vec farPost = GetFarPostPosition(player, state);
-            float distToFarPost = (player.pos - farPost).Length();
+            Vec backPost = GetBackPostPosition(player, state);
+            float distToBackPost = (player.pos - backPost).Length();
 
-            // Reward based on proximity to far post
+            // Reward based on proximity to back post
             float reward = 0.0f;
 
-            if (distToFarPost < FAR_POST_RADIUS) {
-                // At far post - excellent positioning
+            if (distToBackPost < FAR_POST_RADIUS) {
+                // At back post - excellent positioning for shot blocking
                 reward = BASE_REWARD;
 
-                // Bonus for perfect positioning (very close)
-                if (distToFarPost < FAR_POST_RADIUS * 0.5f) {
+                // Bonus for perfect positioning (very close to post)
+                if (distToBackPost < FAR_POST_RADIUS * 0.5f) {
                     reward += PERFECT_POSITION_BONUS;
                 }
 
                 // Bonus for facing toward the goal interior (covering the net)
                 float goalFacingAlignment = CalculateGoalFacingAlignment(player, state);
                 if (goalFacingAlignment > 0.5f) {
-                    // Facing toward the goal - good coverage
+                    // Facing toward the goal - good coverage for blocking
                     reward += FACING_GOAL_BONUS;
                 }
                 else if (goalFacingAlignment < -0.5f) {
@@ -294,8 +302,8 @@ namespace RLGC {
                     reward *= 1.3f;
                 }
             }
-            else if (distToFarPost < FAR_POST_RADIUS * 2.0f) {
-                // Moving toward far post - small reward
+            else if (distToBackPost < FAR_POST_RADIUS * 2.0f) {
+                // Moving toward back post - small reward
                 reward = BASE_REWARD * 0.3f;
             }
 
@@ -520,6 +528,13 @@ namespace RLGC {
             int lastTouchStep = 0;        // Step number of last touch
             float highestAltitude = 0.0f; // Highest altitude reached
             bool ballWasInAir = false;    // Was ball in air on last frame?
+
+            // NEW: Contact angle and softness tracking
+            float lastContactAngleFactor = 0.0f;  // How well-angled was last touch (0-1)
+            float lastSoftnessScore = 0.0f;       // How soft was last touch (0-1)
+            float ballZVelocityGainLast = 0.0f;   // Z velocity gain from last touch
+            Vec lastBallPos = Vec(0, 0, 0);       // Ball position last frame
+            Vec lastBallVel = Vec(0, 0, 0);       // Ball velocity last frame
         };
 
         std::unordered_map<uint32_t, AirTouchMemory> memory;
@@ -527,13 +542,20 @@ namespace RLGC {
 
         static constexpr float BALL_GROUND_THRESHOLD = 150.0f;  // Height considered "on ground"
         static constexpr float MIN_TOUCH_HEIGHT = 300.0f;       // Only count touches above this height
-        static constexpr float TOUCH_TIMEOUT_STEPS = 120;        // Reset if no touch for 1 sec (at 120 ticks/sec)
-        static constexpr float MIN_TOUCH_DELAY_STEPS = 60;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
+        static constexpr float TOUCH_TIMEOUT_STEPS = 240;        // Reset if no touch for 1 sec (at 120 ticks/sec)
+        static constexpr float MIN_TOUCH_DELAY_STEPS = 30;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
         static constexpr float SINGLE_TOUCH_REWARD = 0.1f;
         static constexpr float DOUBLE_TOUCH_REWARD = 0.3f;
         static constexpr float TRIPLE_PLUS_REWARD = 0.5f;
         static constexpr float CONSISTENCY_BONUS = 0.2f;         // For spacing touches well
         static constexpr float HEIGHT_BONUS = 0.15f;             // For high aerial touches
+
+        // NEW: Enhanced touch quality bonuses
+        static constexpr float CONTACT_ANGLE_BONUS = 0.1f;       // Bonus for bottom-of-ball contacts
+        static constexpr float SOFTNESS_BONUS = 0.15f;           // Bonus for soft first touch
+        static constexpr float Z_VELOCITY_BONUS = 0.12f;         // Bonus for increasing ball height
+        static constexpr float MAX_VELOCITY_DIFF_SOFT = 500.0f;  // Velocity diff threshold for "soft" contact
+        static constexpr float ANGLE_TOLERANCE = 0.4f;           // Radians (~23°) tolerance for optimal angle
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -596,6 +618,57 @@ namespace RLGC {
                     if (mem.highestAltitude > 1500.0f) {
                         reward += HEIGHT_BONUS;
                     }
+
+                    // ========== NEW: ENHANCED TOUCH QUALITY BONUSES ==========
+
+                    // 1. CONTACT ANGLE BONUS - Reward touches on bottom of ball
+                    if (state.prev) {
+                        // Calculate optimal contact angle for field position
+                        float desiredAngle = AirDribbleUtils::GetOptimalContactAngleForPosition(
+                            player.team, state.ball.pos);
+
+                        // Use ball normal relative to car position for actual angle
+                        Vec toBall = (state.ball.pos - player.pos).Normalized();
+                        float dotWithUp = toBall.Dot(player.rotMat.up);
+                        float actualAngle = acos(RS_CLAMP(dotWithUp, -1.0f, 1.0f));
+
+                        // Calculate angle factor (Gaussian scaling, peak at desired angle)
+                        mem.lastContactAngleFactor = AirDribbleUtils::CalculateContactAngleFactor(
+                            desiredAngle, actualAngle, ANGLE_TOLERANCE);
+
+                        reward += CONTACT_ANGLE_BONUS * mem.lastContactAngleFactor;
+                    }
+
+                    // 2. SOFTNESS BONUS - Reward softer first touches
+                    // Only apply strong bonus on first touch of sequence (more important to be soft on pickup)
+                    if (mem.touchCount == 1 || mem.touchCount == 2) {
+                        Vec velDiff = player.vel - state.ball.vel;
+                        float velocityDifference = velDiff.Length();
+                        mem.lastSoftnessScore = AirDribbleUtils::CalculateSoftnessBonus(
+                            velocityDifference, MAX_VELOCITY_DIFF_SOFT);
+
+                        // First touch gets full softness bonus, second touch gets reduced bonus
+                        float softnessMultiplier = (mem.touchCount == 1) ? 1.0f : 0.5f;
+                        reward += SOFTNESS_BONUS * mem.lastSoftnessScore * softnessMultiplier;
+                    }
+
+                    // 3. Z-VELOCITY GAIN BONUS - Reward lifting the ball higher
+                    if (state.prev) {
+                        mem.ballZVelocityGainLast = AirDribbleUtils::CalculateBallZVelocityGain(
+                            state.prev->ball.pos.z,
+                            state.ball.pos.z,
+                            state.prev->ball.vel.z,
+                            state.ball.vel.z);
+
+                        // Only reward if ball is actually gaining height
+                        if (mem.ballZVelocityGainLast > 0.0f) {
+                            reward += Z_VELOCITY_BONUS * RS_CLAMP(mem.ballZVelocityGainLast / 500.0f, 0.0f, 1.0f);
+                        }
+                    }
+
+                    // Store ball state for next frame
+                    mem.lastBallPos = state.ball.pos;
+                    mem.lastBallVel = state.ball.vel;
                 }
             }
 
