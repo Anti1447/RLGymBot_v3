@@ -330,18 +330,28 @@ namespace RLGC {
     // Rev 1.0 (2025-01-21, NJH)
     class PassingSetupReward : public Reward {
     private:
-        // Predict ball position after 1-2 bounces
-        Vec PredictBallTrajectory(const PhysState& ball, int bounces = 1) const {
+        struct TrajectoryResult {
+            Vec finalPos;
+            bool hitWall;
+            bool hitCeiling;
+            bool hitBackboard;
+            int groundBounces;
+        };
+
+        // Predict ball position after up to maxBounces ground bounces,
+        // also simulating wall, ceiling, and backboard bounces.
+        TrajectoryResult PredictBallTrajectory(const PhysState& ball, int maxBounces = 2) const {
             Vec pos = ball.pos;
             Vec vel = ball.vel;
 
-            // Simple physics: gravity and basic drag
-            // Simulate for ~1 second (120 frames * tick_time / tick_skip)
+            TrajectoryResult result = { pos, false, false, false, 0 };
+
             const float dt = 1.0f / 120.0f;
             const float gravAccel = CommonValues::BALL_GRAVITY;
             const float dragCoef = 0.03f;
+            const float r = CommonValues::BALL_RADIUS;
 
-            for (int i = 0; i < 120; i++) {  // ~1 second forward
+            for (int i = 0; i < 180; i++) {  // ~1.5 seconds forward
                 // Apply gravity
                 vel.z += gravAccel * dt;
 
@@ -354,22 +364,38 @@ namespace RLGC {
                 // Update position
                 pos = pos + vel * dt;
 
-                // Ground bounce check
-                if (pos.z < CommonValues::BALL_RADIUS) {
-                    pos.z = CommonValues::BALL_RADIUS;
-                    vel.z = -vel.z * 0.6f;  // Bounce coefficient
-                    bounces--;
-                    if (bounces <= 0) break;  // Stop predicting after N bounces
+                // Ground bounce
+                if (pos.z < r) {
+                    pos.z = r;
+                    vel.z = -vel.z * 0.6f;
+                    result.groundBounces++;
+                    if (result.groundBounces >= maxBounces) break;
                 }
 
-                // Wall collision (simple)
-                if (std::abs(pos.x) > CommonValues::SIDE_WALL_X) {
-                    pos.x = RS_CLAMP(pos.x, -CommonValues::SIDE_WALL_X, CommonValues::SIDE_WALL_X);
-                    vel.x = -vel.x * 0.8f;
+                // Ceiling bounce
+                if (pos.z > CommonValues::CEILING_Z - r) {
+                    pos.z = CommonValues::CEILING_Z - r;
+                    vel.z = -vel.z * 0.6f;
+                    result.hitCeiling = true;
+                }
+
+                // Side wall bounce
+                if (std::abs(pos.x) > CommonValues::SIDE_WALL_X - r) {
+                    pos.x = RS_CLAMP(pos.x, -(CommonValues::SIDE_WALL_X - r), (CommonValues::SIDE_WALL_X - r));
+                    vel.x = -vel.x * 0.6f;
+                    result.hitWall = true;
+                }
+
+                // Back wall / backboard bounce
+                if (std::abs(pos.y) > CommonValues::BACK_WALL_Y - r) {
+                    pos.y = RS_CLAMP(pos.y, -(CommonValues::BACK_WALL_Y - r), (CommonValues::BACK_WALL_Y - r));
+                    vel.y = -vel.y * 0.6f;
+                    result.hitBackboard = true;
                 }
             }
 
-            return pos;
+            result.finalPos = pos;
+            return result;
         }
 
         bool IsTeammatePosition(const Vec& pos, const Player& player, const GameState& state, float proximityRadius = 1500.0f) const {
@@ -485,16 +511,20 @@ namespace RLGC {
 
             Vec towardTheirGoal = (theirGoal - player.pos).Normalized();
 
-            // Check if ball is moving generally toward their goal (not back to our goal)
-            float goalwardComponent = ballVelNorm.Dot(towardTheirGoal);
+            // Predict trajectory first so we can check for surface redirects
+            TrajectoryResult traj = PredictBallTrajectory(state.ball, 2);
+            bool isSurfacePass = traj.hitWall || traj.hitCeiling || traj.hitBackboard;
 
-            if (goalwardComponent < 0.2f) {
-                // Ball moving backward - not a good pass setup
+            // Check if ball is moving generally toward their goal (not back to our goal).
+            // For surface-bounce passes the ball may initially travel upward or toward our
+            // back wall, so only penalize if there is no surface redirect predicted.
+            float goalwardComponent = ballVelNorm.Dot(towardTheirGoal);
+            if (goalwardComponent < 0.2f && !isSurfacePass) {
+                // Ball moving backward and no surface redirect - not a good pass setup
                 return -0.2f;
             }
 
-            // Predict where ball will be after bounces
-            Vec predictedBallPos = PredictBallTrajectory(state.ball, 1);  // 1 bounce
+            Vec predictedBallPos = traj.finalPos;
 
             // Check if teammates are better positioned than opponents at ball destination
             float tmDist = GetTeammateDistToPos(predictedBallPos, player, state);
@@ -520,59 +550,50 @@ namespace RLGC {
                 reward += 0.8f;
             }
 
-            // TRAJECTORY QUALITY BONUS: Reward predictable passes (not many bounces)
-            // Penalize crazy bounces that are hard to receive
-            int bounceCount = 0;
-            Vec testPos = state.ball.pos;
-            for (int i = 0; i < 50 && bounceCount < 3; i++) {
-                testPos.z += state.ball.vel.z * (1.0f / 120.0f);
-                if (testPos.z < CommonValues::BALL_RADIUS) {
-                    bounceCount++;
+            // TRAJECTORY QUALITY BONUS: reward clean passes and intentional surface redirects.
+            // Old behaviour only rewarded zero ground-bounces and penalised surface passes.
+            if (isSurfacePass) {
+                // Intentional wall/ceiling/backboard redirect ending near a teammate
+                if (tmDist < 2000.0f) {
+                    reward += 1.0f;  // Surface-redirect pass with receiver in range
                 }
+            } else {
+                // Direct / lob pass quality
+                if (traj.groundBounces == 0) {
+                    reward += 1.5f;  // Clean lob with no bounces - excellent!
+                } else if (traj.groundBounces == 1) {
+                    reward += 0.8f;  // One ground bounce - acceptable
+                }
+                // groundBounces >= 2: chaotic, no bonus
             }
 
-            if (bounceCount == 0) {
-                reward += 1.5f;  // Clean pass with no bounces - excellent!
-            }
-            else if (bounceCount == 1) {
-                reward += 0.8f;  // One bounce - acceptable
-            }
-            // bounceCount >= 2: no bonus, chaotic trajectory
-
-            // NEW: Evaluate pass zone accuracy
+            // Evaluate pass zone accuracy
             float zoneAccuracyBonus = 0.0f;
             for (const auto& teammate : state.players) {
                 if (teammate.team != player.team || teammate.carId == player.carId) continue;
                 if (teammate.isDemoed) continue;
 
-                // Get opponent goal
                 Vec opponentGoal = theirGoal;
 
-                // Calculate optimal pass zone for this teammate
                 Vec optimalZone = GetOptimalPassZone(teammate.pos, opponentGoal,
                                                      teammate.vel, teammate.boost);
 
-                // Evaluate how well the pass matches this zone
                 float zoneScore = EvaluatePassZoneAccuracy(predictedBallPos, optimalZone,
                                                            teammate.pos, opponentGoal);
 
-                // Bonus: 0.5 for perfect zone match, 0 for miss
                 float bonus = 0.5f * zoneScore;
 
                 // Weight by teammate quality (favor passes to teammates with more boost)
                 float boostWeight = 1.0f + (teammate.boost / 100.0f) * 0.2f;  // 1.0-1.2x
                 bonus *= boostWeight;
 
-                // NEW: Low-boost teamplay multiplier
-                // When passer is low on boost, reward passing more (encourage rotation/teamplay)
-                // Formula: Low boost (0) = 1.5x multiplier, High boost (100) = 1.0x multiplier
+                // Low-boost teamplay multiplier: encourage passing when low on boost
                 float lowBoostTeamplayMultiplier = 1.5f - (player.boost / 100.0f) * 0.5f;  // 1.0-1.5x
                 bonus *= lowBoostTeamplayMultiplier;
 
                 zoneAccuracyBonus = RS_MAX(zoneAccuracyBonus, bonus);
             }
 
-            // Add zone accuracy bonus to total reward
             if (zoneAccuracyBonus > 0.0f) {
                 reward += zoneAccuracyBonus;
             }
@@ -608,7 +629,22 @@ namespace RLGC {
         mutable std::unordered_map<uint32_t, uint32_t> lastBallTouchBy;
         mutable std::unordered_map<uint32_t, float> passReceiveTime;
         mutable std::unordered_map<uint32_t, bool> recentPassToMe;
-        mutable std::unordered_map<uint32_t, float> elapsedTime;  // Track time manually
+        mutable std::unordered_map<uint32_t, bool> surfacePassActive;  // Pass via wall/ceiling/backboard
+        mutable std::unordered_map<uint32_t, float> elapsedTime;
+
+        // Proximity thresholds for surface detection (matching AdvancedPlayRewards.h patterns)
+        static constexpr float WALL_NEAR_THRESH = 300.0f;
+        static constexpr float CEIL_NEAR_THRESH = 200.0f;
+        static constexpr float BACK_NEAR_THRESH = 400.0f;
+        static constexpr float BACK_MIN_Z       = 300.0f;
+
+        bool IsBallNearSurface(const Vec& ballPos) const {
+            bool nearSideWall   = std::abs(ballPos.x) > (CommonValues::SIDE_WALL_X - WALL_NEAR_THRESH);
+            bool nearCeiling    = ballPos.z > (CommonValues::CEILING_Z - CEIL_NEAR_THRESH);
+            bool nearBackboard  = std::abs(ballPos.y) > (CommonValues::BACK_WALL_Y - BACK_NEAR_THRESH)
+                                  && ballPos.z > BACK_MIN_Z;
+            return nearSideWall || nearCeiling || nearBackboard;
+        }
 
     public:
         ReceivingPassReward() {}
@@ -616,7 +652,6 @@ namespace RLGC {
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (player.isDemoed) return 0.0f;
 
-            // Update elapsed time
             uint32_t id = player.carId;
             elapsedTime[id] += state.deltaTime;
 
@@ -630,94 +665,93 @@ namespace RLGC {
             }
 
             // Check if this is a pass intended for us
-            bool isPassToMe = false;
-
             if (lastBallTouchBy[0] != 0 && lastBallTouchBy[0] != player.carId) {
-                // A teammate (not us) recently touched the ball
-                // Check if ball is moving toward us
-
                 Vec ballVel = state.ball.vel;
-                if (ballVel.Length() > 200.0f) {  // Ball is moving
+                if (ballVel.Length() > 200.0f) {
                     Vec toUs = (player.pos - state.ball.pos).Normalized();
                     float towardComponent = ballVel.Normalized().Dot(toUs);
 
-                    if (towardComponent > 0.3f) {
-                        // Ball is moving toward our general direction
-                        isPassToMe = true;
-                        recentPassToMe[player.carId] = true;
-                        passReceiveTime[player.carId] = elapsedTime[id];
+                    // For surface-bounce passes the ball may be heading toward a wall/ceiling,
+                    // not directly at us yet.  Relax the threshold when ball is near a surface.
+                    bool nearSurface = IsBallNearSurface(state.ball.pos);
+                    float dirThreshold = nearSurface ? 0.1f : 0.3f;
+
+                    if (towardComponent > dirThreshold) {
+                        recentPassToMe[id] = true;
+                        surfacePassActive[id] = nearSurface;
+                        passReceiveTime[id] = elapsedTime[id];
                     }
                 }
             }
 
             // REWARD 1: Positioning relative to incoming pass
-            if (recentPassToMe[player.carId]) {
+            if (recentPassToMe[id]) {
                 Vec ballVel = state.ball.vel;
                 if (ballVel.Length() > 200.0f) {
-                    // NEW: Verify pass trajectory leads toward goal
-                    Vec ourGoal = (player.team == Team::BLUE)
-                        ? CommonValues::BLUE_GOAL_CENTER
-                        : CommonValues::ORANGE_GOAL_CENTER;
-                    Vec towardGoal = (ourGoal - player.pos).Normalized();
+                    Vec theirGoal = (player.team == Team::BLUE)
+                        ? CommonValues::ORANGE_GOAL_CENTER
+                        : CommonValues::BLUE_GOAL_CENTER;
+                    Vec towardGoal = (theirGoal - player.pos).Normalized();
 
-                    // Ball should be traveling toward goal after reception
                     Vec ballVelNorm = ballVel.Normalized();
-                    float goaldwardComponent = ballVelNorm.Dot(towardGoal);
+                    float goalwardComponent = ballVelNorm.Dot(towardGoal);
 
-                    // Reward being on the same heading as ball trajectory
                     Vec playerVelNorm = player.vel.Length() > 100.0f
                         ? player.vel.Normalized()
-                        : ballVelNorm;  // Default to ball direction if we're slow
+                        : ballVelNorm;
 
                     float alignmentBonus = RS_MAX(0.0f, playerVelNorm.Dot(ballVelNorm));
 
-                    // NEW: Only reward alignment if pass has goal-ward component
-                    if (goaldwardComponent > 0.3f && alignmentBonus > 0.6f) {
-                        reward += 0.5f;  // Good positioning/movement relative to pass
+                    if (goalwardComponent > 0.3f && alignmentBonus > 0.6f) {
+                        reward += 0.5f;
 
-                        // NEW: Extra bonus if receiver has boost to follow up
-                        float boostBonus = (player.boost / 100.0f) * 0.3f;  // 0-0.3f bonus
+                        float boostBonus = (player.boost / 100.0f) * 0.3f;
                         reward += boostBonus;
                     }
                 }
             }
 
-            // REWARD 2: Receiving the pass (touching ball when teammate passed it)
-            if (player.ballTouchedStep && recentPassToMe[player.carId]) {
-                // We touched the ball after teammate passed it toward us!
-                float timeSincePass = elapsedTime[id] - passReceiveTime[player.carId];
+            // REWARD 2: Receiving the pass
+            if (player.ballTouchedStep && recentPassToMe[id]) {
+                float timeSincePass = elapsedTime[id] - passReceiveTime[id];
 
-                if (timeSincePass < 1.0f) {  // Within ~1 second of the pass
-                    reward += 1.5f;  // Clean reception!
+                // Surface-bounce passes take longer to arrive; allow a wider window
+                float receiveWindow = surfacePassActive[id] ? 2.5f : 1.0f;
 
-                    // BONUS: Check if we're converting to offense immediately
-                    // (High ball speed relative to pass arrival speed)
+                if (timeSincePass < receiveWindow) {
+                    reward += 1.5f;  // Clean reception
+
+                    // Extra bonus for successfully receiving a surface-bounce pass
+                    if (surfacePassActive[id]) {
+                        reward += 0.5f;
+                    }
+
+                    // BONUS: Converting receive into offense
                     Vec ballVel = state.ball.vel;
                     if (ballVel.Length() > 2000.0f) {
-                        // We accelerated the ball significantly - offensive play!
-                        // NEW: Only bonus if we had boost available for the play
-                        float boostBonus = (player.boost / 100.0f) * 0.5f;  // 0-0.5f bonus
+                        float boostBonus = (player.boost / 100.0f) * 0.5f;
                         reward += 2.0f + boostBonus;
                     }
 
-                    // Reset the pass tracking
-                    recentPassToMe[player.carId] = false;
+                    recentPassToMe[id] = false;
+                    surfacePassActive[id] = false;
                 }
             }
 
             // PENALTY: Missing a pass opportunity
-            // (Ball passed toward us but we didn't touch it and it's now far away)
-            if (recentPassToMe[player.carId]) {
-                float timeSincePass = elapsedTime[id] - passReceiveTime[player.carId];
+            if (recentPassToMe[id]) {
+                float timeSincePass = elapsedTime[id] - passReceiveTime[id];
 
-                if (timeSincePass > 0.5f) {
-                    // More than half second has passed
+                // Surface passes need more time before we declare a miss
+                float missWindow = surfacePassActive[id] ? 1.5f : 0.5f;
+
+                if (timeSincePass > missWindow) {
                     float distToBall = (player.pos - state.ball.pos).Length();
 
                     if (distToBall > 2000.0f) {
-                        // Ball is far away and we didn't touch it - we missed the pass!
                         reward -= 0.3f;
-                        recentPassToMe[player.carId] = false;
+                        recentPassToMe[id] = false;
+                        surfacePassActive[id] = false;
                     }
                 }
             }
@@ -729,6 +763,7 @@ namespace RLGC {
             lastBallTouchBy.clear();
             passReceiveTime.clear();
             recentPassToMe.clear();
+            surfacePassActive.clear();
             elapsedTime.clear();
         }
     };

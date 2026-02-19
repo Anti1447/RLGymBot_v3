@@ -529,9 +529,9 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new ZeroSumReward(new BackPassReward(), 1.0f), 3.0f),
                 //WeightedReward(new ZeroSumReward(new HighPassReward(), 1.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new ForwardPassReward(), 1.0f), 10.0f),
-                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 20.0f),
-                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 10.0f),
-                WeightedReward(new PassToOpponentPenalty(), 25.0f),
+                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 30.0f),
+                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 15.0f),
+                WeightedReward(new PassToOpponentPenalty(), 30.0f),
 
                 // NEW: Retreat after touch (prepare for rotation), rotation rewards
                 WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 1.0f),

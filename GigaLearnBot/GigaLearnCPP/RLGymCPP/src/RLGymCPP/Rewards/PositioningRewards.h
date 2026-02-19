@@ -345,8 +345,8 @@ class ActiveSupportingPositionReward : public Reward {
 private:
     // Distance thresholds for supporting positioning
     const float MIN_SUPPORT_DIST = 1500.0f;      // Too close = 1st man territory
-    const float OPTIMAL_SUPPORT_DIST = 2500.0f;  // Sweet spot for support
-    const float MAX_SUPPORT_DIST = 3500.0f;      // Too far = passive
+    const float OPTIMAL_SUPPORT_DIST = 3200.0f;  // Sweet spot for support
+    const float MAX_SUPPORT_DIST = 6000.0f;      // Too far = passive
 
     // Possession and role detection
     const float POSSESSION_VELOCITY_THRESHOLD = 100.0f;  // Min velocity dot to count as "moving toward ball"
