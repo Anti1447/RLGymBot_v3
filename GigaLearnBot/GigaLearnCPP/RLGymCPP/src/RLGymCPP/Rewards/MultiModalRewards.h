@@ -412,6 +412,53 @@ namespace RLGC {
             return minDist;
         }
 
+        // NEW: Calculate optimal pass zone between teammate and goal
+        Vec GetOptimalPassZone(const Vec& teammatePpos, const Vec& goalPos, const Vec& teamVel, float boost) const {
+            // Direction from teammate toward goal
+            Vec towardGoal = (goalPos - teammatePpos).Normalized();
+
+            // Teammate velocity direction (where they're moving)
+            Vec movementDir = teamVel.Length() > 100.0f ? teamVel.Normalized() : towardGoal;
+
+            // Blend: If teammate moving toward goal, pass can be further ahead
+            // If teammate moving sideways/backward, pass should be closer
+            float alignmentToGoal = RS_MAX(0.0f, movementDir.Dot(towardGoal));  // 0-1
+
+            // Boost factor: High boost (100) = pass can be further (zone closer to goal)
+            // Low boost (0) = pass should be closer to teammate (easier reception)
+            float boostFactor = boost / 100.0f;  // 0-1
+
+            // Optimal distance factor: blend movement alignment and boost
+            // High alignment + high boost = pass closer to goal (0.7-1.0)
+            // Low alignment + low boost = pass closer to teammate (0.3-0.5)
+            float optimalDistanceFactor = 0.4f + (alignmentToGoal * 0.3f) + (boostFactor * 0.3f);
+
+            // Return position in the zone
+            float distToGoal = (goalPos - teammatePpos).Length();
+            return teammatePpos + towardGoal * (distToGoal * optimalDistanceFactor);
+        }
+
+        // NEW: Evaluate how well pass zone matches actual pass
+        float EvaluatePassZoneAccuracy(const Vec& predictedBallPos, const Vec& optimalZone,
+                                       const Vec& teamPos, const Vec& goalPos) const {
+            // How close is predicted ball to optimal zone?
+            float distToOptimal = (predictedBallPos - optimalZone).Length();
+
+            // Radius of acceptable zone: 400 units (larger zone = more forgiving)
+            float zoneRadius = 400.0f;
+
+            if (distToOptimal <= zoneRadius) {
+                // Perfect zone hit: scale from 1.0 (at center) to 0.3 (at edge)
+                return 1.0f - (distToOptimal / zoneRadius) * 0.7f;
+            } else {
+                // Outside zone: still small bonus if not too far
+                if (distToOptimal <= zoneRadius * 2.0f) {
+                    return 0.3f * (1.0f - ((distToOptimal - zoneRadius) / zoneRadius) * 0.5f);
+                }
+                return 0.0f;
+            }
+        }
+
     public:
         PassingSetupReward() {}
 
@@ -492,6 +539,44 @@ namespace RLGC {
             }
             // bounceCount >= 2: no bonus, chaotic trajectory
 
+            // NEW: Evaluate pass zone accuracy
+            float zoneAccuracyBonus = 0.0f;
+            for (const auto& teammate : state.players) {
+                if (teammate.team != player.team || teammate.carId == player.carId) continue;
+                if (teammate.isDemoed) continue;
+
+                // Get opponent goal
+                Vec opponentGoal = theirGoal;
+
+                // Calculate optimal pass zone for this teammate
+                Vec optimalZone = GetOptimalPassZone(teammate.pos, opponentGoal,
+                                                     teammate.vel, teammate.boost);
+
+                // Evaluate how well the pass matches this zone
+                float zoneScore = EvaluatePassZoneAccuracy(predictedBallPos, optimalZone,
+                                                           teammate.pos, opponentGoal);
+
+                // Bonus: 0.5 for perfect zone match, 0 for miss
+                float bonus = 0.5f * zoneScore;
+
+                // Weight by teammate quality (favor passes to teammates with more boost)
+                float boostWeight = 1.0f + (teammate.boost / 100.0f) * 0.2f;  // 1.0-1.2x
+                bonus *= boostWeight;
+
+                // NEW: Low-boost teamplay multiplier
+                // When passer is low on boost, reward passing more (encourage rotation/teamplay)
+                // Formula: Low boost (0) = 1.5x multiplier, High boost (100) = 1.0x multiplier
+                float lowBoostTeamplayMultiplier = 1.5f - (player.boost / 100.0f) * 0.5f;  // 1.0-1.5x
+                bonus *= lowBoostTeamplayMultiplier;
+
+                zoneAccuracyBonus = RS_MAX(zoneAccuracyBonus, bonus);
+            }
+
+            // Add zone accuracy bonus to total reward
+            if (zoneAccuracyBonus > 0.0f) {
+                reward += zoneAccuracyBonus;
+            }
+
             return reward;
         }
     };
@@ -569,15 +654,30 @@ namespace RLGC {
             if (recentPassToMe[player.carId]) {
                 Vec ballVel = state.ball.vel;
                 if (ballVel.Length() > 200.0f) {
-                    // Reward being on the same heading as ball trajectory
+                    // NEW: Verify pass trajectory leads toward goal
+                    Vec ourGoal = (player.team == Team::BLUE)
+                        ? CommonValues::BLUE_GOAL_CENTER
+                        : CommonValues::ORANGE_GOAL_CENTER;
+                    Vec towardGoal = (ourGoal - player.pos).Normalized();
+
+                    // Ball should be traveling toward goal after reception
                     Vec ballVelNorm = ballVel.Normalized();
+                    float goaldwardComponent = ballVelNorm.Dot(towardGoal);
+
+                    // Reward being on the same heading as ball trajectory
                     Vec playerVelNorm = player.vel.Length() > 100.0f
                         ? player.vel.Normalized()
                         : ballVelNorm;  // Default to ball direction if we're slow
 
                     float alignmentBonus = RS_MAX(0.0f, playerVelNorm.Dot(ballVelNorm));
-                    if (alignmentBonus > 0.6f) {
+
+                    // NEW: Only reward alignment if pass has goal-ward component
+                    if (goaldwardComponent > 0.3f && alignmentBonus > 0.6f) {
                         reward += 0.5f;  // Good positioning/movement relative to pass
+
+                        // NEW: Extra bonus if receiver has boost to follow up
+                        float boostBonus = (player.boost / 100.0f) * 0.3f;  // 0-0.3f bonus
+                        reward += boostBonus;
                     }
                 }
             }
@@ -595,7 +695,9 @@ namespace RLGC {
                     Vec ballVel = state.ball.vel;
                     if (ballVel.Length() > 2000.0f) {
                         // We accelerated the ball significantly - offensive play!
-                        reward += 2.0f;
+                        // NEW: Only bonus if we had boost available for the play
+                        float boostBonus = (player.boost / 100.0f) * 0.5f;  // 0-0.5f bonus
+                        reward += 2.0f + boostBonus;
                     }
 
                     // Reset the pass tracking

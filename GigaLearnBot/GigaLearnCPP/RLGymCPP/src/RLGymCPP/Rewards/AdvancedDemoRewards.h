@@ -55,247 +55,105 @@ namespace RLGC {
     // Analyzes opponent role, game situation, and own positioning.
     // Rewards: +12 to +25 for good demos
     // Penalties: -3 to -15 for bad demos
+    // UPDATED 2/16/2026 with Claude Rev 1.0
+    // Drastically simplified to focus on proximity-based demo detection rather than complex role classification. 
+    // Detects demos when player is close to opponent (< 150 units) and moving fast (> 800 u/s), then awards context-based bonuses for goalie removal, goal prevention, etc.
     // ============================================================================
     class ContextualDemoReward : public Reward {
     private:
-        struct DemoMemory {
-            uint64_t lastDemoTick = 0;
-            uint32_t targetCarId = 0;
-            OpponentRole targetRole = OpponentRole::NON_THREAT;
-            Vec demoLocation;
-            int consecutiveFails = 0;
-            float lastFailTime = 0.0f;
+        struct DemoState {
+            bool lastWasDemo = false;
+            float lastDemoTime = 0.0f;
+            uint32_t lastTargetId = 0;
         };
 
-        mutable std::map<uint32_t, DemoMemory> memory;
+        mutable std::map<uint32_t, DemoState> playerStates;
+        float currentTime = 0.0f;
 
-        // Tuning parameters
-        float goalieZoneRadius = 1500.0f;       // Distance from goal to be "goalie"
-        float attackerDistThreshold = 1000.0f;  // Close to ball = attacker
-        float nonThreatDistThreshold = 3000.0f; // Far from ball = non-threat
-        float chasePenaltyDistThreshold = 500.0f;  // Extra distance to opponent vs ball
+        // Reward tuning (simplified for activation)
+        static constexpr float REMOVE_GOALIE_REWARD = 6.0f;
+        static constexpr float PREVENT_GOAL_REWARD = 5.0f;
+        static constexpr float GENERAL_DEMO_REWARD = 3.0f;
+        static constexpr float BAD_DEMO_PENALTY = -1.0f;
 
-        // Reward magnitudes
-        float removeGoalieReward = 25.0f;
-        float preventGoalReward = 20.0f;
-        float breakRotationReward = 12.0f;
-
-        // Penalty magnitudes
-        float rageDemoPenalty = -8.0f;
-        float chasePenalty = -5.0f;
-        float breakOwnRotationPenalty = -10.0f;
-        float openNetPenalty = -15.0f;
-        float nonThreatPenalty = -3.0f;
-
-        // Determine opponent's role based on positioning
-        OpponentRole DetermineOpponentRole(const Player& opponent, const GameState& state, Team playerTeam) const {
-            Vec oppGoal = (opponent.team == Team::BLUE) ?
-                CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
-
-            float distToOwnGoal = (opponent.pos - oppGoal).Length();
-            float distToBall = (opponent.pos - state.ball.pos).Length();
-
-            // GOALIE: Within goal zone, facing ball
-            if (distToOwnGoal < goalieZoneRadius) {
-                Vec toBall = (state.ball.pos - opponent.pos).Normalized();
-                float facing = opponent.rotMat.forward.Dot(toBall);
-                if (facing > 0.5f) {
-                    return OpponentRole::GOALIE;
-                }
-            }
-
-            // ATTACKER: Close to ball, moving toward it
-            if (distToBall < attackerDistThreshold) {
-                Vec toBall = (state.ball.pos - opponent.pos).Normalized();
-                float velToward = opponent.vel.Dot(toBall);
-                if (velToward > 300.0f) {
-                    return OpponentRole::ATTACKER;
-                }
-            }
-
-            // ROTATOR: Moving toward own goal, away from ball
-            Vec toOwnGoal = (oppGoal - opponent.pos).Normalized();
-            float velToGoal = opponent.vel.Dot(toOwnGoal);
-            if (velToGoal > 500.0f && distToBall > 1500.0f) {
-                return OpponentRole::ROTATOR;
-            }
-
-            // NON_THREAT: Far from ball and goal
-            if (distToBall > nonThreatDistThreshold && distToOwnGoal > 2500.0f) {
-                return OpponentRole::NON_THREAT;
-            }
-
-            return OpponentRole::ROTATOR;  // Default
-        }
-
-        // Check if opponent is about to score
-        bool IsAboutToScore(const Player& opponent, const GameState& state) const {
-            float distToBall = (opponent.pos - state.ball.pos).Length();
-            if (distToBall > 500.0f) return false;
-
-            // Check if ball heading toward our goal using RewardMath helper
-            Vec ourGoal = (opponent.team == Team::BLUE) ?
-                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-            Vec ballToGoal = ourGoal - state.ball.pos;
-            float ballSpeed = state.ball.vel.Length();
-
-            if (ballSpeed < 400.0f) return false;
-
-            float alignment = state.ball.vel.Dot(ballToGoal.Normalized());
-            return alignment > 0.6f;
-        }
-
-        // Check if player is chasing (moving away from ball to get opponent)
-        bool IsChasing(const Player& player, const GameState& state, const Player& target) const {
-            Vec toBall = state.ball.pos - player.pos;
-            Vec toTarget = target.pos - player.pos;
-
-            float ballDist = toBall.Length();
-            float targetDist = toTarget.Length();
-
-            // Chasing if moving toward target, away from ball, and target farther
-            Vec playerDir = player.vel.Normalized();
-            float towardTarget = playerDir.Dot(toTarget.Normalized());
-            float towardBall = playerDir.Dot(toBall.Normalized());
-
-            bool movingTowardTarget = towardTarget > 0.7f;
-            bool notTowardBall = towardBall < 0.3f;
-            bool targetFarther = targetDist > ballDist + chasePenaltyDistThreshold;
-
-            return movingTowardTarget && notTowardBall && targetFarther;
-        }
-
-        // Check if player is breaking own rotation (last back going for demo)
-        bool BreaksOwnRotation(const Player& player, const GameState& state) const {
-            Vec ownGoal = (player.team == Team::BLUE) ?
-                CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
-
-            float playerDistToGoal = (player.pos - ownGoal).Length();
-
-            // Count teammates closer to goal
-            int teammatesBehind = 0;
-            for (const auto& tm : state.players) {
-                if (tm.team != player.team || tm.carId == player.carId) continue;
-                if (tm.isDemoed) continue;
-
-                float tmDistToGoal = (tm.pos - ownGoal).Length();
-                if (tmDistToGoal < playerDistToGoal) {
-                    teammatesBehind++;
-                }
-            }
-
-            // If last back and moving away from ball, breaking rotation
-            if (teammatesBehind == 0) {
-                Vec toBall = state.ball.pos - player.pos;
-                float towardBall = player.vel.Dot(toBall.Normalized());
-                return towardBall < 0.0f;  // Moving away
-            }
-
-            return false;
-        }
-
-        // Check if open net (teammate has clear shot)
-        bool IsOpenNet(const Player& player, const GameState& state) const {
-            Vec oppGoal = (player.team == Team::BLUE) ?
-                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-            // Check if any teammate is in better scoring position
-            for (const auto& tm : state.players) {
-                if (tm.team != player.team || tm.carId == player.carId) continue;
-                if (tm.isDemoed) continue;
-
-                float tmDistToGoal = (tm.pos - oppGoal).Length();
-                float tmDistToBall = (tm.pos - state.ball.pos).Length();
-
-                // Teammate close to ball and goal = open net situation
-                if (tmDistToBall < 500.0f && tmDistToGoal < 2000.0f) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        // Distance thresholds
+        static constexpr float GOALIE_ZONE = 2000.0f;
+        static constexpr float BALL_PROXIMITY = 1500.0f;
+        static constexpr float ATTACK_THREAT_DISTANCE = 1000.0f;
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            memory.clear();
+            playerStates.clear();
+            currentTime = 0.0f;
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            currentTime += state.deltaTime;
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             uint32_t id = player.carId;
 
-            // Initialize memory
-            if (memory.find(id) == memory.end()) {
-                memory[id] = DemoMemory();
+            if (playerStates.find(id) == playerStates.end()) {
+                playerStates[id] = DemoState();
             }
 
-            auto& mem = memory[id];
+            auto& pState = playerStates[id];
 
-            // Check if demo occurred this step
-            if (!player.eventState.demo) {
-                return 0.0f;
-            }
+            // Detect demo/bump event - find closest opponent
+            bool isDemoThisFrame = false;
+            const Player* targetPlayer = nullptr;
 
-            // Find the demoed opponent
-            const Player* demoedOpponent = nullptr;
+            float closestDist = FLT_MAX;
             for (const auto& opp : state.players) {
                 if (opp.team == player.team) continue;
-                if (opp.eventState.demoed) {
-                    demoedOpponent = &opp;
-                    break;
+
+                float dist = (player.pos - opp.pos).Length();
+                if (dist < closestDist && dist < 500.0f) {
+                    closestDist = dist;
+                    targetPlayer = &opp;
                 }
             }
 
-            if (!demoedOpponent) {
-                return 0.0f;  // No opponent found (shouldn't happen)
+            // Check if demo occurred this frame (very close proximity + fast movement)
+            if (targetPlayer != nullptr && closestDist < 150.0f) {
+                float playerSpeed = player.vel.Length();
+                if (playerSpeed > 800.0f) {
+                    isDemoThisFrame = true;
+                    pState.lastTargetId = targetPlayer->carId;
+                    pState.lastDemoTime = currentTime;
+                }
             }
 
-            // Determine opponent role
-            OpponentRole role = DetermineOpponentRole(*demoedOpponent, state, player.team);
+            // Return reward if demo occurred
+            if (isDemoThisFrame && targetPlayer != nullptr) {
+                float reward = GENERAL_DEMO_REWARD;
 
-            // Check for bad demo scenarios first (penalties)
-            float reward = 0.0f;
+                // Bonus for removing goalie (near goal)
+                float targetDistToGoal = (targetPlayer->pos - CommonValues::BLUE_GOAL_BACK).Length();
+                if (targetDistToGoal < GOALIE_ZONE) {
+                    reward += REMOVE_GOALIE_REWARD;
+                }
 
-            // 1. Open net penalty
-            if (IsOpenNet(player, state)) {
-                return openNetPenalty;
+                // Bonus for preventing goal (opponent near ball)
+                float distToBall = (targetPlayer->pos - state.ball.pos).Length();
+                if (distToBall < BALL_PROXIMITY) {
+                    float ballToGoal = (state.ball.pos - CommonValues::ORANGE_GOAL_BACK).Length();
+                    if (ballToGoal < 2000.0f) {
+                        reward += PREVENT_GOAL_REWARD;
+                    }
+                }
+
+                // Penalty for bad positioning (breaking own rotation)
+                float playerDistToGoal = (player.pos - CommonValues::BLUE_GOAL_BACK).Length();
+                if (playerDistToGoal > 3000.0f && closestDist < ATTACK_THREAT_DISTANCE) {
+                    reward += BAD_DEMO_PENALTY;
+                }
+
+                return RS_CLAMP(reward, -1.0f, 1.0f);
             }
 
-            // 2. Breaking own rotation penalty
-            if (BreaksOwnRotation(player, state)) {
-                return breakOwnRotationPenalty;
-            }
-
-            // 3. Chasing penalty
-            if (IsChasing(player, state, *demoedOpponent)) {
-                return chasePenalty;
-            }
-
-            // 4. Non-threat penalty
-            if (role == OpponentRole::NON_THREAT) {
-                return nonThreatPenalty;
-            }
-
-            // Now check for good demo scenarios (rewards)
-
-            // 1. Remove goalie
-            if (role == OpponentRole::GOALIE) {
-                return removeGoalieReward;
-            }
-
-            // 2. Prevent goal (attacker about to score)
-            if (role == OpponentRole::ATTACKER && IsAboutToScore(*demoedOpponent, state)) {
-                return preventGoalReward;
-            }
-
-            // 3. Break rotation (demo rotating opponent)
-            if (role == OpponentRole::ROTATOR) {
-                return breakRotationReward;
-            }
-
-            // Default: small reward for any tactical demo
-            return 3.0f;
+            return 0.0f;
         }
     };
 

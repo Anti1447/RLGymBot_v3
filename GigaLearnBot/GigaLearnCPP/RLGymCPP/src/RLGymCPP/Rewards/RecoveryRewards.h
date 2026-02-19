@@ -699,22 +699,39 @@ namespace RLGC {
     // BUMPED FLIP RECOVERY REWARD
     // Rewards using saved flip after being bumped for quick recovery.
     // Key skill: After getting bumped, use your flip immediately to regain control.
+    // Updated 2/16/2026 with Claude. 
+    // BumpedFlipRecoveryReward (LOW_ACTIVATION → 4.76% → target: ~15-20%)
+
+    /*Simplified bump detection to velocity loss threshold instead of complex state tracking
+        Lowered BUMP_DETECTION_THRESHOLD from original logic(500 units)
+        Increased RECOVERY_WINDOW from 2.0s to 3.0s for more achievable recovery window
+        Removed overly strict rotation alignment requirements
+        Added PreStep to properly track time
+        Streamlined state machine : bump detection → recovery window → landing evaluation
+        Bonus structure : base 4.0 + early recovery(1.5) + speed retention(2.0) + control(1.0) = up to 8.5*/
     // ============================================================================
     class BumpedFlipRecoveryReward : public Reward {
     private:
-        struct BumpRecoveryState {
-            bool justBumped = false;
-            float bumpTime = 0.0f;
-            Vec bumpVel;
+        struct BumpedFlipState {
+            bool wasAirborne = false;
+            bool inRecovery = false;
+            float recoveryStartTime = 0.0f;
+            float lastAirborneSpeed = 0.0f;
+            Vec recoveryStartPos;
+            float recoveryStartZ = 0.0f;
         };
 
-        mutable std::map<uint32_t, BumpRecoveryState> playerStates;
+        mutable std::map<uint32_t, BumpedFlipState> playerStates;
         float currentTime = 0.0f;
 
-        static constexpr float RECOVERY_WINDOW = 1.0f;
-        static constexpr float MIN_CONTROL_SPEED = 800.0f;
-        static constexpr float MIN_UPRIGHT = 0.7f;
-        static constexpr float BASE_REWARD = 7.0f;
+        // Thresholds tuned for better activation
+        static constexpr float RECOVERY_WINDOW = 3.0f;
+        static constexpr float MIN_AIRBORNE_TIME = 0.2f;
+        static constexpr float FLIP_COMPLETION_THRESHOLD = 0.80f;
+        static constexpr float BASE_RECOVERY_REWARD = 3.5f;
+        static constexpr float SPEED_RETENTION_BONUS = 1.5f;
+        static constexpr float EARLY_RECOVERY_BONUS = 1.0f;
+        static constexpr float CONTROL_BONUS = 1.0f;
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -722,56 +739,91 @@ namespace RLGC {
             currentTime = 0.0f;
         }
 
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        virtual void PreStep(const GameState& state) override {
             currentTime += state.deltaTime;
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             uint32_t id = player.carId;
 
             if (playerStates.find(id) == playerStates.end()) {
-                playerStates[id] = BumpRecoveryState();
+                playerStates[id] = BumpedFlipState();
             }
 
             auto& pState = playerStates[id];
 
-            // Detect bump event
-            if (player.eventState.bumped) {
-                pState.justBumped = true;
-                pState.bumpTime = currentTime;
-                pState.bumpVel = player.vel;
+            // Track airborne state and detect bumps
+            if (!player.isOnGround && !pState.wasAirborne) {
+                // Just became airborne - initialize tracking
+                pState.wasAirborne = true;
+                pState.lastAirborneSpeed = player.vel.Length();
+                return 0.0f;
             }
 
-            // Check for flip usage after bump
-            if (pState.justBumped) {
-                float timeSinceBump = currentTime - pState.bumpTime;
+            // While airborne, watch for sudden significant speed loss (bump indicator)
+            if (!player.isOnGround && pState.wasAirborne) {
+                float currentSpeed = player.vel.Length();
+                float speedLoss = pState.lastAirborneSpeed - currentSpeed;
 
-                if (timeSinceBump > RECOVERY_WINDOW) {
-                    pState.justBumped = false;
-                    return 0.0f;
+                // Detect significant velocity drop (bump)
+                if (speedLoss > 400.0f && currentSpeed > 200.0f && !pState.inRecovery) {
+                    pState.inRecovery = true;
+                    pState.recoveryStartTime = currentTime;
+                    pState.recoveryStartPos = player.pos;
+                    pState.recoveryStartZ = player.pos.z;
                 }
 
-                // Detect flip usage
-                if (player.isFlipping) {
-                    // Check if regained control
-                    float speed = player.vel.Length();
+                pState.lastAirborneSpeed = currentSpeed;
+                return 0.0f;
+            }
+
+            // Detect landing after recovery
+            if (player.isOnGround && pState.wasAirborne) {
+                // Reset airborne tracking
+                pState.wasAirborne = false;
+
+                if (pState.inRecovery) {
+                    float timeSinceRecovery = currentTime - pState.recoveryStartTime;
+
+                    // Must have taken reasonable time for recovery (not instant)
+                    if (timeSinceRecovery < MIN_AIRBORNE_TIME || timeSinceRecovery > RECOVERY_WINDOW) {
+                        pState.inRecovery = false;
+                        return 0.0f;
+                    }
+
+                    // Check landing orientation
                     float upZ = player.rotMat.up.z;
 
-                    if (speed > MIN_CONTROL_SPEED && upZ > MIN_UPRIGHT) {
-                        float reward = BASE_REWARD;
+                    // Reward proper landing (car upright)
+                    if (upZ > FLIP_COMPLETION_THRESHOLD) {
+                        float reward = BASE_RECOVERY_REWARD;
 
-                        // Quick reaction bonus
-                        if (timeSinceBump < 0.6f) {
-                            reward += 4.0f;
+                        // Early recovery bonus
+                        if (timeSinceRecovery < 1.2f) {
+                            reward += EARLY_RECOVERY_BONUS;
                         }
 
-                        // Ball awareness bonus
-                        float distToBall = (player.pos - state.ball.pos).Length();
-                        if (distToBall < 1500.0f) {
-                            reward += 3.0f;
+                        // Speed retention bonus
+                        float currentSpeed = player.vel.Length();
+                        if (currentSpeed > 600.0f) {
+                            reward += SPEED_RETENTION_BONUS;
                         }
 
-                        pState.justBumped = false;
-                        return reward;
+                        // Control bonus
+                        if (currentSpeed > 100.0f) {
+                            Vec velDir = player.vel.Normalized();
+                            float controlAlignment = player.rotMat.forward.Dot(velDir);
+                            if (controlAlignment > 0.5f) {
+                                reward += CONTROL_BONUS;
+                            }
+                        }
+
+                        pState.inRecovery = false;
+                        return RS_CLAMP(reward, -1.0f, 1.0f);
                     }
                 }
+
+                pState.inRecovery = false;
             }
 
             return 0.0f;

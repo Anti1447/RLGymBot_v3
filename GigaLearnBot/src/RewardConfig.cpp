@@ -5,6 +5,9 @@
 #include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/OptionControlReward.h"
 #include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/OptionGatingWrappers.h"
 #include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/SimpleOvercommitmentPenalty.h"
+#include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/AdvancedOvercommitmentPenalty.h"
+#include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/AdvancedOpponentOvercommitmentReward.h"
+#include "../GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/CompositeFlickReward.h"
 
 std::vector<WeightedReward> GetPhasedRewards() {
     switch (CURRENT_PHASE) {
@@ -160,8 +163,14 @@ std::vector<WeightedReward> GetPhasedRewards() {
 
                 // NEW: Retreat after touch (prepare for rotation), rotation rewards
                 WeightedReward(new RetreatAfterTouchReward(RotationPhase::PLATINUM), 4.0f),
-                
+
                 WeightedReward(new ProgressiveRotationReward(RotationPhase::PLATINUM), 5.0f),
+
+                // NEW: Numerical advantage attacking (2v1+ situations)
+                WeightedReward(new NumericalAdvantageAttackingReward(), 4.0f),
+
+                // NEW: Dribble bump reward (aggressive ground dribbles with bumps)
+                WeightedReward(new DribbleBumpReward(), 2.0f),
 
                 WeightedReward(new DemoAwarenessReward(), 2.0f),
                 WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 20.0f),
@@ -280,9 +289,9 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // NOTE: DribbleMasteryReward is now wrapped with option control above
                 WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 1.5f),
                 WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.5f),
-                WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 0.3f), 9.0f),
-                WeightedReward(new ZeroSumReward(new FlickExplorationReward(), 0.3f), 3.0f),
-                // NOTE: AdvancedFlickReward is now wrapped with option control above
+                WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 12.0f),
+                // NOTE: CompositeFlickReward combines AdvancedFlickReward, FlickExplorationReward,
+                //       BackFlipFlickReward, MustyFlickReward, and FlickOnGoalReward
 
                 // Recovery
                 WeightedReward(new HalfFlipReward(), 1.5f),
@@ -339,6 +348,13 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 1.5f),
 
                 WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 20.0f),
+                WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 3.5f),
+
+                // NEW: Numerical advantage attacking (2v1+ situations)
+                WeightedReward(new NumericalAdvantageAttackingReward(), 5.0f),
+
+                // NEW: Dribble bump reward (aggressive ground dribbles with bumps)
+                WeightedReward(new DribbleBumpReward(), 3.0f),
 
                 WeightedReward(new DemoAwarenessReward(), 2.5f),
                 /*WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 50.0f),
@@ -372,7 +388,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
                     new ZeroSumReward(
                         new MathRewardWrapper(
                             {
-                                new FlickOnGoalReward(),
+                                new CompositeFlickReward(),
                                 new ShotAccuracyInBoundsReward()
                             },
                             MathOp::MULTIPLY
@@ -406,53 +422,50 @@ std::vector<WeightedReward> GetPhasedRewards() {
             // ====================================================================
                 //WeightedReward(new VelocityPlayerToBallReward(), 0.25f),  // VERY REDUCED
                 //WeightedReward(new VelocityReward(), 0.1f),
-                WeightedReward(new ZeroSumReward(new StrongTouchReward(90, 140), 0.3f), 30.0f),  // Stricter
-                WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 30.0f),
-                //WeightedReward(new InstantSpacingReward(RotationPhase::DIAMOND), 1.0f),  // UPGRADED
-                WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 20.0f),
-                WeightedReward(new PowerSlideControlReward(), 0.6f),
-                WeightedReward(new GoalReward(-0.9f), 1000.0f),
-                //WeightedReward(new SimpleOvercommitmentPenalty(), 10.0f),
+                WeightedReward(new ZeroSumReward(new StrongTouchReward(100, 140), 0.3f), 40.0f),  // Stricter
+                WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 40.0f),
+                WeightedReward(new InstantSpacingReward(RotationPhase::CHAMPION_PLUS), 5.0f),  // UPGRADED
+                //WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 25.0f),
+                WeightedReward(new PowerSlideControlReward(), 0.55f),
+                WeightedReward(new GoalReward(-0.75f), 1200.0f),
 
                 // Aerial focus
                 //WeightedReward(new DoubleJumpAerialReward(), 5.0f),
-                WeightedReward(new PitchControlAerialReward(), 12.0f),
-                WeightedReward(new ZeroSumReward(new FirstToBallReward(), 0.5f), 10.0f),
-                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 0.3f), 20.0f),
-                WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 8.0f),
-                WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.3f), 15.0f),
-                WeightedReward(new ZeroSumReward(new AirDribbleReward(), 0.3f), 35.0f),
-                WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.3f), 70.0f),
-                WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.3f), 80.0f),
-                WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 12.0f),
-                WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 25.0f),
+                WeightedReward(new ZeroSumReward(new PitchControlAerialReward(), 0.4f), 10.0f),
+                WeightedReward(new ZeroSumReward(new FirstToBallReward(), 1.0f), 10.0f),
+                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 1.0f), 25.0f),
+                WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 5.0f),
+                WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 10.0f),
+                WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.5f), 75.0f),
+                WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.5f), 25.0f),
+                //WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.3f), 90.0f),
+                WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 0.3f), 9.0f),
+                WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 20.0f),
                 //WeightedReward(new ZeroSumReward(new WallToAerialReward(), 0.3f), 2.0f),
                 //WeightedReward(new ZeroSumReward(new JumpTouchReward(), 0.3f), 10.0f),
-                WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 25.0f),
+                WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 20.0f),
 
                 // NEW: Dribbling
-                WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 1.0f),
-                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 4.0f),
+                WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 0.6f),
+                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 2.0f),
                 // NOTE: DribbleMasteryReward is now wrapped with option control above
-                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 1.5f),
-                WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.5f),
-                WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 0.3f), 10.0f),
-                WeightedReward(new ZeroSumReward(new BackFlipFlickReward(), 0.3f), 1.2f),
-                WeightedReward(new ZeroSumReward(new MustyFlickReward(), 0.3f), 2.4f),
-                //WeightedReward(new ZeroSumReward(new AngleFlickRewardBase(), 0.3f), 12.0f),
-                //WeightedReward(new ZeroSumReward(new FlickExplorationReward(), 0.3f), 3.0f),
-                // NOTE: AdvancedFlickReward is now wrapped with option control above
+                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 0.6f),
+                WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 0.8f),
+                WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 14.0f),
+
+                // NEW: Ceiling Shots (advanced wall-to-air-dribble variation)
+                WeightedReward(new ZeroSumReward(new CeilingShotReward(), 0.5f), 35.0f),
 
                 // Recovery
                 WeightedReward(new HalfFlipReward(), 1.5f),
-                //WeightedReward(new WavedashBasicReward(), -2.0f),
+                WeightedReward(new WavedashBasicReward(), 0.5f),
                 //WeightedReward(new IntelligentWavedashReward(), 5.0f),
                 //WeightedReward(new WavedashReward(), 12.0f),
                 WeightedReward(new EnhancedSpeedFlipReward(), 10.0f),
-                WeightedReward(new AirReward(), 0.1f),
-                WeightedReward(new ProperLandingReward(), 0.3f),
+                //WeightedReward(new AirReward(), 0.25f),
+                WeightedReward(new ProperLandingReward(), 0.65f),
                 WeightedReward(new AdvancedRecoveryReward(), 0.3f),
-                WeightedReward(new BumpedFlipRecoveryReward(), 0.4f),
+                WeightedReward(new BumpedFlipRecoveryReward(), 0.2f),
                 //WeightedReward(new WallDashReward(), 35.0f),  // Increased weight for better sequence detection
                 WeightedReward(new SupersonicReward(), 4.0f),
 
@@ -461,70 +474,82 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new KickoffFlipReward(), 13.0f),
                 //WeightedReward(new KickoffStrategyReward(), 25.0f),  // Reward diverse kickoff strategies
                 //WeightedReward(new KickoffRandomizationReward(), 15.0f),  // Prevent repetitive patterns
+                // Kickoff - Encourage closest player to rush ball
+                WeightedReward(new ClosestPlayerSpeedReward(), 4.0f),
 
                 // Boost management
-                WeightedReward(new PickupBoostReward(), 34.0f),  // INCREASED
-                WeightedReward(new SaveBoostReward(), 0.57f),
-                WeightedReward(new SmallPadCollectionReward(), 2.5f),
-                WeightedReward(new BoostPathReward(), 3.0f),
-                WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 50.0f),
-                WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 4.0f),
-                WeightedReward(new BoostWastePenaltyReward(), 6.0f),
-                WeightedReward(new SupersonicBoostPenalty(), 8.0f),
-                WeightedReward(new PostKickoffMidBoostReward(), 15.0f),
-                WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 6.0f),
-                WeightedReward(new LowBoostOffenseReward(), 10.0f),
-                WeightedReward(new BigBoostPadCenterReward(), 15.0f),
+                WeightedReward(new PickupBoostReward(), 35.0f),  // INCREASED
+                WeightedReward(new SaveBoostReward(), 0.53f),
+                WeightedReward(new SmallPadCollectionReward(), 2.0f),
+                WeightedReward(new BoostPathReward(), 6.0f),
+                WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 60.0f),
+                WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 2.0f),
+                WeightedReward(new BoostWastePenaltyReward(), 8.0f),
+                WeightedReward(new SupersonicBoostPenalty(), 12.0f),
+                //WeightedReward(new PostKickoffMidBoostReward(), 15.0f),
+                WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 3.0f),
+                WeightedReward(new BigBoostPadCenterReward(), 20.0f),
                 WeightedReward(new DefensiveRotationBoostReward(), 20.0f),
 
                 // Basic Shots and Outplays
-                WeightedReward(new ZeroSumReward(new HookShotReward(), 0.3f), 5.0f),
-                WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 5.0f),
-                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 25.0f), // updated reward on 01/30/26. Added to Option Control above
+                //WeightedReward(new ZeroSumReward(new HookShotReward(), 0.3f), 5.0f),
+                WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 15.0f),
+                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 15.0f), // updated reward on 01/30/26. Added to Option Control above
                 WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.5f), // Added to Option Control above
                 //WeightedReward(new ZeroSumReward(new AirRollShotReward(), 0.3f), 6.0f),
-                WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.3f), 35.0f),
-                WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 30.0f),
-                WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(), 0.3f), 15.0f),
-                WeightedReward(new ZeroSumReward(new AerialCommitmentReward(), 0.3f), 15.0f),
+                WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.3f), 30.0f),
+                WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 35.0f),
+                WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(), 0.5f), 15.0f),
+                WeightedReward(new ZeroSumReward(new AerialCommitmentReward(), 0.5f), 15.0f),
+                WeightedReward(new ZeroSumReward(new WallPinchReward(), 0.2f), 15.0f),
 
                 // NEW: Minor possession shaping and defense
-                WeightedReward(new DefensivePositionReward(), 2.5f),
-                WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.0f),
-                WeightedReward(new ZeroSumReward(new PossessionControlReward(), 1.0f), 8.0f),
-                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 0.3f), 2.15f),
-                WeightedReward(new ZeroSumReward(new BigClearReward(), 0.5f), 12.0f),
-                WeightedReward(new ZeroSumReward(new CornerClearReward(), 0.5f), 2.0f),
-                WeightedReward(new DefensivePositioningChallengeReward(), 2.0f),
+                WeightedReward(new DefensivePositionReward(), 1.5f),
+                WeightedReward(new DefensiveReadinessReward(), 0.5f),
+                WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 3.0f),
+                WeightedReward(new ZeroSumReward(new PossessionControlReward(), 1.0f), 10.0f),
+                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 1.0f), 2.0f),
+                WeightedReward(new ZeroSumReward(new BigClearReward(), 0.5f), 6.0f),
+                WeightedReward(new ZeroSumReward(new CornerClearReward(), 0.5f), 3.0f),
+                WeightedReward(new DefensivePositioningChallengeReward(), 2.5f),
                 WeightedReward(new BackboardDefenseReward(), 5.0f),
-                WeightedReward(new EarlyDangerDetectionReward(), 1.0f),
-                WeightedReward(new DoubleCommitPenalty(), 10.0f),
-                WeightedReward(new SimpleOvercommitmentPenalty(), 20.0f),  // Phase 1: Resource management & positioning discipline
-                WeightedReward(new ZeroSumReward(new GoalLineClearanceReward(), 0.5f), 15.0f),
-                WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 6.0f),
-                WeightedReward(new GoalpostPositioningReward(), 8.0f),
-                WeightedReward(new ActiveSupportingPositionReward(), 6.5f),
-                WeightedReward(new OwnNetCenteringPenalty(), 15.0f),
+                WeightedReward(new EarlyDangerDetectionReward(), 1.2f),
+                WeightedReward(new DoubleCommitPenalty(), 15.0f),
+                WeightedReward(new SimpleOvercommitmentPenalty(), 6.0f),  // Phase 1: Resource management & positioning discipline
+                WeightedReward(new AdvancedOvercommitmentPenalty(), 5.0f),  // Some Phase 2 emphasis
+                WeightedReward(new ZeroSumReward(new GoalLineClearanceReward(), 0.5f), 10.0f),
+                WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 10.0f),
+                WeightedReward(new GoalpostPositioningReward(), 6.0f),
+                WeightedReward(new ActiveSupportingPositionReward(), 6.0f),
+                WeightedReward(new OwnNetCenteringPenalty(), 10.0f),
+                WeightedReward(new EmergencySaveCommitReward(), 4.0f),
 
                 // NEW: Passing rewards
                 // NOTE: PassingAccuracyReward is now wrapped with option control 
                 //WeightedReward(new ZeroSumReward(new BackPassReward(), 1.0f), 3.0f),
-                WeightedReward(new ZeroSumReward(new HighPassReward(), 1.0f), 8.0f),
-                WeightedReward(new ZeroSumReward(new ForwardPassReward(), 1.0f), 8.0f),
-                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 25.0f),
-                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 25.0f),
-                WeightedReward(new PassToOpponentPenalty(), 12.0f),
+                //WeightedReward(new ZeroSumReward(new HighPassReward(), 1.0f), 10.0f),
+                //WeightedReward(new ZeroSumReward(new ForwardPassReward(), 1.0f), 10.0f),
+                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 20.0f),
+                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 10.0f),
+                WeightedReward(new PassToOpponentPenalty(), 25.0f),
 
                 // NEW: Retreat after touch (prepare for rotation), rotation rewards
-                WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 3.0f),
+                WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 1.0f),
 
-                WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 15.0f),
+                WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 5.0f),
+                WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 2.0f),
 
-                WeightedReward(new DemoAwarenessReward(), 2.5f),
+                // NEW: Numerical advantage attacking (2v1+ situations)
+                WeightedReward(new ZeroSumReward(new NumericalAdvantageAttackingReward(), 1.0f), 70.0f),
+
+                // NEW: Dribble bump reward (aggressive ground dribbles with bumps)
+                //WeightedReward(new ZeroSumReward(new DribbleBumpReward(), 0.5f), 40.0f),
+
+                //WeightedReward(new DemoAwarenessReward(), 3.0f),
                 WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 30.0f),
-                WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 60.0f),
-                WeightedReward(new ZeroSumReward(new ContextualDemoReward(), 0.5f), 130.0f),
-                WeightedReward(new ZeroSumReward(new SoloDefenderBumpReward(), 0.5f), 40.0f),
+                WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 40.0f),
+                WeightedReward(new ZeroSumReward(new ContextualDemoReward(), 0.5f), 80.0f),
+                //WeightedReward(new ZeroSumReward(new SoloDefenderBumpReward(), 0.5f), 60.0f),
                 //WeightedReward(new ZeroSumReward(new PlayerVelocityToOpponentReward(), 0.4f), 2.0f),
                 //WeightedReward(new BumpReward(), 30.0f),
                 //WeightedReward(new BumpedPenalty(), 15.0f),
@@ -546,20 +571,33 @@ std::vector<WeightedReward> GetPhasedRewards() {
                         ),
                         0.3f
                     ),
-                    40.0f
+                    50.0f
                 ),
                 WeightedReward(
                     new ZeroSumReward(
                         new MathRewardWrapper(
                             {
-                                new FlickOnGoalReward(),
+                                new AirTouchReward(),
                                 new ShotAccuracyInBoundsReward()
                             },
                             MathOp::MULTIPLY
                         ),
                         0.3f
                     ),
-                    36.0f
+                    30.0f
+                ),
+                WeightedReward(
+                    new ZeroSumReward(
+                        new MathRewardWrapper(
+                            {
+                                new CompositeFlickReward(),
+                                new ShotAccuracyInBoundsReward()
+                            },
+                            MathOp::MULTIPLY
+                        ),
+                        0.3f
+                    ),
+                    30.0f
                 ),
                 WeightedReward(
                     new ZeroSumReward(
@@ -572,26 +610,341 @@ std::vector<WeightedReward> GetPhasedRewards() {
                         ),
                         0.3f
                     ),
-                    30.0f
+                    40.0f
                 ),
-                WeightedReward(new ZeroSumReward(new AssistReward(), 0.5f), 60.0f),
-                WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 60.0f)
+                WeightedReward(new ZeroSumReward(new AssistReward(), 1.0f), 30.0f),
+                WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 40.0f)
         };
     }
     case TrainingPhase::PHASE_6_CHAMPION:
+    {
+        // ====================================================================
+        // PHASE 6: CHAMPION - Advanced Motion Prediction (Phase 2 Overcommitment)
+        // ====================================================================
+        // Transition from Phase 1 (reactive) to Phase 2 (predictive) overcommitment
+        // penalties. Both run with reduced Phase 1 weight and new Phase 2 emphasis.
+        // Opponent exploitation reward for capitalizing on locked-out opponents.
+        // ====================================================================
+
+        // Use Phase 5 Diamond as base and add Phase 2 overcommitment rewards
+        auto baseRewards = std::vector<WeightedReward>{
+            // ====================================================================
+            // DIAMOND PHASE CORE REWARDS (reused)
+            // ====================================================================
+            WeightedReward(new ZeroSumReward(new StrongTouchReward(80, 140), 0.3f), 25.0f),
+            WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 30.0f),
+            WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 15.0f),
+            WeightedReward(new PowerSlideControlReward(), 0.55f),
+            WeightedReward(new GoalReward(-1.0f), 1000.0f),
+
+            // Aerial focus
+            WeightedReward(new ZeroSumReward(new PitchControlAerialReward(), 0.4f), 10.0f),
+            WeightedReward(new ZeroSumReward(new FirstToBallReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 5.0f),
+            WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 20.0f),
+            WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.5f), 60.0f),
+            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.5f), 25.0f),
+            WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 0.3f), 12.0f),
+            WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 20.0f),
+            WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 20.0f),
+
+            // Dribbling
+            WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 0.25f),
+            WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 3.0f),
+            WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 1.0f),
+            WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.0f),
+            WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 11.0f),
+            // NOTE: CompositeFlickReward combines AdvancedFlickReward (6.0), BackFlipFlickReward (1.0),
+            //       MustyFlickReward (2.0), and FlickExplorationReward (2.0)
+
+            // Recovery
+            WeightedReward(new HalfFlipReward(), 1.5f),
+            WeightedReward(new WavedashBasicReward(), 1.0f),
+            WeightedReward(new EnhancedSpeedFlipReward(), 10.0f),
+            WeightedReward(new ProperLandingReward(), 0.5f),
+            WeightedReward(new AdvancedRecoveryReward(), 0.3f),
+            WeightedReward(new BumpedFlipRecoveryReward(), 0.1f),
+            WeightedReward(new SupersonicReward(), 3.0f),
+
+            // Boost management
+            WeightedReward(new PickupBoostReward(), 33.0f),
+            WeightedReward(new SaveBoostReward(), 0.55f),
+            WeightedReward(new SmallPadCollectionReward(), 2.0f),
+            WeightedReward(new BoostPathReward(), 6.0f),
+            WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 50.0f),
+            WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 4.0f),
+            WeightedReward(new BoostWastePenaltyReward(), 8.0f),
+            WeightedReward(new SupersonicBoostPenalty(), 9.0f),
+            WeightedReward(new PostKickoffMidBoostReward(), 15.0f),
+            WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 6.0f),
+            WeightedReward(new BigBoostPadCenterReward(), 20.0f),
+            WeightedReward(new DefensiveRotationBoostReward(), 20.0f),
+
+            // Kickoff - Encourage closest player to rush ball
+            WeightedReward(new ClosestPlayerSpeedReward(), 5.0f),
+
+            // Shots and Outplays
+            WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 10.0f),
+            WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 30.0f),
+            WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.5f),
+            WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.3f), 35.0f),
+            WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 35.0f),
+            WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(), 0.5f), 10.0f),
+            WeightedReward(new ZeroSumReward(new AerialCommitmentReward(), 0.5f), 15.0f),
+
+            // Defense and possession
+            WeightedReward(new DefensivePositionReward(), 2.5f),
+            WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.5f),
+            WeightedReward(new ZeroSumReward(new PossessionControlReward(), 1.0f), 15.0f),
+            WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 1.0f), 1.9f),
+            WeightedReward(new ZeroSumReward(new BigClearReward(), 0.5f), 10.0f),
+            WeightedReward(new ZeroSumReward(new CornerClearReward(), 0.5f), 3.0f),
+            WeightedReward(new DefensivePositioningChallengeReward(), 2.5f),
+            WeightedReward(new BackboardDefenseReward(), 5.0f),
+            WeightedReward(new EarlyDangerDetectionReward(), 1.2f),
+            WeightedReward(new DoubleCommitPenalty(), 6.0f),
+
+            // ====================================================================
+            // PHASE 2 OVERCOMMITMENT (NEW for Phase 6+)
+            // ====================================================================
+            // Reduced Phase 1 (reactive) penalties, new Phase 2 (predictive)
+            WeightedReward(new SimpleOvercommitmentPenalty(), 7.0f),  // Reduced from 30.0f
+            WeightedReward(new AdvancedOvercommitmentPenalty(), 7.0f),  // New: Motion prediction
+            WeightedReward(new AdvancedOpponentOvercommitmentReward(), 10.0f),  // New: Exploit lock-outs
+
+            WeightedReward(new ZeroSumReward(new GoalLineClearanceReward(), 0.5f), 15.0f),
+            WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 15.0f),
+            WeightedReward(new GoalpostPositioningReward(), 10.0f),
+            WeightedReward(new ActiveSupportingPositionReward(), 4.0f),
+            WeightedReward(new OwnNetCenteringPenalty(), 10.0f),
+            WeightedReward(new EmergencySaveCommitReward(), 4.0f),
+
+            // Passing rewards
+            WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 20.0f),
+            WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 10.0f),
+            WeightedReward(new PassToOpponentPenalty(), 20.0f),
+
+            // Rotation
+            WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 2.0f),
+            WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 5.0f),
+            WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 2.0f),
+
+            // Numerical advantage and dribble attacks
+            WeightedReward(new ZeroSumReward(new NumericalAdvantageAttackingReward(), 1.0f), 30.0f),
+
+            // Demos and bumps
+            //WeightedReward(new DemoAwarenessReward(), 3.0f),
+            WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 40.0f),
+            WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 60.0f),
+            WeightedReward(new ZeroSumReward(new ContextualDemoReward(), 0.5f), 150.0f),
+            WeightedReward(new ZeroSumReward(new SoloDefenderBumpReward(), 0.5f), 60.0f),
+
+            // Shots
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new SpeedScaledShotReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                30.0f
+            ),
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new CompositeFlickReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                30.0f
+            ),
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new BallRedirectReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                30.0f
+            ),
+            WeightedReward(new ZeroSumReward(new AssistReward(), 1.0f), 30.0f),
+            WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 40.0f)
+        };
+
+        return baseRewards;
+    }
+
     case TrainingPhase::PHASE_7_GC:
     case TrainingPhase::PHASE_8_SSL:
     case TrainingPhase::PHASE_9_PRO:
-        // For now, default to PHASE_4_PLATINUM rewards
-        // TODO: Implement phase-specific rewards for phases 5-9
-        return std::vector<WeightedReward>{
-            WeightedReward(new VelocityReward(), 0.4f),
-            WeightedReward(new FaceBallReward(), 0.3f),
-            WeightedReward(new VelocityPlayerToBallReward(), 3.0f),
-            WeightedReward(new ZeroSumReward(new TouchBallReward(), 1.0f), 20.0f),
-            WeightedReward(new PickupBoostReward(), 8.0f),
-            WeightedReward(new GoalReward(-1.0f), 150.0f)
+    {
+        // ====================================================================
+        // PHASES 7-9: GRAND CHAMPION+ - Full Phase 2 Emphasis
+        // ====================================================================
+        // Minimize Phase 1 (reactive), maximize Phase 2 (predictive)
+        // Higher complexity rewards for elite-level play
+        // ====================================================================
+
+        // Use Phase 6 as base with adjusted overcommitment weights
+        auto baseRewards = std::vector<WeightedReward>{
+            // (Same core rewards as Phase 6, with overcommitment weight adjustments)
+            WeightedReward(new ZeroSumReward(new StrongTouchReward(80, 140), 0.3f), 25.0f),
+            WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 30.0f),
+            WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 15.0f),
+            WeightedReward(new PowerSlideControlReward(), 0.55f),
+            WeightedReward(new GoalReward(-1.0f), 1000.0f),
+
+            WeightedReward(new ZeroSumReward(new PitchControlAerialReward(), 0.4f), 10.0f),
+            WeightedReward(new ZeroSumReward(new FirstToBallReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 5.0f),
+            WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 20.0f),
+            WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.5f), 60.0f),
+            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.5f), 25.0f),
+            WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 0.3f), 12.0f),
+            WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 20.0f),
+            WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 20.0f),
+
+            WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 0.5f),
+            WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 2.0f),
+            WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 1.0f),
+            WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.0f),
+            WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 11.0f),
+            // NOTE: CompositeFlickReward combines AdvancedFlickReward (6.0), BackFlipFlickReward (1.0),
+            //       MustyFlickReward (2.0), and FlickExplorationReward (2.0)
+
+            WeightedReward(new HalfFlipReward(), 1.5f),
+            WeightedReward(new WavedashBasicReward(), 1.0f),
+            WeightedReward(new EnhancedSpeedFlipReward(), 10.0f),
+            WeightedReward(new ProperLandingReward(), 0.5f),
+            WeightedReward(new AdvancedRecoveryReward(), 0.3f),
+            WeightedReward(new BumpedFlipRecoveryReward(), 0.1f),
+            WeightedReward(new SupersonicReward(), 3.0f),
+
+            WeightedReward(new PickupBoostReward(), 33.0f),
+            WeightedReward(new SaveBoostReward(), 0.55f),
+            WeightedReward(new SmallPadCollectionReward(), 2.0f),
+            WeightedReward(new BoostPathReward(), 6.0f),
+            WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 50.0f),
+            WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 4.0f),
+            WeightedReward(new BoostWastePenaltyReward(), 8.0f),
+            WeightedReward(new SupersonicBoostPenalty(), 9.0f),
+            WeightedReward(new PostKickoffMidBoostReward(), 15.0f),
+            WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 6.0f),
+            WeightedReward(new BigBoostPadCenterReward(), 20.0f),
+            WeightedReward(new DefensiveRotationBoostReward(), 20.0f),
+
+            WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 10.0f),
+            WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 30.0f),
+            WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.5f),
+            WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.3f), 35.0f),
+            WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 35.0f),
+            WeightedReward(new ZeroSumReward(new ChallengeCommitmentReward(), 0.5f), 10.0f),
+            WeightedReward(new ZeroSumReward(new AerialCommitmentReward(), 0.5f), 15.0f),
+
+            WeightedReward(new DefensivePositionReward(), 2.5f),
+            WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.5f),
+            WeightedReward(new ZeroSumReward(new PossessionControlReward(), 1.0f), 15.0f),
+            WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 1.0f), 1.9f),
+            WeightedReward(new ZeroSumReward(new BigClearReward(), 0.5f), 10.0f),
+            WeightedReward(new ZeroSumReward(new CornerClearReward(), 0.5f), 3.0f),
+            WeightedReward(new DefensivePositioningChallengeReward(), 2.5f),
+            WeightedReward(new BackboardDefenseReward(), 5.0f),
+            WeightedReward(new EarlyDangerDetectionReward(), 1.2f),
+            WeightedReward(new DoubleCommitPenalty(), 5.0f),
+
+            // ====================================================================
+            // PHASE 2 OVERCOMMITMENT (FULL EMPHASIS for Phases 7-9)
+            // ====================================================================
+            // Minimal Phase 1 (5.0f), maximum Phase 2 (20.0f + 18.0f)
+            WeightedReward(new SimpleOvercommitmentPenalty(), 5.0f),  // Minimal Phase 1
+            WeightedReward(new AdvancedOvercommitmentPenalty(), 20.0f),  // Full Phase 2 emphasis
+            WeightedReward(new AdvancedOpponentOvercommitmentReward(), 18.0f),  // Full opponent exploit
+
+            WeightedReward(new ZeroSumReward(new GoalLineClearanceReward(), 0.5f), 15.0f),
+            WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 15.0f),
+            WeightedReward(new GoalpostPositioningReward(), 10.0f),
+            WeightedReward(new ActiveSupportingPositionReward(), 8.0f),
+            WeightedReward(new OwnNetCenteringPenalty(), 15.0f),
+            WeightedReward(new EmergencySaveCommitReward(), 4.0f),
+
+            WeightedReward(new ZeroSumReward(new HighPassReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new ForwardPassReward(), 1.0f), 10.0f),
+            WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 40.0f),
+            WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 40.0f),
+            WeightedReward(new PassToOpponentPenalty(), 25.0f),
+
+            WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 5.0f),
+            WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 20.0f),
+            WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 5.0f),
+
+            WeightedReward(new ZeroSumReward(new NumericalAdvantageAttackingReward(), 1.0f), 30.0f),
+            WeightedReward(new ZeroSumReward(new DribbleBumpReward(), 0.5f), 60.0f),
+
+            WeightedReward(new DemoAwarenessReward(), 3.0f),
+            WeightedReward(new ZeroSumReward(new BumpReward(), 0.5f), 40.0f),
+            WeightedReward(new ZeroSumReward(new DemoReward(), 0.5f), 60.0f),
+            WeightedReward(new ZeroSumReward(new ContextualDemoReward(), 0.5f), 150.0f),
+            WeightedReward(new ZeroSumReward(new SoloDefenderBumpReward(), 0.5f), 60.0f),
+
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new SpeedScaledShotReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                40.0f
+            ),
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new CompositeFlickReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                30.0f
+            ),
+            WeightedReward(
+                new ZeroSumReward(
+                    new MathRewardWrapper(
+                        {
+                            new BallRedirectReward(),
+                            new ShotAccuracyInBoundsReward()
+                        },
+                        MathOp::MULTIPLY
+                    ),
+                    0.3f
+                ),
+                40.0f
+            ),
+            WeightedReward(new ZeroSumReward(new AssistReward(), 1.0f), 120.0f),
+            WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 80.0f)
         };
+
+        return baseRewards;
+    }
 
     default:
         // Fallback to Bronze

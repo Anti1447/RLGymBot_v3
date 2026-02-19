@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 #include <RLGymCPP/EnvSet/EnvSet.h>
+#include <RLGymCPP/Rewards/RewardMetricsCollector.h>
+#include <RLGymCPP/Rewards/RewardDiagnostician.h>
 #include "RLGymCPP/Utils/KickoffController.h"
 #include "Util/MetricSender.h"
 #include "Util/RenderSender.h"
@@ -52,6 +54,9 @@ namespace GGL {
 			totalIterations = 0;
 
 		StepCallbackFn stepCallback = NULL;
+
+		// Reward metrics collection for automated diagnostics
+		RewardMetricsCollector metricsCollector;
 
 		// MuZero reanalysis components
 		ReanalysisBuffer* reanalysisBuffer = nullptr;

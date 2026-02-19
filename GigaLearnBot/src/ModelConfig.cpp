@@ -53,9 +53,9 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.031f;
-        cfg.policyLR = 1.4e-4f;
-        cfg.criticLR = 1.4e-4f;
+        cfg.entropyScale = 0.03f;
+        cfg.policyLR = 1.32e-4f;
+        cfg.criticLR = 1.32e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.65f;
@@ -144,7 +144,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // This ensures the skill rating reflects performance across all modes
     cfg.skillTracker.enabled = true;
     cfg.skillTracker.numArenas = 32;       // Sufficient for mixed-mode evaluation
-    cfg.skillTracker.simTime = 60.f;       // Per-arena sim time
+    cfg.skillTracker.simTime = 75.f;       // Per-arena sim time
     cfg.skillTracker.maxSimTime = 240.f;
     cfg.skillTracker.updateInterval = 8;
     cfg.skillTracker.ratingInc = 5.f;
@@ -180,7 +180,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9901;
+    cfg.ppo.gaeGamma = 0.9903;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

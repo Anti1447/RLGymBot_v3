@@ -37,3 +37,29 @@ def init(py_exec_path, project, group, name, id = None):
 def add_metrics(metrics):
 	global wandb_run
 	wandb_run.log(metrics)
+
+def on_checkpoint_saved(checkpoint_path, checkpoints_root, total_timesteps):
+	"""Called from C++ Learner::Save() after REWARD_DIAGNOSIS.json is written.
+	Runs automated reward analysis comparing the 2 most recent checkpoints.
+	Logs summary metrics to wandb and saves graphs locally. Non-fatal."""
+	global wandb_run
+	try:
+		# Import reward_analysis_auto from same directory or parent directory
+		import sys
+		from pathlib import Path
+
+		# Add parent directory to path to find python_scripts module
+		script_dir = Path(__file__).parent
+		sys.path.insert(0, str(script_dir))
+
+		import reward_analysis_auto
+		reward_analysis_auto.run_analysis(
+			checkpoint_path=checkpoint_path,
+			checkpoints_root=checkpoints_root,
+			total_timesteps=total_timesteps,
+			wandb_run=wandb_run
+		)
+	except Exception as e:
+		print(f"[RewardAnalysis] WARNING: Analysis failed (non-fatal): {e}")
+		import traceback
+		traceback.print_exc()

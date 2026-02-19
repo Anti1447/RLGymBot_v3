@@ -804,4 +804,42 @@ namespace RLGC {
 			return dirToOpponent.Dot(normVel);
 		}
 	};
+
+	// ClosestPlayerSpeedReward (2025-02-17)
+	// Rewards ONLY the closest player on the team to the ball with velocity toward ball
+	// If two players are equidistant, rewards the leftmost player (smallest x)
+	// Purpose: Encourages the nearest player to get first to the ball during kickoff
+	class ClosestPlayerSpeedReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Find the closest teammate to the ball
+			float closestDist = std::numeric_limits<float>::max();
+			int closestIdx = -1;
+
+			for (size_t i = 0; i < state.players.size(); i++) {
+				const Player& teammate = state.players[i];
+
+				// Only consider teammates
+				if (teammate.team != player.team)
+					continue;
+
+				float dist = (teammate.pos - state.ball.pos).Length();
+
+				// Update if closer, or same distance but more to the left (smaller x)
+				if (dist < closestDist || (dist == closestDist && closestIdx != -1 && teammate.pos.x < state.players[closestIdx].pos.x)) {
+					closestDist = dist;
+					closestIdx = (int)i;
+				}
+			}
+
+			// No teammates found (shouldn't happen) or not the closest player
+			if (closestIdx == -1 || state.players[closestIdx].carId != player.carId)
+				return 0.0f;
+
+			// Reward this player's velocity toward ball (same as VelocityPlayerToBallReward)
+			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
+			return dirToBall.Dot(normVel);
+		}
+	};
 }

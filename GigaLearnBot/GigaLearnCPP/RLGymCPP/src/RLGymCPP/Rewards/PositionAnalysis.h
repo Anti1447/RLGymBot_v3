@@ -211,6 +211,116 @@ public:
 
         return closest;
     }
+
+    // ===== TRAJECTORY PROJECTION (Phase 2 - Advanced Overcommitment) =====
+
+    static inline Vec projectMotion(const Vec& pos, const Vec& vel, float time) {
+        // Project motion vector forward in time (no gravity)
+        return pos + vel * time;
+    }
+
+    static inline float getRemainingFlipDuration(const Player& player) {
+        // Calculate remaining flip/double jump duration based on jump state
+        // Flip typically lasts 0.3-0.5 seconds; use jump counter state
+        if (player.hasDoubleJumped) return 0.0f;  // No flip available
+        if (player.isFlipping) {
+            // Flip in progress - estimate ~0.2s remaining
+            // In real implementation, would track flip start time
+            return 0.2f;
+        }
+        return 0.0f;
+    }
+
+    static inline Vec projectBoostDepletionPosition(const Player& player,
+                                                    float boostBurnRate = 33.3f) {
+        // Project where player will be when boost runs out at current burn rate
+        if (player.boost <= 0.0f) return player.pos;
+
+        float timeToEmpty = player.boost / boostBurnRate;
+        return projectMotion(player.pos, player.vel, timeToEmpty);
+    }
+
+    static inline float calculateTimeToGround(const Player& player) {
+        // Calculate time until player reaches ground (including gravity)
+        if (player.isOnGround) return 0.0f;
+
+        float gravity = -650.0f;  // Rocket League gravity constant
+        float vy = player.vel.z;
+        float pos_z = player.pos.z;
+
+        // Solve: 0 = pos_z + vy*t + 0.5*g*t^2
+        float discriminant = vy * vy - 2.0f * gravity * pos_z;
+        if (discriminant < 0) return 0.0f;
+
+        float t1 = (-vy - std::sqrt(discriminant)) / gravity;
+        return (t1 > 0) ? t1 : 0.0f;
+    }
+
+    static inline float projectZPosition(const Player& player, float time) {
+        // Get estimated Z position at a future time (with gravity included)
+        float gravity = -650.0f;
+        return player.pos.z + player.vel.z * time + 0.5f * gravity * time * time;
+    }
+
+    static inline bool canFlipReachDistance(const Player& player,
+                                           float targetDistance,
+                                           const Vec& targetPos) {
+        // Check if flip can reach a target distance
+        if (!player.isFlipping && player.hasDoubleJumped) return false;  // No flip available
+
+        Vec flipPos = projectMotion(player.pos, player.vel, getRemainingFlipDuration(player));
+        float distance = (targetPos - flipPos).Length();
+
+        return distance < targetDistance + 200.0f;  // 200 UU margin for recovery
+    }
+
+    static inline Vec predictFlipCompletionPosition(const Player& player) {
+        // Project where player will be when current flip completes
+        float flipDuration = getRemainingFlipDuration(player);
+        return projectMotion(player.pos, player.vel, flipDuration);
+    }
+
+    static inline float getAerialTouchableHeight(const Player& player,
+                                                const Vec& ballPos) {
+        // Calculate projected Z height when player reaches ball's XY position
+        // Useful for detecting if aerial will actually reach ball height
+
+        // Estimate time to reach ball XY position
+        Vec playerToballXY = Vec(ballPos.x - player.pos.x, ballPos.y - player.pos.y, 0.0f);
+        float xyDistance = playerToballXY.Length();
+
+        if (xyDistance < 1.0f) return player.pos.z;  // Already at ball XY
+
+        // Estimate horizontal velocity (assume airborne, mostly horizontal)
+        Vec playerVelXY = Vec(player.vel.x, player.vel.y, 0.0f);
+        float horizontalSpeed = playerVelXY.Length();
+
+        if (horizontalSpeed < 1.0f) return projectZPosition(player, xyDistance / 1.0f);
+
+        float timeToReach = xyDistance / horizontalSpeed;
+        return projectZPosition(player, timeToReach);
+    }
+
+    static inline bool isProjectedToStrandInOpponentHalf(const Player& player,
+                                                         float boostBurnRate = 33.3f) {
+        // Check if boost depletion endpoint is stranded in opponent half
+        if (player.boost <= 0.0f) {
+            // Already stranded
+            bool inOppHalf = (player.team == Team::BLUE && player.pos.y > 0) ||
+                           (player.team == Team::ORANGE && player.pos.y < 0);
+            return inOppHalf;
+        }
+
+        Vec depletionPos = projectBoostDepletionPosition(player, boostBurnRate);
+        bool inOppHalf = (player.team == Team::BLUE && depletionPos.y > 0) ||
+                        (player.team == Team::ORANGE && depletionPos.y < 0);
+
+        // Also check if projected position is far from own goal
+        Vec ownGoal = (player.team == Team::BLUE) ? Vec(0, -5120, 0) : Vec(0, 5120, 0);
+        float distFromGoal = (depletionPos - ownGoal).Length();
+
+        return inOppHalf && distFromGoal > 3000.0f;
+    }
 };
 
 }  // namespace RLGC

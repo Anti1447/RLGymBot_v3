@@ -167,6 +167,15 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		reanalysisBuffer = new ReanalysisBuffer(bufferConfig);
 	}
 
+	// Initialize reward metrics collector
+	if (config.addRewardsToMetrics && !envSet->rewards.empty()) {
+		metricsCollector.Initialize(envSet->rewards[0]);
+		if (versionMgr) {
+			metricsCollector.SnapshotSkillRatings(versionMgr->skill.curRatings.data);
+		}
+		RG_LOG("\tReward metrics collector initialized with " << metricsCollector.trackers.size() << " rewards");
+	}
+
 	RG_LOG(RG_DIVIDER);
 }
 
@@ -237,6 +246,68 @@ void GGL::Learner::Save() {
 	RG_LOG("Saving to folder " << saveFolder << "...");
 	SaveStats(saveFolder / STATS_FILE_NAME);
 	ppo->SaveTo(saveFolder);
+
+	// Write reward metrics and diagnosis
+	if (metricsCollector.initialized) {
+		// Get current skill ratings for delta tracking
+		std::map<std::string, float> currentRatings;
+		if (versionMgr)
+			currentRatings = versionMgr->skill.curRatings.data;
+
+		metricsCollector.WriteMetricsJSON(
+			saveFolder / "REWARD_METRICS.json",
+			currentRatings,
+			totalTimesteps,
+			"PHASE_" + std::to_string((int)totalTimesteps) // Simple identifier
+		);
+
+		// Run diagnostician
+		std::vector<RewardMetrics> allMetrics;
+		std::map<std::string, float> rewardWeights;
+		for (const auto& pair : metricsCollector.trackers) {
+			const auto& tracker = pair.second;
+			RewardMetrics rm;
+			rm.rewardName = tracker.rewardName;
+			rm.activationRate = tracker.GetActivationRate();
+			rm.meanActivationValue = tracker.GetMean();
+			rm.varianceInActivation = tracker.GetVariance();
+			rm.baseWeight = tracker.weight;
+			rm.isActive = rm.activationRate > 0.01f;
+			rm.isStable = rm.varianceInActivation < 0.6f;
+			rm.isHelpful = false; // No per-reward win correlation yet
+			rm.correlationWithWinRate = 0.0f;
+			allMetrics.push_back(rm);
+			rewardWeights[tracker.rewardName] = tracker.weight;
+		}
+
+		RewardDiagnostician diagnostician;
+		auto diagnoses = diagnostician.DiagnoseAllRewards(allMetrics, rewardWeights);
+		RewardDiagnostician::WriteDiagnosisJSON(
+			saveFolder / "REWARD_DIAGNOSIS.json",
+			diagnoses,
+			totalTimesteps,
+			(int)metricsCollector.trackers.size()
+		);
+
+		// Snapshot ratings for next interval's delta tracking
+		if (versionMgr)
+			metricsCollector.SnapshotSkillRatings(versionMgr->skill.curRatings.data);
+
+		// Trigger automated Python reward analysis (non-fatal)
+		if (metricSender) {
+			try {
+				std::string saveFolderStr = saveFolder.string();
+				std::string checkpointFolderStr = config.checkpointFolder.string();
+				metricSender->pyMod.attr("on_checkpoint_saved")(
+					saveFolderStr,
+					checkpointFolderStr,
+					totalTimesteps
+				);
+			} catch (std::exception& e) {
+				RG_LOG("WARNING: Reward analysis failed (non-fatal): " << e.what());
+			}
+		}
+	}
 
 	// Remove old checkpoints
 	if (config.checkpointsToKeep != -1) {
@@ -702,6 +773,10 @@ void GGL::Learner::Start() {
 
 							for (auto& pair : avgRewards)
 								report.AddAvg("Rewards/" + pair.first, pair.second.Get());
+
+							// Feed into metrics collector for diagnostics
+							if (metricsCollector.initialized)
+								metricsCollector.RecordRewards(avgRewards);
 						}
 
 						// Now that we've inferred and stepped the env, we can add that stuff to the trajectories

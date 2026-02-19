@@ -580,7 +580,7 @@ namespace RLGC {
 
         // NEW: opponent proximity penalty for risky dribbles
         float opponentDangerRange = 500.0f;   // penalty zone for dribbling near opponents
-        float maxOpponentPenalty = 0.5f;      // max penalty amount (reduces reward by 50%)
+        float maxOpponentPenalty = 1.0f;      // max penalty amount (reduces reward by 50%)
 
         mutable std::map<uint32_t, float> sustainedTime;
         mutable std::map<uint32_t, bool>  wasOnCar;

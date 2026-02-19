@@ -287,3 +287,587 @@ public:
         return 12.0f * goalAlignment;  // 0-12 reward
     }
 };
+
+// ============================================================================
+// NUMERICAL ADVANTAGE ATTACKING REWARD
+// Incentivizes aggressive, coordinated attacking in 2v1+ situations
+// Encourages demo/bump tactics and high-velocity passing plays
+// ============================================================================
+class NumericalAdvantageAttackingReward : public Reward {
+private:
+	enum class AttackerRole {
+		NOT_ATTACKING,   // Not in numerical advantage
+		PRIMARY,         // Closest to ball among attackers
+		SUPPORT          // Second-closest to ball among attackers
+	};
+
+	struct AdvantageMemory {
+		AttackerRole lastRole = AttackerRole::NOT_ATTACKING;
+		int framesSinceDemoBump = 999;
+		int framesSincePassing = 999;
+		bool lastFrameHadPossession = false;
+		uint32_t lastDemoTarget = UINT32_MAX;
+	};
+
+	std::unordered_map<uint32_t, AdvantageMemory> memory;
+	int currentStep = 0;
+
+	// Constants
+	static constexpr float DEMO_RANGE = 1500.0f;
+	static constexpr float PASS_QUALITY_THRESHOLD = 500.0f;  // Min velocity for quality pass
+	static constexpr float ATTACKING_ZONE_DIST = 5000.0f;    // Distance from opponent goal
+	static constexpr int POST_ACTION_WINDOW = 120;           // ~1 second at 120 Hz
+	static constexpr float PASS_POSITION_MIN = 1500.0f;
+	static constexpr float PASS_POSITION_MAX = 3500.0f;
+	static constexpr float RECEPTION_POSITION_MIN = 1000.0f;
+	static constexpr float RECEPTION_POSITION_MAX = 2500.0f;
+
+	Vec GetOpponentGoalCenter(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::ORANGE_GOAL_CENTER
+			: CommonValues::BLUE_GOAL_CENTER;
+	}
+
+	bool IsInOpponentHalf(const Player& player) const {
+		if (player.team == Team::BLUE) {
+			return player.pos.y > 0;  // BLUE attacks toward +Y
+		} else {
+			return player.pos.y < 0;  // ORANGE attacks toward -Y
+		}
+	}
+
+	bool IsInAttackingZone(const Player& player) const {
+		if (!IsInOpponentHalf(player)) return false;
+
+		Vec opponentGoal = GetOpponentGoalCenter(player.team);
+		float distToGoal = (player.pos - opponentGoal).Length();
+		return distToGoal < ATTACKING_ZONE_DIST;
+	}
+
+	// Count attacking vs defending players
+	// Returns pair: (count in attacking zone, count in defending position)
+	std::pair<int, int> CountNumericalAdvantage(const Player& player, const GameState& state) const {
+		int attackingCount = 0;
+		int defendingCount = 0;
+
+		Vec opponentGoal = GetOpponentGoalCenter(player.team);
+
+		// Count team players in attacking zone
+		for (const auto& p : state.players) {
+			if (p.team == player.team && p.carId != player.carId) {
+				if (IsInAttackingZone(p)) {
+					attackingCount++;
+				}
+			}
+		}
+
+		// Count opponent players defending
+		for (const auto& p : state.players) {
+			if (p.team != player.team) {
+				if (!IsInOpponentHalf(p) || (p.pos - opponentGoal).Length() < ATTACKING_ZONE_DIST) {
+					defendingCount++;
+				}
+			}
+		}
+
+		// Include self in attacking count if in attacking zone
+		if (IsInAttackingZone(player)) {
+			attackingCount++;
+		}
+
+		return std::make_pair(attackingCount, defendingCount);
+	}
+
+	bool HasNumericalAdvantage(const Player& player, const GameState& state) const {
+		auto [attacking, defending] = CountNumericalAdvantage(player, state);
+		return attacking >= (defending + 1);
+	}
+
+	// Get closest opponent player
+	const Player* GetClosestOpponent(const Player& player, const GameState& state) const {
+		const Player* closest = nullptr;
+		float closestDist = FLT_MAX;
+
+		for (const auto& p : state.players) {
+			if (p.team != player.team) {
+				float dist = (player.pos - p.pos).Length();
+				if (dist < closestDist) {
+					closestDist = dist;
+					closest = &p;
+				}
+			}
+		}
+
+		return closest;
+	}
+
+	// Determine primary attacker (closest to ball among attacking teammates)
+	AttackerRole DetermineRole(const Player& player, const GameState& state) const {
+		if (!HasNumericalAdvantage(player, state)) {
+			return AttackerRole::NOT_ATTACKING;
+		}
+
+		// Find closest attacking teammate to ball
+		float playerDistToBall = (player.pos - state.ball.pos).Length();
+		float closestTeammateDist = FLT_MAX;
+		bool playerIsClosest = true;
+
+		for (const auto& p : state.players) {
+			if (p.team == player.team && p.carId != player.carId && IsInAttackingZone(p)) {
+				float dist = (p.pos - state.ball.pos).Length();
+				if (dist < closestTeammateDist) {
+					closestTeammateDist = dist;
+				}
+				if (dist < playerDistToBall) {
+					playerIsClosest = false;
+				}
+			}
+		}
+
+		// If no attacking teammates, player is primary
+		if (closestTeammateDist == FLT_MAX) {
+			return AttackerRole::PRIMARY;
+		}
+
+		// If player is closest, primary; otherwise support
+		return playerIsClosest ? AttackerRole::PRIMARY : AttackerRole::SUPPORT;
+	}
+
+	bool IsDemoBumpOpportunity(const Player& player, const GameState& state) const {
+		const Player* opponent = GetClosestOpponent(player, state);
+		if (!opponent) return false;
+
+		float distToOpponent = (player.pos - opponent->pos).Length();
+		return distToOpponent < DEMO_RANGE;
+	}
+
+	bool IsInPassingPosition(const Player& player) const {
+		Vec opponentGoal = GetOpponentGoalCenter(player.team);
+		float distToGoal = (player.pos - opponentGoal).Length();
+		return distToGoal >= PASS_POSITION_MIN && distToGoal <= PASS_POSITION_MAX;
+	}
+
+	bool IsInReceptionPosition(const Player& player, const Vec& ballPos) const {
+		Vec opponentGoal = GetOpponentGoalCenter(player.team);
+		float distToGoal = (player.pos - opponentGoal).Length();
+
+		// Check distance to goal
+		if (distToGoal < RECEPTION_POSITION_MIN || distToGoal > RECEPTION_POSITION_MAX) {
+			return false;
+		}
+
+		// Check if positioned for good angle (not directly behind ball)
+		Vec toPlayer = (player.pos - ballPos).Normalized();
+		Vec toGoal = (opponentGoal - ballPos).Normalized();
+		float angleAlignment = toPlayer.Dot(toGoal);
+
+		return angleAlignment > 0.3f;  // Good angle to receive and shoot
+	}
+
+public:
+	void Reset(const GameState& state) override {
+		memory.clear();
+		currentStep = 0;
+	}
+
+	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		// Skip 1v1 matches
+		if (state.players.size() < 4) {
+			return 0.0f;
+		}
+
+		auto& mem = memory[player.carId];
+		float reward = 0.0f;
+
+		AttackerRole currentRole = DetermineRole(player, state);
+		bool inAdvantage = HasNumericalAdvantage(player, state);
+
+		// ====== PRIMARY ATTACKER: DEMO/BUMP PATH ======
+		if (currentRole == AttackerRole::PRIMARY && inAdvantage) {
+			// Event reward for successful demo/bump
+			const Player* opponent = GetClosestOpponent(player, state);
+			if (opponent && IsDemoBumpOpportunity(player, state)) {
+				// Check if opponent was just demoed or bumped
+				if ((opponent->eventState.demo || opponent->eventState.bumped) && mem.lastDemoTarget == opponent->carId) {
+					mem.framesSinceDemoBump = 0;
+				}
+
+				mem.lastDemoTarget = opponent->carId;
+			}
+
+			// Reward for positioning for demo
+			if (IsDemoBumpOpportunity(player, state)) {
+				reward += 0.1f;  // Shaping reward for being in demo range
+			}
+
+			// Event reward if demo just happened
+			if (mem.framesSinceDemoBump == 0) {
+				reward += 0.4f;  // Successful demo/bump
+			}
+
+			if (mem.framesSinceDemoBump < POST_ACTION_WINDOW) {
+				mem.framesSinceDemoBump++;
+			}
+		}
+
+		// ====== SUPPORT ATTACKER: POST-DEMO SHOT ======
+		if (currentRole == AttackerRole::SUPPORT && inAdvantage) {
+			// Reward for shooting after teammate demo (within window)
+			if (mem.framesSinceDemoBump < POST_ACTION_WINDOW && player.ballTouchedStep) {
+				reward += 0.5f;  // Reward for capitalizing on demo
+				mem.framesSinceDemoBump = POST_ACTION_WINDOW;  // Reset window
+			}
+		}
+
+		// ====== PRIMARY ATTACKER: PASSING PATH ======
+		if (currentRole == AttackerRole::PRIMARY && inAdvantage && IsInPassingPosition(player)) {
+			// Check for high-velocity pass to teammate
+			if (player.ballTouchedStep && state.ball.vel.Length() > PASS_QUALITY_THRESHOLD) {
+				// Verify pass is toward teammate in attacking zone
+				bool validPass = false;
+				for (const auto& p : state.players) {
+					if (p.team == player.team && p.carId != player.carId && IsInAttackingZone(p)) {
+						Vec toTeammate = (p.pos - player.pos).Normalized();
+						Vec ballDir = state.ball.vel.Normalized();
+						if (ballDir.Dot(toTeammate) > 0.3f) {
+							validPass = true;
+							break;
+						}
+					}
+				}
+
+				if (validPass) {
+					reward += 0.4f;  // Reward for quality pass
+					mem.framesSincePassing = 0;
+				}
+			}
+		}
+
+		// ====== SUPPORT ATTACKER: POST-PASS SHOT ======
+		if (currentRole == AttackerRole::SUPPORT && inAdvantage && IsInReceptionPosition(player, state.ball.pos)) {
+			// Reward for shooting after receiving pass
+			if (mem.framesSincePassing < POST_ACTION_WINDOW && player.ballTouchedStep) {
+				reward += 0.5f;  // Reward for capitalizing on pass
+				mem.framesSincePassing = POST_ACTION_WINDOW;  // Reset window
+			}
+		}
+
+		// ====== GENERAL AGGRESSION BONUS ======
+		if (inAdvantage) {
+			// Per-frame bonus for being in attacking zone
+			if (IsInAttackingZone(player)) {
+				auto [attacking, defending] = CountNumericalAdvantage(player, state);
+				float advantageScale = (attacking - defending) / 2.0f;  // Scale by magnitude
+				reward += 0.1f * advantageScale;
+			}
+
+			// Penalty for retreating during numerical advantage
+			if (currentRole != AttackerRole::NOT_ATTACKING) {
+				if (!IsInAttackingZone(player) && player.vel.Length() < 500.0f) {
+					reward -= 0.05f;  // Light penalty for not pushing advantage
+				}
+			}
+		}
+
+		// Update timers
+		if (mem.framesSinceDemoBump < POST_ACTION_WINDOW) {
+			mem.framesSinceDemoBump++;
+		}
+		if (mem.framesSincePassing < POST_ACTION_WINDOW) {
+			mem.framesSincePassing++;
+		}
+
+		mem.lastRole = currentRole;
+		mem.lastFrameHadPossession = player.ballTouchedStep;
+
+		return reward;
+	}
+
+	void PreStep(const GameState& state) override {
+		currentStep++;
+	}
+};
+
+// ============================================================================
+// DRIBBLE BUMP REWARD
+// Incentivizes bumping/demoing opponents while maintaining ground dribbles
+// Teaches aggressive ground dribbling tactics toward defenders
+// ============================================================================
+class DribbleBumpReward : public Reward {
+private:
+	enum class DribbleApproachType {
+		NOT_DRIBBLING,      // Not in a dribble
+		DEFENSIVE_DRIBBLE,  // Dribbling away from pressure
+		AGGRESSIVE_DRIBBLE  // Dribbling toward opponent
+	};
+
+	struct DribbleMemory {
+		bool isDribbling = false;                    // Currently in dribble sequence
+		int dribbleFrames = 0;                       // Frames in current sequence
+		int ballOnCarFrames = 0;                     // Frames ball stayed on car
+		DribbleApproachType lastApproachType = DribbleApproachType::NOT_DRIBBLING;
+
+		uint32_t targetOpponentId = UINT32_MAX;     // Which opponent we're targeting
+		uint32_t lastDefenderId = UINT32_MAX;       // Last defender (for prioritization)
+		float closestApproachDist = FLT_MAX;        // Closest distance during approach
+
+		int framesSinceBumpDemo = 999;              // Post-action window for bump
+		bool hasGivenBumpReward = false;            // Only reward once per bump
+	};
+
+	std::unordered_map<uint32_t, DribbleMemory> memory;
+	int currentStep = 0;
+
+	// Constants
+	static constexpr float BUMP_RANGE = 1500.0f;
+	static constexpr float APPROACH_TRIGGER = 2000.0f;
+	static constexpr float DRIBBLE_SPEED_MIN = 250.0f;
+	static constexpr float BALL_ON_CAR_THRESHOLD = 0.8f;
+	static constexpr float GOAL_BONUS_RANGE = 3000.0f;
+	static constexpr int POST_BUMP_WINDOW = 120;
+	static constexpr int MIN_DRIBBLE_TIME = 10;
+
+	Vec GetOwnGoalPos(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::BLUE_GOAL_CENTER
+			: CommonValues::ORANGE_GOAL_CENTER;
+	}
+
+	Vec GetOpponentGoalPos(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::ORANGE_GOAL_CENTER
+			: CommonValues::BLUE_GOAL_CENTER;
+	}
+
+	// Check if ball on car using simple height/distance check
+	bool IsBallOnCar(const Player& player, const GameState& state) const {
+		Vec rel = state.ball.pos - player.pos;
+		float height = rel.z;
+		float horiz = Vec(rel.x, rel.y, 0).Length();
+		return (height > 40.0f && height < 150.0f && horiz < 120.0f);
+	}
+
+	// Check if actively dribbling using carrystate
+	bool IsDribblingCarry(const Player& player, const GameState& state) const {
+		const float kMaxForwardOffset = 170.0f;
+		const float kMinForwardOffset = -80.0f;
+		const float kMaxLateralOffset = 140.0f;
+		const float kMaxDistanceXY = 220.0f;
+		const float kMinBallHeightAboveCar = 55.0f;
+		const float kMaxBallHeightAboveCar = 220.0f;
+		const float kMaxRelativeSpeed = 900.0f;
+		const float kMinCarSpeed = 250.0f;
+
+		if (!player.isOnGround) return false;
+
+		Vec diff = state.ball.pos - player.pos;
+
+		float dz = diff.z;
+		if (dz < kMinBallHeightAboveCar || dz > kMaxBallHeightAboveCar) return false;
+
+		Vec diffXY = diff; diffXY.z = 0.0f;
+		if (diffXY.Length() > kMaxDistanceXY) return false;
+
+		float forwardOffset = player.rotMat.forward.Dot(diff);
+		float lateralOffset = player.rotMat.right.Dot(diff);
+
+		if (forwardOffset > kMaxForwardOffset || forwardOffset < kMinForwardOffset) return false;
+		if (std::fabs(lateralOffset) > kMaxLateralOffset) return false;
+
+		if (player.vel.Length() < kMinCarSpeed) return false;
+		if ((state.ball.vel - player.vel).Length() > kMaxRelativeSpeed) return false;
+
+		return true;
+	}
+
+	// Find opponent closest to their own goal (last defender)
+	const Player* FindLastDefender(const Player& player, const GameState& state) const {
+		const Player* lastDefender = nullptr;
+		float closestToGoal = FLT_MAX;
+
+		Vec theirGoal = GetOwnGoalPos(player.team == Team::BLUE ? Team::ORANGE : Team::BLUE);
+
+		for (const auto& p : state.players) {
+			if (p.team != player.team) {
+				float distToGoal = (p.pos - theirGoal).Length();
+				if (distToGoal < closestToGoal) {
+					closestToGoal = distToGoal;
+					lastDefender = &p;
+				}
+			}
+		}
+
+		return lastDefender;
+	}
+
+	// Find closest opponent overall
+	const Player* FindClosestOpponent(const Player& player, const GameState& state) const {
+		const Player* closest = nullptr;
+		float closestDist = FLT_MAX;
+
+		for (const auto& p : state.players) {
+			if (p.team != player.team) {
+				float dist = (player.pos - p.pos).Length();
+				if (dist < closestDist) {
+					closestDist = dist;
+					closest = &p;
+				}
+			}
+		}
+
+		return closest;
+	}
+
+	// Check if dribbling toward a specific opponent
+	bool IsApproachingOpponent(const Player& player, const Player* opponent) const {
+		if (!opponent) return false;
+
+		Vec toOpponent = (opponent->pos - player.pos).Normalized();
+		Vec ballVel = player.vel.Normalized();
+
+		// Check if movement toward opponent
+		return ballVel.Dot(toOpponent) > 0.2f;
+	}
+
+	// Check if in offensive context (dribble toward goal)
+	bool IsOffensiveContext(const Player& player, const GameState& state) const {
+		Vec oppGoal = GetOpponentGoalPos(player.team);
+		Vec toGoal = (oppGoal - player.pos).Normalized();
+		Vec velocity = player.vel.Normalized();
+
+		return velocity.Dot(toGoal) > 0.0f;  // Headed toward opponent goal
+	}
+
+	// Calculate dribble quality (percentage of frames ball on car)
+	float CalculateDribbleQuality(int ballOnCarFrames, int totalFrames) const {
+		if (totalFrames == 0) return 0.0f;
+		return static_cast<float>(ballOnCarFrames) / static_cast<float>(totalFrames);
+	}
+
+public:
+	void Reset(const GameState& state) override {
+		memory.clear();
+		currentStep = 0;
+	}
+
+	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		// Skip 1v1 matches
+		if (state.players.size() < 4) {
+			return 0.0f;
+		}
+
+		// Skip during kickoff
+		if ((player.pos).Length() < 4000.0f && state.ball.pos.Length() < 2000.0f) {
+			// Ball and player both near center = likely kickoff
+			memory[player.carId].isDribbling = false;
+			return 0.0f;
+		}
+
+		auto& mem = memory[player.carId];
+		float reward = 0.0f;
+
+		bool isDribbling = IsDribblingCarry(player, state);
+		bool ballOnCar = IsBallOnCar(player, state);
+
+		// Update dribble state
+		if (isDribbling) {
+			mem.isDribbling = true;
+			mem.dribbleFrames++;
+			if (ballOnCar) {
+				mem.ballOnCarFrames++;
+			}
+		} else {
+			mem.isDribbling = false;
+			mem.dribbleFrames = 0;
+			mem.ballOnCarFrames = 0;
+		}
+
+		// Get opponent information
+		const Player* lastDefender = FindLastDefender(player, state);
+		const Player* closestOpponent = FindClosestOpponent(player, state);
+
+		// ====== DRIBBLING LOGIC ======
+		if (isDribbling && mem.dribbleFrames >= MIN_DRIBBLE_TIME) {
+			// Determine approach type
+			float distToLastDef = lastDefender ? (player.pos - lastDefender->pos).Length() : FLT_MAX;
+			float distToClosest = closestOpponent ? (player.pos - closestOpponent->pos).Length() : FLT_MAX;
+
+			bool approachingLastDef = (distToLastDef < APPROACH_TRIGGER);
+			bool approachingAny = (distToClosest < APPROACH_TRIGGER);
+
+			// ====== PATH A: LAST DEFENDER TARGETING (HIGHEST PRIORITY) ======
+			if (approachingLastDef && lastDefender) {
+				mem.targetOpponentId = lastDefender->carId;
+				mem.lastApproachType = DribbleApproachType::AGGRESSIVE_DRIBBLE;
+				mem.lastDefenderId = lastDefender->carId;
+
+				// Shaping reward for approaching last defender while maintaining dribble
+				reward += 0.15f;
+
+				// Event reward for successful bump/demo on last defender
+				if (lastDefender->eventState.demo || lastDefender->eventState.bumped) {
+					if (mem.lastDefenderId == lastDefender->carId && !mem.hasGivenBumpReward) {
+						reward += 0.6f;  // High reward for bumping last defender
+						mem.hasGivenBumpReward = true;
+						mem.framesSinceBumpDemo = 0;
+					}
+				}
+
+				// Context bonus: dribble toward goal + bump = big advantage
+				if (IsOffensiveContext(player, state)) {
+					reward += 0.1f;
+				}
+			}
+			// ====== PATH B: FLEXIBLE APPROACH (BUMPING OR WEAVING) ======
+			else if (approachingAny && closestOpponent) {
+				mem.targetOpponentId = closestOpponent->carId;
+				mem.lastApproachType = DribbleApproachType::AGGRESSIVE_DRIBBLE;
+
+				// Shaping reward for approaching any opponent
+				reward += 0.1f;
+
+				// Event reward for bumping/demoing non-primary opponent
+				if (closestOpponent->eventState.demo || closestOpponent->eventState.bumped) {
+					if (!mem.hasGivenBumpReward) {
+						reward += 0.4f;  // Moderate reward for other bumps
+						mem.hasGivenBumpReward = true;
+						mem.framesSinceBumpDemo = 0;
+					}
+				}
+
+				// Reward for weaving (maintaining dribble without contact)
+				if (distToClosest > 1600.0f && distToClosest < 2000.0f && mem.dribbleFrames > 30) {
+					reward += 0.05f;  // Small reward for successful weave
+				}
+			}
+			// ====== PATH C: DEFENSIVE DRIBBLE (ESCAPE) ======
+			else {
+				mem.lastApproachType = DribbleApproachType::DEFENSIVE_DRIBBLE;
+				// Small shaping reward for defensive dribbles
+				reward += 0.05f;
+			}
+
+			// Quality bonus: Maintaining ball on car during approach
+			float dribbleQuality = CalculateDribbleQuality(mem.ballOnCarFrames, mem.dribbleFrames);
+			if (dribbleQuality > BALL_ON_CAR_THRESHOLD) {
+				reward += 0.2f;
+			}
+
+			// Penalty: Dribble breaks during approach
+			if (mem.dribbleFrames > 0 && dribbleQuality < 0.5f) {
+				reward -= 0.1f;
+			}
+		}
+
+		// ====== POST-BUMP FOLLOWUP WINDOW ======
+		if (mem.framesSinceBumpDemo < POST_BUMP_WINDOW) {
+			mem.framesSinceBumpDemo++;
+		}
+
+		return reward;
+	}
+
+	void PreStep(const GameState& state) override {
+		currentStep++;
+	}
+};

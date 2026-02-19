@@ -572,15 +572,15 @@ namespace RLGC {
 
                     if (dist < 200.0f) {
                         if (IsOpposingSide(pad, player.team)) {
-                            reward += 0.4f;
+                            reward += 0.1f;
 
                             bool cornerPad = abs(pad.y) > 3500.0f && abs(pad.x) > 2500.0f;
                             if (cornerPad) {
-                                reward += 0.3f;
+                                reward += 0.08f;
                             }
 
                             float desperation = 1.0f - (lastBoostAmounts[player.carId] / 100.0f);
-                            reward += desperation * 0.2f;
+                            reward += desperation * 0.05f;
                         }
                         break;
                     }

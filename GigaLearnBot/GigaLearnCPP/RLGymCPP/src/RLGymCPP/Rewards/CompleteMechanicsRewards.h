@@ -139,16 +139,44 @@ public:
                 // Dot product: 1.0 = perfectly aligned, 0.0 = perpendicular, -1.0 = opposite
                 float alignment = carUp.Dot(surfaceNormal);
 
-                // Reward based on alignment quality
-                // > 0.9 = excellent landing (facing the right way)
-                // > 0.7 = good landing (mostly aligned)
-                // > 0.5 = acceptable landing (somewhat aligned)
-                if (alignment > 0.9f) {
-                    return 1.0f; // Excellent landing
-                } else if (alignment > 0.7f) {
-                    return 0.7f; // Good landing
-                } else if (alignment > 0.5f) {
-                    return 0.4f; // Acceptable landing
+                // NEW: Detect ceiling contact (surface normal pointing down, alignment < -0.5)
+                // Ceiling normal points downward (negative Z), car up points upward (positive Z) normally
+                // When aligned with ceiling, alignment is negative (car flipped)
+                bool isCeilingContact = surfaceNormal.z < -0.5f;  // Normal points downward = ceiling
+
+                if (isCeilingContact) {
+                    // CEILING CONTACT - Reward wheels, penalize hood/roof
+                    // On ceiling: wheels should be on top (facing upward relative to ceiling surface)
+                    // This means we want carUp aligned with ceiling normal (both pointing down)
+
+                    if (alignment < -0.7f) {
+                        // Perfect ceiling contact with car upside-down (wheels up, hood down toward ground)
+                        // Flip is preserved! This is what we want.
+                        return 1.5f; // Excellent - wheels on ceiling, flip preserved
+                    } else if (alignment < -0.5f) {
+                        // Good ceiling contact - mostly upside-down with wheels on ceiling
+                        return 1.0f; // Good - wheels making ceiling contact
+                    } else if (alignment > 0.5f) {
+                        // BAD: Car is right-side-up on ceiling (hood/roof touching ceiling)
+                        // This is dangerous - flip is already used! Penalize heavily.
+                        return -0.8f; // Strong penalty - hood/roof contact wastes flip
+                    } else {
+                        // Mediocre ceiling contact (sideways or partially aligned)
+                        return 0.2f; // Weak bonus - contact made but not optimal
+                    }
+                } else {
+                    // GROUND/WALL CONTACT - Original logic
+                    // Reward based on alignment quality
+                    // > 0.9 = excellent landing (facing the right way)
+                    // > 0.7 = good landing (mostly aligned)
+                    // > 0.5 = acceptable landing (somewhat aligned)
+                    if (alignment > 0.9f) {
+                        return 1.0f; // Excellent landing
+                    } else if (alignment > 0.7f) {
+                        return 0.7f; // Good landing
+                    } else if (alignment > 0.5f) {
+                        return 0.4f; // Acceptable landing
+                    }
                 }
             }
         }
@@ -1587,164 +1615,281 @@ public:
     }
 };
 
-// Progressive ceiling shot training with staged rewards
-class CeilingShotTrainingReward : public Reward {
+// ============================================================================
+// CEILING SHOT REWARD (Unified - Rev 2.0)
+// ============================================================================
+// Comprehensive reward for ceiling shot mechanics with continuous gradient signals.
+//
+// Three-stage progression:
+// 1. Setup (0-1.0): Ball apex near ceiling, player jumps toward ball
+// 2. Contact & Alignment (1.0-3.0): True ceiling contact, velocity matching, positioning
+// 3. Execution (3.0-5.0+): Flip execution with goal direction and speed bonuses
+//
+// Key improvements over original two-reward system:
+// - Uses actual contact normal for ceiling detection (not just position)
+// - Validates velocity alignment (both direction AND magnitude)
+// - Enforces proximity constraints (±400 UU in all directions)
+// - Provides continuous graduated rewards for smooth learning
+// - Includes explicit metrics for state detection verification
+// ============================================================================
+class CeilingShotReward : public Reward {
 private:
-    mutable std::map<uint32_t, bool> wasOnCeiling;
-    mutable std::map<uint32_t, bool> touchedCeilingWithBallNearby;
-    mutable std::map<uint32_t, bool> hasHitBallFromCeiling;
-    mutable std::map<uint32_t, bool> hasUsedFlipFromCeiling;
+    // Stage tracking (per player)
+    mutable std::map<uint32_t, float> stageProgress;           // Current cumulative reward
+    mutable std::map<uint32_t, bool>  completeSetupValid;      // Did setup complete?
+    mutable std::map<uint32_t, bool>  onCeilingPreviousFrame;  // Ceiling state tracking
 
-public:
-    virtual void Reset(const GameState& initialState) override {
-        wasOnCeiling.clear();
-        touchedCeilingWithBallNearby.clear();
-        hasHitBallFromCeiling.clear();
-        hasUsedFlipFromCeiling.clear();
+    // Explicit metrics for verification (per player)
+    mutable std::map<uint32_t, uint64_t> truelyOnCeilingFrameCount;    // Frames with actual contact
+    mutable std::map<uint32_t, uint64_t> onCeilingWithBallNearbyCount; // Frames ceiling + ball in range
+
+    // ========================================================================
+    // HELPER METHODS
+    // ========================================================================
+
+    bool IsTruelyOnCeiling(const Player& player) const {
+        // Verify actual wheel contact via surface normal, not just position
+        return player.worldContact.hasContact &&
+               player.worldContact.contactNormal.z < -0.5f &&
+               !player.isOnGround;
     }
 
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        float reward = 0.0f;
-
-        // Check if on ceiling (wheels touching ceiling)
-        bool onCeiling = (player.pos.z > (CommonValues::CEILING_Z - 200.0f) &&
-            !player.isOnGround); // In air near ceiling
-
-        // Check if ball is nearby (1000 uu sphere)
-        float distToBall = (state.ball.pos - player.pos).Length();
-        bool ballNearby = (distToBall < 1000.0f);
-
-        // Check if player has flip available
-        bool HasFlipOrJump = player.HasFlipOrJump();
-
-        bool prevOnCeiling = wasOnCeiling[player.carId];
-        bool prevTouchedCeiling = touchedCeilingWithBallNearby[player.carId];
-        bool prevHitBall = hasHitBallFromCeiling[player.carId];
-        bool prevUsedFlip = hasUsedFlipFromCeiling[player.carId];
-
-        // STAGE 1: Touch ceiling while ball is nearby AND keep flip
-        if (onCeiling && ballNearby && HasFlipOrJump && !prevTouchedCeiling) {
-            reward += 5.0f;
-            touchedCeilingWithBallNearby[player.carId] = true;
-        }
-
-        // STAGE 2: Hit the ball after being on ceiling (much larger reward)
-        if (prevTouchedCeiling && player.ballTouchedStep && !player.isOnGround && !prevHitBall) {
-            reward += 20.0f;
-            hasHitBallFromCeiling[player.carId] = true;
-        }
-
-        // STAGE 3: Use flip after being on ceiling (moderate reward)
-        if (prevTouchedCeiling && !HasFlipOrJump && prevOnCeiling && !prevUsedFlip) {
-            // Player used their flip
-            reward += 8.0f;
-            hasUsedFlipFromCeiling[player.carId] = true;
-        }
-
-        // BONUS: All conditions met (ceiling touch + ball hit + flip used)
-        if (prevHitBall && prevUsedFlip && player.ballTouchedStep) {
-            reward += 15.0f; // Full execution bonus
-        }
-
-        // Reset tracking if back on ground
-        if (player.isOnGround) {
-            touchedCeilingWithBallNearby[player.carId] = false;
-            hasHitBallFromCeiling[player.carId] = false;
-            hasUsedFlipFromCeiling[player.carId] = false;
-        }
-
-        wasOnCeiling[player.carId] = onCeiling;
-
-        return reward;
-    }
-};
-
-// Rewards ceiling shots that result in shots on goal
-class CeilingShotOnGoalReward : public Reward {
-private:
-    mutable std::map<uint32_t, bool> wasOnCeiling;
-    mutable std::map<uint32_t, bool> hitBallFromCeiling;
-    mutable std::map<uint32_t, float> ceilingTouchTime;
-    mutable std::map<uint32_t, float> elapsedTime; // Track time manually
-
-public:
-    virtual void Reset(const GameState& initialState) override {
-        wasOnCeiling.clear();
-        hitBallFromCeiling.clear();
-        ceilingTouchTime.clear();
-        elapsedTime.clear();
+    bool IsBallProperlyPositioned(const Player& player, const GameState& state) const {
+        // Ball must be within 400 UU in ALL directions for proper ceiling shot setup
+        float horizDist = GetHorizontalDistance(player, state);
+        float vertDist = GetVerticalDistance(player, state);
+        return horizDist <= 400.0f && fabs(vertDist) <= 400.0f;
     }
 
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-        uint32_t id = player.carId;
+    float GetHorizontalDistance(const Player& player, const GameState& state) const {
+        // Distance in x-y plane (ground projection)
+        float dx = player.pos.x - state.ball.pos.x;
+        float dy = player.pos.y - state.ball.pos.y;
+        return sqrt(dx * dx + dy * dy);
+    }
 
-        // Update elapsed time
-        elapsedTime[id] += dt;
+    float GetVerticalDistance(const Player& player, const GameState& state) const {
+        // Positive = player below ball, negative = player above ball
+        return player.pos.z - state.ball.pos.z;
+    }
 
-        float reward = 0.0f;
+    float GetVelocityAlignment(const Player& player, const GameState& state) const {
+        // CRITICAL: Check BOTH direction AND magnitude for proper ceiling shot
+        // Direction: normalized dot product (are we falling in same direction?)
+        Vec ballVelDir = state.ball.vel.Normalized();
+        Vec playerVelDir = player.vel.Normalized();
+        float directionAlignment = playerVelDir.Dot(ballVelDir);  // 1.0 = perfect match
 
-        // Check if on/near ceiling
-        bool onCeiling = (player.pos.z > (CommonValues::CEILING_Z - 200.0f) && !player.isOnGround);
+        // Magnitude: speed ratio similarity (are we falling at similar speed?)
+        float ballSpeed = state.ball.vel.Length();
+        float playerSpeed = player.vel.Length();
+        float speedRatio = (ballSpeed > 0.1f) ? playerSpeed / ballSpeed : 1.0f;
+        float magnitudeSimilarity = 1.0f - RS_CLAMP(fabs(1.0f - speedRatio), 0.0f, 1.0f);
 
-        bool prevOnCeiling = wasOnCeiling[id];
-        bool prevHitBall = hitBallFromCeiling[id];
+        // Average both: ready to flip only when BOTH are >= 0.8
+        return (directionAlignment + magnitudeSimilarity) * 0.5f;
+    }
 
-        // Track when player was on ceiling
-        if (onCeiling && !prevOnCeiling) {
-            ceilingTouchTime[id] = elapsedTime[id];
+    bool IsOnWall(const Player& player) const {
+        // Player is on/near wall if close to SIDE_WALL_X or BACK_WALL_Y
+        float distX = fabs(fabs(player.pos.x) - CommonValues::SIDE_WALL_X);
+        float distY = fabs(fabs(player.pos.y) - CommonValues::BACK_WALL_Y);
+        const float WALL_THRESHOLD = 500.0f;
+        return (distX < WALL_THRESHOLD || distY < WALL_THRESHOLD);
+    }
+
+    bool IsBallElevated(const GameState& state) const {
+        // Ball apex near ceiling (within 200 UU below ceiling)
+        return state.ball.pos.z > (CommonValues::CEILING_Z - 200.0f);
+    }
+
+    bool IsPlayerMovingTowardBall(const Player& player, const GameState& state) const {
+        // After wall hit, player should jump/boost toward ball
+        Vec toBall = (state.ball.pos - player.pos).Normalized();
+        float velocityTowardBall = player.vel.Dot(toBall);
+        return velocityTowardBall > 500.0f;  // Significant movement toward ball
+    }
+
+    // ========================================================================
+    // STAGE EVALUATORS
+    // ========================================================================
+
+    float EvaluateSetup(const Player& player, const GameState& state) const {
+        // STAGE 1 (0-1.0): Setup completion
+        // - Player on wall
+        // - Ball elevated near ceiling
+        // - Player jumping/boosting toward ball
+
+        if (!IsOnWall(player) || !IsBallElevated(state)) {
+            return 0.0f;
         }
 
-        // Player hit ball after being on ceiling (within 3 seconds)
-        if (prevOnCeiling && player.ballTouchedStep && !player.isOnGround) {
-            float timeSinceCeiling = elapsedTime[id] - ceilingTouchTime[id];
+        // Reward scales based on movement toward ball
+        if (IsPlayerMovingTowardBall(player, state)) {
+            return 1.0f;  // Setup complete
+        }
 
-            if (timeSinceCeiling < 3.0f) { // Within 3 seconds of ceiling touch
-                hitBallFromCeiling[id] = true;
+        // Partial reward for being in position even if not moving toward yet
+        return 0.3f;
+    }
 
-                // Determine target goal
-                Vec targetGoal = (player.team == Team::BLUE) ?
-                    CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+    float EvaluateContact(const Player& player, const GameState& state) const {
+        // STAGE 2 (1.0-3.0): Contact and alignment
+        // - True ceiling contact via wheel contact
+        // - Ball proximity (±400 UU)
+        // - Velocity alignment (direction + magnitude)
 
-                // Check if ball is heading toward goal
-                Vec ballToGoal = (targetGoal - state.ball.pos).Normalized();
-                float alignment = state.ball.vel.Normalized().Dot(ballToGoal);
+        if (!IsTruelyOnCeiling(player)) {
+            return 0.0f;  // Must have true contact
+        }
 
-                // Check if shot is on target (heading toward goal)
-                if (alignment > 0.6f) {
-                    // Base reward for ceiling shot on goal
-                    reward += 25.0f;
+        float contactReward = 1.0f;  // Base for being on ceiling
 
-                    // Bonus for good alignment
-                    if (alignment > 0.85f) {
-                        reward += 10.0f;
-                    }
+        // Check ball proximity
+        if (IsBallProperlyPositioned(player, state)) {
+            contactReward += 0.5f;  // Proximity bonus
+        }
 
-                    // Bonus for ball speed
-                    float ballSpeed = state.ball.vel.Length();
-                    if (ballSpeed > 1500.0f) {
-                        reward += 5.0f;
-                    }
-                    if (ballSpeed > 2000.0f) {
-                        reward += 5.0f;
-                    }
+        // Check velocity alignment
+        float alignmentScore = GetVelocityAlignment(player, state);
+        if (alignmentScore > 0.8f) {
+            // Ready to flip: both direction and magnitude aligned
+            contactReward += RS_CLAMP(alignmentScore - 0.8f, 0.0f, 1.0f);  // Scale 0-1.0 for alignment
+        }
 
-                    // Bonus if flip was used
-                    if (!player.HasFlipOrJump() && prevOnCeiling) {
-                        reward += 8.0f;
-                    }
-                }
+        // Bonus if flip is still available (not used yet)
+        if (player.HasFlipOrJump()) {
+            contactReward += 0.3f;
+        }
+
+        return RS_CLAMP(contactReward, 1.0f, 3.0f);  // Clamp to stage 2 range
+    }
+
+    float EvaluateExecution(const Player& player, const GameState& state) const {
+        // STAGE 3 (3.0-5.0+): Execution and goal direction
+        // - Flip was used (!HasFlipOrJump)
+        // - Ball touch verified
+        // - Ball directed toward opponent goal
+
+        if (player.isOnGround || !player.ballTouchedStep) {
+            return 0.0f;  // Must be in air and just touched ball
+        }
+
+        float executionReward = 3.0f;  // Base for being in execution phase
+
+        // Bonus for flip usage
+        if (!player.HasFlipOrJump()) {
+            executionReward += 1.5f;  // Flip was used
+        }
+
+        // Check goal direction
+        Vec targetGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+        Vec ballToGoal = (targetGoal - state.ball.pos).Normalized();
+        float goalAlignment = state.ball.vel.Normalized().Dot(ballToGoal);
+
+        if (goalAlignment > 0.6f) {
+            // Shot is on target toward goal
+            executionReward += 0.5f;
+
+            // Extra bonus for excellent alignment
+            if (goalAlignment > 0.85f) {
+                executionReward += 0.5f;
             }
         }
 
-        // Reset tracking if back on ground
-        if (player.isOnGround) {
-            hitBallFromCeiling[id] = false;
+        // Bonuses for ball speed
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed > 1500.0f) {
+            executionReward += 0.25f;
+        }
+        if (ballSpeed > 2000.0f) {
+            executionReward += 0.25f;
         }
 
-        wasOnCeiling[id] = onCeiling;
+        return executionReward;
+    }
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        stageProgress.clear();
+        completeSetupValid.clear();
+        onCeilingPreviousFrame.clear();
+        truelyOnCeilingFrameCount.clear();
+        onCeilingWithBallNearbyCount.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        uint32_t id = player.carId;
+
+        // Initialize tracking for new player
+        if (stageProgress.find(id) == stageProgress.end()) {
+            stageProgress[id] = 0.0f;
+            completeSetupValid[id] = false;
+            onCeilingPreviousFrame[id] = false;
+        }
+
+        // Track explicit metrics for state detection verification
+        if (IsTruelyOnCeiling(player)) {
+            truelyOnCeilingFrameCount[id]++;
+
+            if (IsBallProperlyPositioned(player, state)) {
+                onCeilingWithBallNearbyCount[id]++;
+            }
+        }
+
+        float reward = 0.0f;
+
+        // Evaluate each stage and accumulate rewards
+        float setupReward = EvaluateSetup(player, state);
+        if (setupReward > 0.0f) {
+            completeSetupValid[id] = true;
+        }
+
+        // Only advance through stages if previous conditions are met
+        if (completeSetupValid[id]) {
+            float contactReward = EvaluateContact(player, state);
+            float executionReward = 0.0f;
+
+            // Only allow execution if contact is established
+            if (contactReward > 1.0f) {
+                executionReward = EvaluateExecution(player, state);
+            }
+
+            // Use highest-stage reward achieved (continuous accumulation)
+            if (executionReward > 0.0f) {
+                reward = executionReward;
+            } else if (contactReward > 0.0f) {
+                reward = contactReward;
+            } else if (setupReward > 0.0f) {
+                reward = setupReward;
+            }
+        } else {
+            // Still trying to set up
+            reward = setupReward;
+        }
+
+        // Reset tracking if player lands or falls off ceiling
+        if (player.isOnGround) {
+            completeSetupValid[id] = false;
+            stageProgress[id] = 0.0f;
+        }
+
+        onCeilingPreviousFrame[id] = IsTruelyOnCeiling(player);
 
         return reward;
+    }
+
+    // Metrics accessors for monitoring training
+    uint64_t GetTruelyOnCeilingFrames(const Player& player) const {
+        auto it = truelyOnCeilingFrameCount.find(player.carId);
+        return (it != truelyOnCeilingFrameCount.end()) ? it->second : 0;
+    }
+
+    uint64_t GetCeilingWithBallNearbyFrames(const Player& player) const {
+        auto it = onCeilingWithBallNearbyCount.find(player.carId);
+        return (it != onCeilingWithBallNearbyCount.end()) ? it->second : 0;
     }
 };
 
@@ -2061,17 +2206,17 @@ private:
     // ============================================================================
 
     // --- CORE REWARD SCALING ---
-    const float PROGRESS_SCALE = 0.010f;
+    const float PROGRESS_SCALE = 0.013f;
     // What it does: Reward per unit of progress toward goal (uu/s)
     // More aggressive: Increase to 0.015-0.020 for higher per-touch rewards
     // More conservative: Decrease to 0.008-0.010 for lower rewards
 
-    const float PER_TOUCH_MAX = 8.0f;
+    const float PER_TOUCH_MAX = 10.0f;
     // What it does: Maximum reward a single touch can yield
     // More aggressive: Increase to 12.0-15.0 to allow bigger single-touch payouts
     // More conservative: Decrease to 7.0-8.0 to cap individual touches lower
 
-    const float SEQ_REWARD_CAP = 60.0f;
+    const float SEQ_REWARD_CAP = 80.0f;
     // What it does: Total maximum reward for an entire air dribble sequence
     // More aggressive: Increase to 60.0-80.0 for longer, more rewarding sequences
     // More conservative: Decrease to 35.0-40.0 to limit total sequence value
@@ -2081,61 +2226,61 @@ private:
     // More aggressive: Increase to 12.0-15.0 for longer allowable sequences
     // More conservative: Decrease to 7.0-8.0 to force quicker completions
 
-    const int MAX_TOUCHES = 35;
+    const int MAX_TOUCHES = 50;
     // What it does: Maximum number of touches before sequence exhausts
     // More aggressive: Increase to 40-50 for more touch allowance
     // More conservative: Decrease to 20-25 to limit farming
 
-    const float MIN_PROGRESS_UU = 15.0f;
+    const float MIN_PROGRESS_UU = 8.0f;
     // What it does: Minimum forward progress required to award anything
     // More aggressive: Decrease to 8.0-10.0 to reward smaller progress
     // More conservative: Increase to 15.0-20.0 to require more meaningful progress
 
     // --- DECAY CURVE ---
-    const float DECAY_EXPONENT = 0.45f;
+    const float DECAY_EXPONENT = 0.25f;
     // What it does: Controls how quickly rewards diminish (0-1 range, lower = softer)
     // More aggressive: Decrease to 0.20-0.25 for even softer early decay
     // More conservative: Increase to 0.45-0.60 for steeper diminishing returns
 
     // --- BONUS REWARDS ---
-    const float ENTRY_BONUS = 0.6f;
+    const float ENTRY_BONUS = 1.0f;
     // What it does: One-time bonus when first qualifying touch occurs
     // More aggressive: Increase to 1.0-1.5 to encourage starting sequences
     // More conservative: Decrease to 0.3-0.4 for minimal starting bonus
 
-    const float SECOND_TOUCH_BONUS = 1.0f;
+    const float SECOND_TOUCH_BONUS = 1.2f;
     // What it does: Bonus when second qualifying touch occurs
     // More aggressive: Increase to 1.2-1.5 to encourage continuation
     // More conservative: Decrease to 0.4-0.6 for minimal continuation bonus
 
     // --- DIRECTIONAL REQUIREMENTS ---
-    const float MIN_DIR_MULTIPLIER = 0.5f;
+    const float MIN_DIR_MULTIPLIER = 0.3f;
     // What it does: Minimum directional alignment multiplier (was stricter)
     // More aggressive: Decrease to 0.2-0.3 to allow more off-angle dribbles
     // More conservative: Increase to 0.5-0.7 to require better goal alignment
 
-    const float GOOD_DIR_THRESHOLD = 0.55f;
+    const float GOOD_DIR_THRESHOLD = 0.5f;
     // What it does: Alignment threshold for "good" direction (dot product)
     // More aggressive: Decrease to 0.3-0.4 to be more lenient
     // More conservative: Increase to 0.6-0.75 to require tighter alignment
 
     // --- HEIGHT ARC BONUSES ---
-    const float HEIGHT_BONUS_THRESHOLD_1 = 350.0f;
+    const float HEIGHT_BONUS_THRESHOLD_1 = 250.0f;
     // What it does: Height gain (uu) required for first height bonus multiplier
     // More aggressive: Decrease to 250.0-300.0 for easier threshold
     // More conservative: Increase to 400.0-500.0 for harder threshold
 
-    const float HEIGHT_BONUS_MULTIPLIER_1 = 1.5f;
+    const float HEIGHT_BONUS_MULTIPLIER_1 = 1.7f;
     // What it does: Reward multiplier when HEIGHT_BONUS_THRESHOLD_1 is reached
     // More aggressive: Increase to 1.75-2.0 for bigger arc rewards
     // More conservative: Decrease to 1.3-1.4 for smaller bonuses
 
-    const float HEIGHT_BONUS_THRESHOLD_2 = 700.0f;
+    const float HEIGHT_BONUS_THRESHOLD_2 = 600.0f;
     // What it does: Height gain (uu) required for second (larger) height bonus
     // More aggressive: Decrease to 550.0-650.0 for easier threshold
     // More conservative: Increase to 800.0-1000.0 for harder threshold
 
-    const float HEIGHT_BONUS_MULTIPLIER_2 = 2.0f;
+    const float HEIGHT_BONUS_MULTIPLIER_2 = 2.5f;
     // What it does: Reward multiplier when HEIGHT_BONUS_THRESHOLD_2 is reached
     // More aggressive: Increase to 2.5-3.0 for massive arc rewards
     // More conservative: Decrease to 1.75-1.85 for smaller bonuses
@@ -2347,6 +2492,442 @@ public:
 
         return reward;
     }
+};
+
+// ============================================================================
+// UnifiedAirDribbleReward (2025-02-17)
+// Consolidates three separate air dribble rewards into one unified reward
+// with mode detection (offensive, defensive, general)
+// ============================================================================
+class UnifiedAirDribbleReward : public Reward {
+private:
+    enum Mode { OFFENSIVE, DEFENSIVE, GENERAL };
+
+    // Unified per-sequence state (shared across all modes)
+    struct SequenceState {
+        int consecutiveAirTouches = 0;
+        float accumReward = 0.0f;
+        float timeElapsed = 0.0f;
+        int touchCount = 0;
+        bool exhausted = false;
+        float startHeight = 0.0f;
+        float maxHeight = 0.0f;
+        bool heightBonusApplied = false;
+        Vec firstTouchBallVel;
+        bool firstTouchProcessed = false;
+    };
+
+    mutable std::map<uint32_t, SequenceState> sequenceStates;
+    float minBallHeight = 250.0f;
+
+    // Consolidated metrics (per mode)
+    mutable std::atomic<uint64_t> offensiveAttempts{ 0 };
+    mutable std::atomic<uint64_t> offensiveCompletions{ 0 };
+    mutable std::atomic<uint64_t> defensiveAttempts{ 0 };
+    mutable std::atomic<uint64_t> defensiveCompletions{ 0 };
+    mutable std::atomic<uint64_t> generalAttempts{ 0 };
+    mutable std::atomic<uint64_t> generalCompletions{ 0 };
+
+    const float EPS_REWARD_SKIP = 1e-7f;
+
+    // ========================================================================
+    // MODE DETECTION
+    // ========================================================================
+
+    Mode DetectMode(const Player& player, const GameState& state) const {
+        // Offensive: ball in opponent's half AND close to opponent goal
+        bool inOpponentHalf = (player.team == Team::BLUE) ?
+            (state.ball.pos.y > 0) : (state.ball.pos.y < 0);
+
+        if (inOpponentHalf) {
+            Vec oppGoal = (player.team == Team::BLUE) ?
+                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+            float distToGoal = (state.ball.pos - oppGoal).Length();
+
+            if (distToGoal < 900.0f) {
+                return Mode::OFFENSIVE;
+            }
+        }
+
+        // Defensive: ball in own half
+        bool inOwnHalf = (player.team == Team::BLUE) ?
+            (state.ball.pos.y < 0) : (state.ball.pos.y > 0);
+
+        if (inOwnHalf) {
+            return Mode::DEFENSIVE;
+        }
+
+        // General: everything else
+        return Mode::GENERAL;
+    }
+
+    // ========================================================================
+    // OFFENSIVE MODE (based on AirDribbleAccuracyReward)
+    // ========================================================================
+
+    float EvaluateOffensive(const Player& player, const GameState& state, SequenceState& seq) const {
+        // Constants for offensive mode
+        const float PROGRESS_SCALE = 0.0105f;
+        const float PER_TOUCH_MAX = 7.0f;
+        const float SEQ_REWARD_CAP = 65.0f;
+        const float MAX_SEQ_DURATION = 13.0f;
+        const int MAX_TOUCHES = 40;
+        const float MIN_PROGRESS_UU = 12.0f;
+        const float DECAY_EXPONENT = 0.5f;
+        const float ENTRY_BONUS = 0.65f;
+        const float SECOND_TOUCH_BONUS = 1.0f;
+        const float MIN_DIR_MULTIPLIER = 0.46f;
+        const float GOOD_DIR_THRESHOLD = 0.525f;
+        const float ROUGH_TOUCH_THRESHOLD = 1200.0f;
+        const float ROUGH_TOUCH_PENALTY = 0.7f;
+        const float SCORING_ZONE_MIN = 250.0f;
+        const float SCORING_ZONE_MAX = 630.0f;
+        const float SCORING_ZONE_BONUS = 1.3f;
+        const float MAX_BALL_Z_FOR_GOAL = 640.0f;
+        const float HEIGHT_CONSTRAINT_PENALTY = 0.5f;
+
+        offensiveAttempts.fetch_add(1);
+
+        // Check sequence constraints
+        if (seq.timeElapsed > MAX_SEQ_DURATION || seq.touchCount >= MAX_TOUCHES) {
+            seq.exhausted = true;
+            return 0.0f;
+        }
+
+        // Calculate progress toward opponent goal
+        Vec oppGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+        float prevDist = (state.prev->ball.pos - oppGoal).Length();
+        float curDist = (state.ball.pos - oppGoal).Length();
+        float progress = RS_MAX(0.0f, prevDist - curDist);
+
+        if (progress < MIN_PROGRESS_UU) {
+            return 0.0f;
+        }
+
+        // Base reward
+        float perTouch = RS_MIN(PER_TOUCH_MAX, progress * PROGRESS_SCALE);
+        float usedFraction = RS_CLAMP(seq.accumReward / SEQ_REWARD_CAP, 0.0f, 1.0f);
+        float decay = powf(1.0f - usedFraction, DECAY_EXPONENT);
+        float remainingCap = RS_MAX(0.0f, SEQ_REWARD_CAP - seq.accumReward);
+        float rewardBeforeDir = RS_MIN(perTouch * decay, remainingCap);
+
+        // Directional multiplier (toward opponent goal)
+        Vec ballToGoal = (oppGoal - state.ball.pos).Normalized();
+        Vec ballVelDir = state.ball.vel.Normalized();
+        float alignment = ballVelDir.Dot(ballToGoal);
+        float dirMul = (alignment < 0.0f) ? MIN_DIR_MULTIPLIER * 0.4f :
+                       (alignment < GOOD_DIR_THRESHOLD) ?
+                       MIN_DIR_MULTIPLIER + (1.0f - MIN_DIR_MULTIPLIER) * (alignment / GOOD_DIR_THRESHOLD) * 0.8f :
+                       0.8f + 0.2f * ((alignment - GOOD_DIR_THRESHOLD) / (1.0f - GOOD_DIR_THRESHOLD));
+
+        float reward = rewardBeforeDir * dirMul;
+
+        // Entry/second-touch bonuses
+        if (seq.consecutiveAirTouches == 0) {
+            reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
+        } else if (seq.consecutiveAirTouches == 1) {
+            reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
+        }
+
+        // Height penalties in finishing zone
+        if (state.ball.pos.z > MAX_BALL_Z_FOR_GOAL) {
+            reward *= HEIGHT_CONSTRAINT_PENALTY;
+        }
+
+        // Scoring zone bonus
+        if (state.ball.pos.z >= SCORING_ZONE_MIN && state.ball.pos.z <= SCORING_ZONE_MAX) {
+            reward *= SCORING_ZONE_BONUS;
+        }
+
+        // First touch quality check
+        if (!seq.firstTouchProcessed && state.prev) {
+            float prevSpeed = state.prev->ball.vel.Length();
+            float currSpeed = state.ball.vel.Length();
+            float velocityChange = currSpeed - prevSpeed;
+            if (velocityChange > ROUGH_TOUCH_THRESHOLD) {
+                reward *= ROUGH_TOUCH_PENALTY;
+            }
+            seq.firstTouchProcessed = true;
+        }
+
+        if (reward > EPS_REWARD_SKIP) {
+            seq.accumReward += reward;
+            seq.touchCount++;
+            offensiveCompletions.fetch_add(1);
+            if (seq.accumReward >= SEQ_REWARD_CAP - 1e-3f) {
+                seq.exhausted = true;
+            }
+            return reward;
+        }
+        return 0.0f;
+    }
+
+    // ========================================================================
+    // DEFENSIVE MODE (based on AirDribbleClearingReward)
+    // ========================================================================
+
+    float EvaluateDefensive(const Player& player, const GameState& state, SequenceState& seq) const {
+        // Constants for defensive mode
+        const float PROGRESS_SCALE = 0.008f;
+        const float PER_TOUCH_MAX = 5.0f;
+        const float SEQ_REWARD_CAP = 40.0f;
+        const float MAX_SEQ_DURATION = 12.0f;
+        const int MAX_TOUCHES = 35;
+        const float MIN_PROGRESS_UU = 10.0f;
+        const float DECAY_EXPONENT = 0.45f;
+        const float ENTRY_BONUS = 0.5f;
+        const float SECOND_TOUCH_BONUS = 0.8f;
+        const float MIN_DIR_MULTIPLIER = 0.4f;
+        const float GOOD_DIR_THRESHOLD = 0.45f;
+        const float ROUGH_TOUCH_THRESHOLD = 1200.0f;
+        const float ROUGH_TOUCH_PENALTY = 0.7f;
+        const float CLEARING_ZONE_MIN = 200.0f;
+        const float CLEARING_ZONE_MAX = 800.0f;
+        const float CLEARING_ZONE_BONUS = 1.2f;
+        const float EXCESSIVE_HEIGHT_THRESHOLD = 1500.0f;
+        const float HEIGHT_PENALTY_EXPONENT = 1.2f;
+        const float MAX_HEIGHT_PENALTY = 0.5f;
+
+        defensiveAttempts.fetch_add(1);
+
+        // Check sequence constraints
+        if (seq.timeElapsed > MAX_SEQ_DURATION || seq.touchCount >= MAX_TOUCHES) {
+            seq.exhausted = true;
+            return 0.0f;
+        }
+
+        // Calculate progress away from own goal (toward opponent)
+        Vec ownGoal = (player.team == Team::BLUE) ?
+            CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+        Vec oppGoalLine = (player.team == Team::BLUE) ?
+            Vec(0.0f, CommonValues::BACK_WALL_Y, 0.0f) :
+            Vec(0.0f, -CommonValues::BACK_WALL_Y, 0.0f);
+
+        float prevDist = (state.prev->ball.pos - ownGoal).Length();
+        float curDist = (state.ball.pos - ownGoal).Length();
+        float progress = RS_MAX(0.0f, curDist - prevDist); // Away from own goal
+
+        if (progress < MIN_PROGRESS_UU) {
+            return 0.0f;
+        }
+
+        // Base reward
+        float perTouch = RS_MIN(PER_TOUCH_MAX, progress * PROGRESS_SCALE);
+        float usedFraction = RS_CLAMP(seq.accumReward / SEQ_REWARD_CAP, 0.0f, 1.0f);
+        float decay = powf(1.0f - usedFraction, DECAY_EXPONENT);
+        float remainingCap = RS_MAX(0.0f, SEQ_REWARD_CAP - seq.accumReward);
+        float rewardBeforeDir = RS_MIN(perTouch * decay, remainingCap);
+
+        // Directional multiplier (away from own goal)
+        Vec awayFromGoal = (oppGoalLine - ownGoal).Normalized();
+        Vec ballVelDir = state.ball.vel.Normalized();
+        float alignment = ballVelDir.Dot(awayFromGoal);
+        float dirMul = (alignment < 0.0f) ? MIN_DIR_MULTIPLIER * 0.4f :
+                       (alignment < GOOD_DIR_THRESHOLD) ?
+                       MIN_DIR_MULTIPLIER + (1.0f - MIN_DIR_MULTIPLIER) * (alignment / GOOD_DIR_THRESHOLD) * 0.8f :
+                       0.8f + 0.2f * ((alignment - GOOD_DIR_THRESHOLD) / (1.0f - GOOD_DIR_THRESHOLD));
+
+        float reward = rewardBeforeDir * dirMul;
+
+        // Entry/second-touch bonuses
+        if (seq.consecutiveAirTouches == 0) {
+            reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
+        } else if (seq.consecutiveAirTouches == 1) {
+            reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
+        }
+
+        // Height penalty
+        if (state.ball.pos.z >= EXCESSIVE_HEIGHT_THRESHOLD) {
+            float excessHeight = state.ball.pos.z - EXCESSIVE_HEIGHT_THRESHOLD;
+            float penalty = powf(excessHeight / (CommonValues::CEILING_Z - EXCESSIVE_HEIGHT_THRESHOLD),
+                HEIGHT_PENALTY_EXPONENT);
+            penalty = RS_CLAMP(penalty, 0.0f, 1.0f - MAX_HEIGHT_PENALTY);
+            reward *= (1.0f - penalty);
+        }
+
+        // Clearing zone bonus
+        if (state.ball.pos.z >= CLEARING_ZONE_MIN && state.ball.pos.z <= CLEARING_ZONE_MAX) {
+            reward *= CLEARING_ZONE_BONUS;
+        }
+
+        // First touch quality
+        if (!seq.firstTouchProcessed && state.prev) {
+            float prevSpeed = state.prev->ball.vel.Length();
+            float currSpeed = state.ball.vel.Length();
+            float velocityChange = currSpeed - prevSpeed;
+            if (velocityChange > ROUGH_TOUCH_THRESHOLD) {
+                reward *= ROUGH_TOUCH_PENALTY;
+            }
+            seq.firstTouchProcessed = true;
+        }
+
+        if (reward > EPS_REWARD_SKIP) {
+            seq.accumReward += reward;
+            seq.touchCount++;
+            defensiveCompletions.fetch_add(1);
+            if (seq.accumReward >= SEQ_REWARD_CAP - 1e-3f) {
+                seq.exhausted = true;
+            }
+            return reward;
+        }
+        return 0.0f;
+    }
+
+    // ========================================================================
+    // GENERAL MODE (based on AirDribbleReward)
+    // ========================================================================
+
+    float EvaluateGeneral(const Player& player, const GameState& state, SequenceState& seq) const {
+        // Constants for general mode
+        const float PROGRESS_SCALE = 0.013f;
+        const float PER_TOUCH_MAX = 10.0f;
+        const float SEQ_REWARD_CAP = 80.0f;
+        const float MAX_SEQ_DURATION = 12.0f;
+        const int MAX_TOUCHES = 50;
+        const float MIN_PROGRESS_UU = 8.0f;
+        const float DECAY_EXPONENT = 0.25f;
+        const float ENTRY_BONUS = 1.0f;
+        const float SECOND_TOUCH_BONUS = 1.2f;
+        const float MIN_DIR_MULTIPLIER = 0.3f;
+        const float GOOD_DIR_THRESHOLD = 0.5f;
+        const float HEIGHT_BONUS_THRESHOLD_1 = 250.0f;
+        const float HEIGHT_BONUS_MULTIPLIER_1 = 1.7f;
+        const float HEIGHT_BONUS_THRESHOLD_2 = 600.0f;
+        const float HEIGHT_BONUS_MULTIPLIER_2 = 2.5f;
+
+        generalAttempts.fetch_add(1);
+
+        // Check sequence constraints
+        if (seq.timeElapsed > MAX_SEQ_DURATION || seq.touchCount >= MAX_TOUCHES) {
+            seq.exhausted = true;
+            return 0.0f;
+        }
+
+        // Calculate progress toward opponent goal
+        Vec oppGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+        float prevDist = (state.prev->ball.pos - oppGoal).Length();
+        float curDist = (state.ball.pos - oppGoal).Length();
+        float progress = RS_MAX(0.0f, prevDist - curDist);
+
+        if (progress < MIN_PROGRESS_UU) {
+            return 0.0f;
+        }
+
+        // Base reward
+        float perTouch = RS_MIN(PER_TOUCH_MAX, progress * PROGRESS_SCALE);
+        float usedFraction = RS_CLAMP(seq.accumReward / SEQ_REWARD_CAP, 0.0f, 1.0f);
+        float decay = powf(1.0f - usedFraction, DECAY_EXPONENT);
+        float remainingCap = RS_MAX(0.0f, SEQ_REWARD_CAP - seq.accumReward);
+        float rewardBeforeDir = RS_MIN(perTouch * decay, remainingCap);
+
+        // Directional multiplier (toward opponent goal, lenient)
+        Vec ballToGoal = (oppGoal - state.ball.pos).Normalized();
+        Vec ballVelDir = state.ball.vel.Normalized();
+        float alignment = ballVelDir.Dot(ballToGoal);
+        float dirMul = (alignment < 0.0f) ? MIN_DIR_MULTIPLIER * 0.5f :
+                       (alignment < GOOD_DIR_THRESHOLD) ?
+                       MIN_DIR_MULTIPLIER + (1.0f - MIN_DIR_MULTIPLIER) * (alignment / GOOD_DIR_THRESHOLD) * 0.7f :
+                       0.7f + 0.3f * ((alignment - GOOD_DIR_THRESHOLD) / (1.0f - GOOD_DIR_THRESHOLD));
+
+        float reward = rewardBeforeDir * dirMul;
+
+        // Entry/second-touch bonuses
+        if (seq.consecutiveAirTouches == 0) {
+            reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
+        } else if (seq.consecutiveAirTouches == 1) {
+            reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
+        }
+
+        // Height bonuses (arc detection)
+        float heightGain = state.ball.pos.z - seq.startHeight;
+        float heightBonus = 1.0f;
+        if (heightGain >= HEIGHT_BONUS_THRESHOLD_2) {
+            heightBonus = HEIGHT_BONUS_MULTIPLIER_2;
+        } else if (heightGain >= HEIGHT_BONUS_THRESHOLD_1) {
+            heightBonus = HEIGHT_BONUS_MULTIPLIER_1;
+        }
+
+        if (heightBonus > 1.0f && !seq.heightBonusApplied) {
+            seq.heightBonusApplied = true;
+        }
+
+        reward *= heightBonus;
+
+        if (reward > EPS_REWARD_SKIP) {
+            seq.accumReward += reward;
+            seq.touchCount++;
+            generalCompletions.fetch_add(1);
+            if (seq.accumReward >= SEQ_REWARD_CAP - 1e-3f) {
+                seq.exhausted = true;
+            }
+            return reward;
+        }
+        return 0.0f;
+    }
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        sequenceStates.clear();
+        offensiveAttempts = 0;
+        offensiveCompletions = 0;
+        defensiveAttempts = 0;
+        defensiveCompletions = 0;
+        generalAttempts = 0;
+        generalCompletions = 0;
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        uint32_t id = player.carId;
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+        // Reset on ground or invalid conditions
+        if (player.isOnGround || state.ball.pos.z < minBallHeight || player.pos.z >= state.ball.pos.z) {
+            sequenceStates.erase(id);
+            return 0.0f;
+        }
+
+        if (!state.prev || !player.ballTouchedStep) {
+            return 0.0f;
+        }
+
+        // Initialize sequence state if absent
+        if (sequenceStates.find(id) == sequenceStates.end()) {
+            sequenceStates[id] = SequenceState();
+            sequenceStates[id].startHeight = state.ball.pos.z;
+            sequenceStates[id].maxHeight = state.ball.pos.z;
+        }
+
+        SequenceState& seq = sequenceStates[id];
+        seq.timeElapsed += dt;
+        seq.consecutiveAirTouches++;
+
+        if (seq.exhausted) {
+            return 0.0f;
+        }
+
+        // Detect mode and evaluate
+        Mode mode = DetectMode(player, state);
+
+        switch (mode) {
+            case Mode::OFFENSIVE:
+                return EvaluateOffensive(player, state, seq);
+            case Mode::DEFENSIVE:
+                return EvaluateDefensive(player, state, seq);
+            case Mode::GENERAL:
+            default:
+                return EvaluateGeneral(player, state, seq);
+        }
+    }
+
+    // Metrics accessors for W&B monitoring
+    uint64_t GetOffensiveAttempts() const { return offensiveAttempts; }
+    uint64_t GetOffensiveCompletions() const { return offensiveCompletions; }
+    uint64_t GetDefensiveAttempts() const { return defensiveAttempts; }
+    uint64_t GetDefensiveCompletions() const { return defensiveCompletions; }
+    uint64_t GetGeneralAttempts() const { return generalAttempts; }
+    uint64_t GetGeneralCompletions() const { return generalCompletions; }
 };
 
 // 2025-12-20 | Rev 1.0 | NJH

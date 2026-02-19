@@ -118,13 +118,13 @@ struct RotationConfig {
 		case RotationPhase::CHAMPION_PLUS:
 			// Focus: Perfect rotation, high-speed flow
 			cfg.minTeammateSpacing = 1800.0f;      // Strict spacing
-			cfg.maxTeammateSpacing = 4200.0f;
+			cfg.maxTeammateSpacing = 4000.0f;
 			cfg.clusterPenaltyWeight = 2.0f;
-			cfg.backPostProximity = 1000.0f;       // Very precise
-			cfg.rotationEventReward = 1.0f;        // Maximum event reward
-			cfg.rotationShapingWeight = 0.7f;
-			cfg.minRoleTime = 1.2f;
-			cfg.maxRoleTime = 8.0f;                // Strict max time
+			cfg.backPostProximity = 1200.0f;       // Very precise
+			cfg.rotationEventReward = 1.2f;        // Maximum event reward
+			cfg.rotationShapingWeight = 0.9f;
+			cfg.minRoleTime = 1.0f;
+			cfg.maxRoleTime = 12.0f;                // Strict max time
 			cfg.enableRoleCycling = true;
 			cfg.enableAdaptiveRotation = true;
 			break;
@@ -780,6 +780,209 @@ public:
 		spacingReward.PreStep(state);
 		retreatReward.PreStep(state);
 		roleReward.PreStep(state);
+	}
+};
+
+// ============================================================================
+// BOOST-AWARE ROTATION REWARD
+// Incentivizes rotation based on boost availability:
+// - Low-boost players should be in FURTHEST role (last man, defensive)
+// - High-boost players should be in CLOSEST role (first man, offensive)
+// Enables dynamic role switching based on resource availability.
+//
+// Disabled during kickoffs. Only applies in 2v2+ team play.
+// Active from Platinum+ (when role awareness develops).
+// ============================================================================
+class BoostAwareRotationReward : public Reward {
+private:
+	enum class BoostRole {
+		FURTHEST,      // Closest to own goal (should be low-boost player)
+		MIDDLE,        // In between (3v3+ only)
+		CLOSEST        // Furthest from own goal (should be high-boost player)
+	};
+
+	struct RoleMemory {
+		BoostRole lastFrameRole = BoostRole::FURTHEST;
+		int roleStepCount = 0;
+		bool hasGivenEventReward = false;
+		float lastBoostDisparity = 0.0f;
+	};
+
+	std::unordered_map<uint32_t, RoleMemory> memory;
+	RotationConfig config;
+	int currentStep = 0;
+
+	// Constants
+	static constexpr int ROLE_STABILITY_STEPS = 120;  // ~1 second at 120 Hz
+	static constexpr float LOW_BOOST_THRESHOLD = 75.0f;
+	static constexpr float HIGH_BOOST_THRESHOLD = 100.0f;
+	static constexpr float BOOST_DISPARITY_THRESHOLD = 30.0f;
+
+	// Get the player's goal position (own goal center)
+	Vec GetOwnGoalPos(Team team) const {
+		return (team == Team::BLUE)
+			? CommonValues::BLUE_GOAL_CENTER
+			: CommonValues::ORANGE_GOAL_CENTER;
+	}
+
+	// Determine player's role based on goal-line distance (X coordinate)
+	// FURTHEST = closest to own goal, CLOSEST = furthest from own goal
+	BoostRole DeterminePlayerRole(const Player& player, const GameState& state) const {
+		float playerGoalDist = (player.pos - GetOwnGoalPos(player.team)).Length();
+
+		std::vector<float> teammateDists;
+		for (const auto& p : state.players) {
+			if (p.team == player.team && p.carId != player.carId) {
+				float dist = (p.pos - GetOwnGoalPos(player.team)).Length();
+				teammateDists.push_back(dist);
+			}
+		}
+
+		if (teammateDists.empty()) {
+			return BoostRole::CLOSEST;  // Only player on team
+		}
+
+		std::sort(teammateDists.begin(), teammateDists.end());
+
+		// Determine role based on distance to own goal
+		if (playerGoalDist <= teammateDists[0]) {
+			return BoostRole::FURTHEST;  // Closest to own goal = last man
+		}
+		else if (teammateDists.size() >= 2 && playerGoalDist >= teammateDists.back()) {
+			return BoostRole::CLOSEST;   // Furthest from own goal = first man
+		}
+		else {
+			return BoostRole::MIDDLE;    // In between (3v3+)
+		}
+	}
+
+	// Get boost disparity between player and closest teammate
+	float GetBoostDisparity(const Player& player, const GameState& state) const {
+		float closestTeammateDist = FLT_MAX;
+		float closestTeammateBoost = 0.0f;
+
+		for (const auto& p : state.players) {
+			if (p.team == player.team && p.carId != player.carId) {
+				float dist = (player.pos - p.pos).Length();
+				if (dist < closestTeammateDist) {
+					closestTeammateDist = dist;
+					closestTeammateBoost = p.boost;
+				}
+			}
+		}
+
+		if (closestTeammateDist == FLT_MAX) {
+			return 0.0f;  // No teammates
+		}
+
+		return closestTeammateBoost - player.boost;
+	}
+
+	// Check if player is in the correct role based on boost
+	bool IsCorrectRole(const Player& player, const GameState& state, BoostRole currentRole) const {
+		float boostDisparity = GetBoostDisparity(player, state);
+
+		// Low-boost player should be FURTHEST
+		if (player.boost < LOW_BOOST_THRESHOLD) {
+			return currentRole == BoostRole::FURTHEST;
+		}
+
+		// High-boost player should be CLOSEST
+		if (player.boost > HIGH_BOOST_THRESHOLD && boostDisparity < -BOOST_DISPARITY_THRESHOLD) {
+			return currentRole == BoostRole::CLOSEST;
+		}
+
+		// Balanced boost - no penalty for any role
+		return true;
+	}
+
+	// Check if during kickoff (all players near center)
+	bool IsKickoffPhase(const GameState& state) const {
+		const float KICKOFF_CENTER_RADIUS = 3000.0f;
+		Vec center(0, 0, 0);
+
+		for (const auto& p : state.players) {
+			if ((p.pos - center).Length() > KICKOFF_CENTER_RADIUS) {
+				return false;  // Player outside kickoff zone
+			}
+		}
+		return true;
+	}
+
+public:
+	BoostAwareRotationReward(RotationPhase phase)
+		: config(RotationConfig::ForPhase(phase)) {
+	}
+
+	void Reset(const GameState& state) override {
+		memory.clear();
+		currentStep = 0;
+	}
+
+	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		// Only active in Platinum+
+		if (!config.enableRoleCycling) {
+			return 0.0f;
+		}
+
+		// Skip 1v1 matches
+		if (state.players.size() < 4) {
+			return 0.0f;
+		}
+
+		// Skip kickoff phase
+		if (IsKickoffPhase(state)) {
+			return 0.0f;
+		}
+
+		auto& mem = memory[player.carId];
+		float reward = 0.0f;
+
+		BoostRole currentRole = DeterminePlayerRole(player, state);
+		float boostDisparity = GetBoostDisparity(player, state);
+		mem.lastBoostDisparity = boostDisparity;
+
+		// Check for role transition
+		if (currentRole != mem.lastFrameRole) {
+			mem.roleStepCount = 0;
+			mem.hasGivenEventReward = false;
+			mem.lastFrameRole = currentRole;
+		}
+
+		mem.roleStepCount++;
+
+		// Only evaluate role correctness after stability window
+		if (mem.roleStepCount >= ROLE_STABILITY_STEPS) {
+			bool correctRole = IsCorrectRole(player, state, currentRole);
+
+			// EVENT REWARD: Transition to correct role
+			if (correctRole && !mem.hasGivenEventReward && mem.roleStepCount == ROLE_STABILITY_STEPS) {
+				reward += 0.3f;
+				mem.hasGivenEventReward = true;
+			}
+
+			// SHAPING REWARD: Maintain correct role
+			if (correctRole) {
+				// Amplify if there's meaningful boost disparity
+				float amplifier = 1.0f;
+				if (std::abs(boostDisparity) > BOOST_DISPARITY_THRESHOLD) {
+					amplifier = 1.5f;
+				}
+				reward += 0.2f * amplifier;
+			}
+			else {
+				// PENALTY: Low-boost player in CLOSEST role
+				if (player.boost < LOW_BOOST_THRESHOLD && currentRole == BoostRole::CLOSEST) {
+					reward -= 0.15f;
+				}
+			}
+		}
+
+		return reward;
+	}
+
+	void PreStep(const GameState& state) override {
+		currentStep++;
 	}
 };
 

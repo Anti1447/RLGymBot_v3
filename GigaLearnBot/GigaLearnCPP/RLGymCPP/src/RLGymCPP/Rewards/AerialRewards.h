@@ -139,13 +139,15 @@ namespace RLGC {
 			bool isPitchedUpEnough = false;
 			bool secondJumpDetected = false;
 			float maxHeightAfterSecondJump = 0.0f;
+			float sequenceStartBoost = -1.0f;  // NEW: Boost when sequence started (for linear scaling 0-30)
 		};
 
 		mutable std::map<uint32_t, FastAerialTracker> trackers;
 
 		// Configuration
-		static constexpr float DOUBLE_JUMP_WINDOW = 2.0f;         // Max time between jumps (seconds)
-		static constexpr float MIN_PITCH_DEGREES = 15.0f;         // Minimum pitch requirement
+		static constexpr float DOUBLE_JUMP_WINDOW = 0.4f;         // Max time between jumps (0.25-0.5s window, now 0.4s)
+		static constexpr float MIN_PITCH_DEGREES = 25.0f;         // Minimum pitch requirement (was 15.0f, now 25.0f for 45±20° range)
+		static constexpr float MAX_PITCH_DEGREES = 65.0f;         // Maximum pitch requirement (NEW: enforce upper bound of 45±20° range)
 		static constexpr float OPTIMAL_PITCH_DEGREES = 45.0f;     // Sweet spot for pitch
 		static constexpr float PITCH_TOLERANCE = 15.0f;           // Tolerance around optimal
 		static constexpr float BASE_REWARD = 2.0f;                // Base reward for fast aerial
@@ -153,6 +155,8 @@ namespace RLGC {
 		static constexpr float MAX_HEIGHT_BONUS = 3.0f;           // Cap on height bonus
 		static constexpr float PITCH_BONUS_SCALE = 0.02f;         // Bonus for good pitch angle
 		static constexpr float MAX_PITCH_BONUS = 1.0f;            // Cap on pitch bonus
+		static constexpr float MIN_BOOST_FOR_REWARD = 0.0f;       // NEW: Minimum boost gate (0.0f allows linear scaling from 0)
+		static constexpr float BOOST_SCALE_THRESHOLD = 30.0f;     // NEW: Boost scaling: 0-30 maps to 0.0-1.0x multiplier
 
 	public:
 		virtual void Reset(const GameState& initialState) override {
@@ -176,6 +180,7 @@ namespace RLGC {
 				tracker.maxPitchDuringFirstJump = 0.0f;
 				tracker.isPitchedUpEnough = false;
 				tracker.secondJumpDetected = false;
+				tracker.sequenceStartBoost = player.boost;  // NEW: Capture boost at sequence start
 				return 0.0f;
 			}
 
@@ -205,8 +210,8 @@ namespace RLGC {
 					tracker.maxPitchDuringFirstJump = pitchDegrees;
 				}
 
-				// Check if pitch is sufficient (>15°)
-				if (pitchDegrees >= MIN_PITCH_DEGREES) {
+				// Check if pitch is in proper range (25-65° for 45±20°)
+				if (pitchDegrees >= MIN_PITCH_DEGREES && pitchDegrees <= MAX_PITCH_DEGREES) {
 					tracker.isPitchedUpEnough = true;
 					tracker.state = FastAerialTracker::PITCHED_UP;
 				}
@@ -248,6 +253,11 @@ namespace RLGC {
 				float pitchBonus = RS_MIN(MAX_PITCH_BONUS, pitchAccuracy * PITCH_BONUS_SCALE * 100.0f);
 
 				float reward = BASE_REWARD + heightBonus + pitchBonus;
+
+				// NEW: Apply boost multiplier (linear scaling 0-30 boost)
+				// Formula: 0 boost = 0.0x, 30 boost = 1.0x, 100+ boost = 1.0x
+				float boostMultiplier = RS_CLAMP(tracker.sequenceStartBoost / BOOST_SCALE_THRESHOLD, 0.0f, 1.0f);
+				reward *= boostMultiplier;
 
 				// Reset for next aerial
 				tracker.state = FastAerialTracker::WAITING;
@@ -300,6 +310,9 @@ namespace RLGC {
 
 			// Position tracking
 			float lastProximityToball = 999999.0f;
+
+			// NEW: Boost tracking
+			float setupStartBoost = 0.0f;  // Boost level when setup started
 		};
 
 		mutable std::map<uint32_t, SetupMemory> trackers;
@@ -338,6 +351,7 @@ namespace RLGC {
 				mem.accumulatedSoftness = 0.0f;
 				mem.softTouchCount = 0;
 				mem.maxHeightInSetup = player.pos.z;
+				mem.setupStartBoost = player.boost;  // NEW: Capture boost at setup start
 			}
 
 			// === PHASE 2: SETUP MAINTENANCE ===
@@ -389,6 +403,12 @@ namespace RLGC {
 				if (mem.setupStepsCount % PERSISTENCE_STEP_INTERVAL == 0 && mem.setupStepsCount > 0) {
 					reward += PERSISTENCE_BONUS;
 				}
+			}
+
+			// NEW: Apply boost multiplier to all setup phase rewards
+			if (mem.isInSetupPhase && reward > 0.0f) {
+				float boostMultiplier = RS_CLAMP(mem.setupStartBoost / 50.0f, 0.0f, 1.0f);
+				reward *= boostMultiplier;
 			}
 
 			return reward;

@@ -21,8 +21,6 @@
 #include <RLGymCPP/Rewards/AdvancedPlayRewards.h>
 #include <RLGymCPP/Rewards/PositioningRewards.h>
 #include <RLGymCPP/Rewards/SmartWallPlayRewards.h>
-#include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
-#include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
 #include <RLGymCPP/Rewards/HookshotReward.h>
 #include <RLGymCPP/Rewards/WallDashReward.h>
 #include <RLGymCPP/Rewards/OptionControlReward.h>
@@ -36,7 +34,7 @@
 #include <RLGymCPP/Rewards/KickoffStrategyReward.h>
 #include <RLGymCPP/Rewards/KickoffRandomizationReward.h>
 #include <RLGymCPP/Rewards/AirDribbleUtilities.h>
-
+#include <RLGymCPP/Rewards/CompositeFlickReward.h>
 using namespace RLGC;
 
 enum class TrainingPhase {

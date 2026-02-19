@@ -200,6 +200,7 @@ namespace RLGC {
     // Rewards positioning at the "far post" during defensive situations.
     // This is optimal positioning for saves and prevents most goals.
     // Also rewards facing toward the inner part of the goal (toward the net).
+    // PENALIZES staying at goal post if a teammate is already behind us.
     // ============================================================================
     class GoalpostPositioningReward : public Reward {
     private:
@@ -208,6 +209,7 @@ namespace RLGC {
         static constexpr float BASE_REWARD = 0.5f;
         static constexpr float PERFECT_POSITION_BONUS = 0.5f;
         static constexpr float FACING_GOAL_BONUS = 0.3f;
+        static constexpr float TEAMMATE_BEHIND_PENALTY = 0.6f;  // Heavy penalty for redundant positioning
 
         // Get the "back post" position (furthest goal post from ball)
         // Back post positioning is critical for shot blocking - stand at the post
@@ -251,6 +253,35 @@ namespace RLGC {
             return carForward.Dot(toGoal);
         }
 
+        // Check if any teammate is closer to our goal than us (behind us)
+        bool HasTeammateCloserToGoal(const Player& player, const GameState& state) const {
+            Vec ownGoal = (player.team == Team::BLUE) ?
+                CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+
+            float playerDistToGoal = (player.pos - ownGoal).Length();
+
+            for (const auto& teammate : state.players) {
+                // Skip self and opponents
+                if (teammate.team != player.team || teammate.carId == player.carId) {
+                    continue;
+                }
+
+                // Skip demoed teammates
+                if (teammate.isDemoed) {
+                    continue;
+                }
+
+                float tmDistToGoal = (teammate.pos - ownGoal).Length();
+
+                // Teammate is behind us (closer to goal) - they should be the defender
+                if (tmDistToGoal < playerDistToGoal) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
     public:
         virtual void Reset(const GameState& initialState) override {
             // No state needed
@@ -269,6 +300,9 @@ namespace RLGC {
 
             Vec backPost = GetBackPostPosition(player, state);
             float distToBackPost = (player.pos - backPost).Length();
+
+            // Check if teammate is already defending
+            bool hasTeammateDefending = HasTeammateCloserToGoal(player, state);
 
             // Reward based on proximity to back post
             float reward = 0.0f;
@@ -301,13 +335,23 @@ namespace RLGC {
                 if (facingAlignment > 0.8f) {
                     reward *= 1.3f;
                 }
+
+                // PENALTY: If teammate is already defending (closer to goal), penalize redundant positioning
+                if (hasTeammateDefending) {
+                    reward *= (1.0f - TEAMMATE_BEHIND_PENALTY);
+                }
             }
             else if (distToBackPost < FAR_POST_RADIUS * 2.0f) {
                 // Moving toward back post - small reward
                 reward = BASE_REWARD * 0.3f;
+
+                // Penalize moving to post if teammate already defending
+                if (hasTeammateDefending) {
+                    reward *= (1.0f - TEAMMATE_BEHIND_PENALTY);
+                }
             }
 
-            return reward;
+            return RS_CLAMP(reward, -1.0f, 1.0f);
         }
     };
 
@@ -535,6 +579,9 @@ namespace RLGC {
             float ballZVelocityGainLast = 0.0f;   // Z velocity gain from last touch
             Vec lastBallPos = Vec(0, 0, 0);       // Ball position last frame
             Vec lastBallVel = Vec(0, 0, 0);       // Ball velocity last frame
+
+            // NEW: Boost tracking
+            float sequenceStartBoost = 0.0f;      // Boost level when sequence started
         };
 
         std::unordered_map<uint32_t, AirTouchMemory> memory;
@@ -593,6 +640,11 @@ namespace RLGC {
                     (currentStep - mem.lastTouchStep) >= MIN_TOUCH_DELAY_STEPS) {
                     mem.touchCount++;
                     mem.lastTouchStep = currentStep;
+
+                    // NEW: Capture boost on first touch of sequence
+                    if (mem.touchCount == 1) {
+                        mem.sequenceStartBoost = player.boost;
+                    }
 
                     // Track highest altitude of touches
                     mem.highestAltitude = RS_MAX(mem.highestAltitude, player.pos.z);
@@ -673,6 +725,12 @@ namespace RLGC {
             }
 
             mem.ballWasInAir = ballInAir;
+
+            // NEW: Apply boost multiplier to all touch bonuses
+            if (mem.touchCount > 0 && reward > 0.0f) {
+                float boostMultiplier = RS_CLAMP(mem.sequenceStartBoost / 50.0f, 0.0f, 1.0f);
+                reward *= boostMultiplier;
+            }
 
             return reward;
         }
