@@ -19,6 +19,7 @@
 #pragma once
 
 #include "Reward.h"
+#include "BallPrediction.h"
 #include "../Math.h"
 #include "AirDribbleUtilities.h"
 #include <map>
@@ -41,11 +42,7 @@ namespace RLGC {
         static constexpr float BASE_REWARD = 0.1f;
         static constexpr float CRITICAL_MULTIPLIER = 3.0f;
 
-        // Predict where ball will be in N seconds
-        Vec PredictBallPosition(const GameState& state, float seconds) const {
-            // Simple linear prediction (could be improved with physics)
-            return state.ball.pos + (state.ball.vel * seconds);
-        }
+        BallPred::Cache _ballCache;
 
         // Check if ball is heading toward goal
         bool IsBallHeadingTowardGoal(const Player& player, const GameState& state, const Vec& goalPos) const {
@@ -62,6 +59,10 @@ namespace RLGC {
         }
 
     public:
+        virtual void PreStep(const GameState& state) override {
+            _ballCache.Update(state);
+        }
+
         virtual void Reset(const GameState& initialState) override {
             // No state needed
         }
@@ -367,40 +368,27 @@ namespace RLGC {
         static constexpr float BASE_REWARD = 0.4f;
         static constexpr float EARLY_INTERCEPTION_BONUS = 0.3f;
 
-        // Simple ball trajectory prediction
-        Vec PredictBallPosition(const GameState& state, float seconds) const {
-            // Linear prediction with gravity
-            Vec predictedPos = state.ball.pos + (state.ball.vel * seconds);
-            predictedPos.z -= 0.5f * 650.0f * seconds * seconds;  // Gravity
+        BallPred::Cache _ballCache;
 
-            // Clamp to field bounds
-            predictedPos.z = RS_MAX(predictedPos.z, 93.0f);  // Ball radius
-            return predictedPos;
-        }
+        // Find interception point on line from predicted ball to goal
+        Vec FindInterceptionPoint(const Vec& goalPos) const {
+            // Use the cache slice nearest to PREDICTION_TIME for physics-accurate position
+            Vec predictedBall = _ballCache.AtTime(PREDICTION_TIME).pos;
 
-        // Find interception point on line from ball to goal
-        Vec FindInterceptionPoint(const GameState& state, const Vec& goalPos) const {
-            Vec ballToGoal = goalPos - state.ball.pos;
-            float distToGoal = ballToGoal.Length();
-
-            if (distToGoal < 0.01f) return state.ball.pos;
-
-            // Predict ball position
-            Vec predictedBall = PredictBallPosition(state, PREDICTION_TIME);
-
-            // Interception point is on line between predicted ball and goal
             Vec predictedToGoal = goalPos - predictedBall;
             float predictedDist = predictedToGoal.Length();
 
             if (predictedDist < 0.01f) return predictedBall;
 
             // Find point 30% of the way from predicted ball to goal
-            Vec interceptionPoint = predictedBall + (predictedToGoal * 0.3f);
-
-            return interceptionPoint;
+            return predictedBall + (predictedToGoal * 0.3f);
         }
 
     public:
+        virtual void PreStep(const GameState& state) override {
+            _ballCache.Update(state);
+        }
+
         virtual void Reset(const GameState& initialState) override {
             // No state needed
         }
@@ -423,7 +411,7 @@ namespace RLGC {
             }
 
             // Find optimal interception point
-            Vec interceptionPoint = FindInterceptionPoint(state, goalPos);
+            Vec interceptionPoint = FindInterceptionPoint(goalPos);
             float distToInterception = (player.pos - interceptionPoint).Length();
 
             // Reward proximity to interception point

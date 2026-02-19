@@ -1,6 +1,7 @@
 #pragma once
 #include "../Framework.h"
 #include "../CommonValues.h"
+#include "BallPrediction.h"
 #include <cmath>
 
 namespace RLGC {
@@ -328,75 +329,10 @@ namespace RLGC {
     // - -0.2: Penalty if ball moving toward opponent space
     //
     // Rev 1.0 (2025-01-21, NJH)
+    // Rev 2.0 (2026-02-18, NJH) - Migrated to BallPred::Cache
     class PassingSetupReward : public Reward {
     private:
-        struct TrajectoryResult {
-            Vec finalPos;
-            bool hitWall;
-            bool hitCeiling;
-            bool hitBackboard;
-            int groundBounces;
-        };
-
-        // Predict ball position after up to maxBounces ground bounces,
-        // also simulating wall, ceiling, and backboard bounces.
-        TrajectoryResult PredictBallTrajectory(const PhysState& ball, int maxBounces = 2) const {
-            Vec pos = ball.pos;
-            Vec vel = ball.vel;
-
-            TrajectoryResult result = { pos, false, false, false, 0 };
-
-            const float dt = 1.0f / 120.0f;
-            const float gravAccel = CommonValues::BALL_GRAVITY;
-            const float dragCoef = 0.03f;
-            const float r = CommonValues::BALL_RADIUS;
-
-            for (int i = 0; i < 180; i++) {  // ~1.5 seconds forward
-                // Apply gravity
-                vel.z += gravAccel * dt;
-
-                // Apply drag
-                float speed = vel.Length();
-                if (speed > 0.1f) {
-                    vel = vel * (1.0f - dragCoef * dt);
-                }
-
-                // Update position
-                pos = pos + vel * dt;
-
-                // Ground bounce
-                if (pos.z < r) {
-                    pos.z = r;
-                    vel.z = -vel.z * 0.6f;
-                    result.groundBounces++;
-                    if (result.groundBounces >= maxBounces) break;
-                }
-
-                // Ceiling bounce
-                if (pos.z > CommonValues::CEILING_Z - r) {
-                    pos.z = CommonValues::CEILING_Z - r;
-                    vel.z = -vel.z * 0.6f;
-                    result.hitCeiling = true;
-                }
-
-                // Side wall bounce
-                if (std::abs(pos.x) > CommonValues::SIDE_WALL_X - r) {
-                    pos.x = RS_CLAMP(pos.x, -(CommonValues::SIDE_WALL_X - r), (CommonValues::SIDE_WALL_X - r));
-                    vel.x = -vel.x * 0.6f;
-                    result.hitWall = true;
-                }
-
-                // Back wall / backboard bounce
-                if (std::abs(pos.y) > CommonValues::BACK_WALL_Y - r) {
-                    pos.y = RS_CLAMP(pos.y, -(CommonValues::BACK_WALL_Y - r), (CommonValues::BACK_WALL_Y - r));
-                    vel.y = -vel.y * 0.6f;
-                    result.hitBackboard = true;
-                }
-            }
-
-            result.finalPos = pos;
-            return result;
-        }
+        BallPred::Cache _ballCache;
 
         bool IsTeammatePosition(const Vec& pos, const Player& player, const GameState& state, float proximityRadius = 1500.0f) const {
             // Check if any teammate is close to this position
@@ -488,6 +424,10 @@ namespace RLGC {
     public:
         PassingSetupReward() {}
 
+        virtual void PreStep(const GameState& state) override {
+            _ballCache.Update(state);
+        }
+
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (player.isDemoed) return 0.0f;
 
@@ -511,9 +451,9 @@ namespace RLGC {
 
             Vec towardTheirGoal = (theirGoal - player.pos).Normalized();
 
-            // Predict trajectory first so we can check for surface redirects
-            TrajectoryResult traj = PredictBallTrajectory(state.ball, 2);
-            bool isSurfacePass = traj.hitWall || traj.hitCeiling || traj.hitBackboard;
+            // Use the pre-computed ball prediction cache (populated in PreStep).
+            // Check for surface redirects across the full prediction window.
+            bool isSurfacePass = _ballCache.HitAnySurface();
 
             // Check if ball is moving generally toward their goal (not back to our goal).
             // For surface-bounce passes the ball may initially travel upward or toward our
@@ -524,7 +464,9 @@ namespace RLGC {
                 return -0.2f;
             }
 
-            Vec predictedBallPos = traj.finalPos;
+            // Use the slice at ~1.5 seconds as the "landing zone" for pass evaluation.
+            // This is close enough to where a typical pass will reach a teammate.
+            Vec predictedBallPos = _ballCache.AtTime(1.5f).pos;
 
             // Check if teammates are better positioned than opponents at ball destination
             float tmDist = GetTeammateDistToPos(predictedBallPos, player, state);
@@ -551,17 +493,16 @@ namespace RLGC {
             }
 
             // TRAJECTORY QUALITY BONUS: reward clean passes and intentional surface redirects.
-            // Old behaviour only rewarded zero ground-bounces and penalised surface passes.
             if (isSurfacePass) {
                 // Intentional wall/ceiling/backboard redirect ending near a teammate
                 if (tmDist < 2000.0f) {
                     reward += 1.0f;  // Surface-redirect pass with receiver in range
                 }
             } else {
-                // Direct / lob pass quality
-                if (traj.groundBounces == 0) {
+                // Direct / lob pass quality (use cached ground bounce count)
+                if (_ballCache.groundBounces == 0) {
                     reward += 1.5f;  // Clean lob with no bounces - excellent!
-                } else if (traj.groundBounces == 1) {
+                } else if (_ballCache.groundBounces == 1) {
                     reward += 0.8f;  // One ground bounce - acceptable
                 }
                 // groundBounces >= 2: chaotic, no bonus
