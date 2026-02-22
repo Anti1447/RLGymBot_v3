@@ -1,0 +1,528 @@
+﻿MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  RLBotCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLBotCPP.lib
+  RocketSim.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RocketSim.lib
+  RLGymCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLGymCPP.lib
+  GigaLearnCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\GigaLearnCPP.dll
+  rlbot.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\rlbot.exe
+  ExampleMain.cpp
+  ModelConfig.cpp
+  RewardConfig.cpp
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,26):
+          see reference to function template instantiation 'unsigned int &std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back<_Ty&>(_Ty &)' being compiled
+          with
+          [
+              _Ty=size_t
+          ]
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,38):
+              see the first reference to 'std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back' in 'torch::dynamo::autograd::AutogradCompilerCall::add_size_input'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'unsigned int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,26):
+          see reference to function template instantiation 'int &std::vector<int32_t,std::allocator<int>>::emplace_back<size_t&>(size_t &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,38):
+              see the first reference to 'std::vector<int32_t,std::allocator<int>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,26):
+          see reference to function template instantiation 'unsigned int &std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back<_Ty&>(_Ty &)' being compiled
+          with
+          [
+              _Ty=size_t
+          ]
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,38):
+              see the first reference to 'std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back' in 'torch::dynamo::autograd::AutogradCompilerCall::add_size_input'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'unsigned int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,26):
+          see reference to function template instantiation 'int &std::vector<int32_t,std::allocator<int>>::emplace_back<size_t&>(size_t &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,38):
+              see the first reference to 'std::vector<int32_t,std::allocator<int>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,26):
+          see reference to function template instantiation 'unsigned int &std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back<_Ty&>(_Ty &)' being compiled
+          with
+          [
+              _Ty=size_t
+          ]
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(329,38):
+              see the first reference to 'std::vector<std::_Vbase,std::allocator<std::_Vbase>>::emplace_back' in 'torch::dynamo::autograd::AutogradCompilerCall::add_size_input'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=std::_Vbase
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'unsigned int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(462,64):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,26):
+          see reference to function template instantiation 'int &std::vector<int32_t,std::allocator<int>>::emplace_back<size_t&>(size_t &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(681,38):
+              see the first reference to 'std::vector<int32_t,std::allocator<int>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&>(uint64_t &)' being compiled
+          with
+          [
+              _Ty=int32_t
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept(<expr>)' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61): warning C4244: 'initializing': conversion from 'uint64_t' to 'int', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty1', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:             _Ty1=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,33):
+          see reference to function template instantiation 'std::pair<int,int> &std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back<size_t&,int&>(size_t &,int &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,45):
+              see the first reference to 'std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_tensor_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<std::pair<int,int>,uint64_t&,int&>(_Ty &,uint64_t &,int &) noexcept' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61):
+          see reference to function template instantiation 'std::pair<int,int>::pair<size_t&,int&,0>(_Other1,_Other2) noexcept' being compiled
+          with
+          [
+              _Other1=size_t &,
+              _Other2=int &
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty2', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:             _Ty2=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ModelConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty1', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:             _Ty1=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,33):
+          see reference to function template instantiation 'std::pair<int,int> &std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back<size_t&,int&>(size_t &,int &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,45):
+              see the first reference to 'std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_tensor_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<std::pair<int,int>,uint64_t&,int&>(_Ty &,uint64_t &,int &) noexcept' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61):
+          see reference to function template instantiation 'std::pair<int,int>::pair<size_t&,int&,0>(_Other1,_Other2) noexcept' being compiled
+          with
+          [
+              _Other1=size_t &,
+              _Other2=int &
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty2', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:             _Ty2=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/ExampleMain.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty1', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:             _Ty1=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,16):
+      the template instantiation context (the oldest one first) is
+          C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,33):
+          see reference to function template instantiation 'std::pair<int,int> &std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back<size_t&,int&>(size_t &,int &)' being compiled
+              C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\libtorch\include\torch\csrc\dynamo\compiled_autograd.h(658,45):
+              see the first reference to 'std::vector<std::pair<int,int>,std::allocator<std::pair<int,int>>>::emplace_back' in 'torch::dynamo::autograd::CompiledNodeArgs::add_tensor_pre_hook'
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(924,24):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_one_at_back<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(845,20):
+          see reference to function template instantiation '_Ty &std::vector<_Ty,std::allocator<_Ty>>::_Emplace_back_with_unused_capacity<uint64_t&,int&>(uint64_t &,int &)' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<std::pair<int,int>,uint64_t&,int&>(_Ty &,uint64_t &,int &) noexcept' being compiled
+          with
+          [
+              _Ty=std::pair<int,int>
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(476,61):
+          see reference to function template instantiation 'std::pair<int,int>::pair<size_t&,int&,0>(_Other1,_Other2) noexcept' being compiled
+          with
+          [
+              _Other1=size_t &,
+              _Other2=int &
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty2', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:             _Ty2=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\utility(274,54): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=unsigned int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<unsigned int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=unsigned int
+          ]
+  
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244: 'initializing': conversion from 'uint64_t' to '_Ty', possible loss of data [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         with [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         [ [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:             _Ty=int [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69): warning C4244:         ] [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  (compiling source file '../src/RewardConfig.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(463,69):
+      the template instantiation context (the oldest one first) is
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector(860,18):
+          see reference to function template instantiation 'void std::_Construct_in_place<int,uint64_t&>(_Ty &,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+          C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xutility(472,14):
+          see reference to function template instantiation '_Ty *std::construct_at<_Ty,uint64_t&>(_Ty *const ,uint64_t &) noexcept' being compiled
+          with
+          [
+              _Ty=int
+          ]
+  
+     Creating library C:/Projects/RLGymBot_v3/GigaLearnBot/build/lib/GigaLearnBot.lib and object C:/Projects/RLGymBot_v3/GigaLearnBot/build/lib/GigaLearnBot.exp
+  Generating code
+C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\RLGymCPP\RocketSim\libsrc\bullet3-3.24\BulletCollision\CollisionShapes\btCollisionShape.cpp(107): warning C4715: 'btCollisionShape::getMargin': not all control paths return a value [C:\Projects\RLGymBot_v3\GigaLearnBot\build\GigaLearnBot.vcxproj]
+  Finished generating code
+  GigaLearnBot.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\GigaLearnBot.exe

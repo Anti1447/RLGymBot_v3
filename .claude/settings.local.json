@@ -74,7 +74,11 @@
       "Bash(cmd /c \"cmake --build C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\build --config Release --parallel 4 > C:\\\\Projects\\\\RLGymBot_v3\\\\build_output.txt 2>&1 & type C:\\\\Projects\\\\RLGymBot_v3\\\\build_output.txt\")",
       "Bash(powershell -Command:*)",
       "Bash(Select-String -Pattern \"error|warning|Error|Warning|succeeded|failed|\\\\.exe\")",
-      "Bash(Out-String)"
+      "Bash(Out-String)",
+      "Bash(powershell:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(echo:*)"
     ]
   }
 }

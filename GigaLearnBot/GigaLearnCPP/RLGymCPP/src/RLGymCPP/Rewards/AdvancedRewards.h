@@ -6,6 +6,7 @@
 #include "Reward.h"
 #include "../Math.h"
 #include "CommonRewards.h"
+#include "BallPrediction.h"
 
 namespace RLGC {
 
@@ -678,12 +679,24 @@ namespace RLGC {
             float forwardFactor = (forwardDot - minForwardDot) / (1.0f - minForwardDot);
             forwardFactor = RS_MAX(0.0f, RS_MIN(1.0f, forwardFactor));
 
-            float speedNorm = 0.0f;
-            if (CommonValues::CAR_MAX_SPEED > 1e-5f) {
-                speedNorm = RS_MIN(1.0f, speed / CommonValues::CAR_MAX_SPEED);
+            // Speed bell-curve: peaks at 1.0x in the optimal dribble range [1300, 1600] UU/s,
+            // falls to 0.5x at both extremes (0 UU/s stationary, 2300 UU/s supersonic).
+            // Previously used linear speedNorm (faster = more reward) which drove supersonic dribbles.
+            static constexpr float DRIB_OPT_LOW  = 1300.0f;
+            static constexpr float DRIB_OPT_HIGH = 1600.0f;
+            float speedMult;
+            if (speed >= DRIB_OPT_LOW && speed <= DRIB_OPT_HIGH) {
+                speedMult = 1.0f;
+            } else if (speed < DRIB_OPT_LOW) {
+                speedMult = 0.5f + 0.5f * (speed / DRIB_OPT_LOW);
+            } else {
+                float excess = speed - DRIB_OPT_HIGH;
+                float range  = CommonValues::CAR_MAX_SPEED - DRIB_OPT_HIGH;
+                speedMult = 0.5f + 0.5f * (1.0f - RS_CLAMP(excess / range, 0.0f, 1.0f));
             }
+            speedMult = RS_CLAMP(speedMult, 0.5f, 1.0f);
 
-            float base = proximity * forwardFactor * speedNorm;  // 0..1
+            float base = proximity * forwardFactor * speedMult;  // 0..1
 
             // Duration emphasis:
             //  - t/sustainRefSec in [0, ~2] for up to 2 seconds
@@ -898,14 +911,26 @@ namespace RLGC {
 
             float rel01 = 1.0f - RS_MIN(1.0f, relSpeed / maxRelativeSpeed);
 
-            float speed01 = 0.0f;
-            if (CommonValues::CAR_MAX_SPEED > 1e-5f) {
-                speed01 = RS_MIN(1.0f, carSpeed / CommonValues::CAR_MAX_SPEED);
+            // Speed bell-curve: peaks at 1.0x in [1300, 1600] UU/s, falls to 0.5x at both
+            // extremes (0 stationary, 2300 supersonic). Replaces linear speed01 which
+            // previously incentivized dribbling at max speed.
+            static constexpr float DRIB_OPT_LOW  = 1300.0f;
+            static constexpr float DRIB_OPT_HIGH = 1600.0f;
+            float speedMult;
+            if (carSpeed >= DRIB_OPT_LOW && carSpeed <= DRIB_OPT_HIGH) {
+                speedMult = 1.0f;
+            } else if (carSpeed < DRIB_OPT_LOW) {
+                speedMult = 0.5f + 0.5f * (carSpeed / DRIB_OPT_LOW);
+            } else {
+                float excess = carSpeed - DRIB_OPT_HIGH;
+                float range  = CommonValues::CAR_MAX_SPEED - DRIB_OPT_HIGH;
+                speedMult = 0.5f + 0.5f * (1.0f - RS_CLAMP(excess / range, 0.0f, 1.0f));
             }
+            speedMult = RS_CLAMP(speedMult, 0.5f, 1.0f);
 
             // Combine. Gate with sustain so you don't get instant payout.
             float base = prox * centeredLat * centeredFwd * rel01;
-            float reward = base * (0.2f + 0.8f * sustain01) * (0.6f + 0.4f * speed01);
+            float reward = base * (0.2f + 0.8f * sustain01) * speedMult;
 
             // Tiny floor for very short holds
             if (sustainedTime[id] < 0.06f) {
@@ -2415,51 +2440,102 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // TURNOVER PENALTY
-    // Penalizes passing the ball to an opponent (turnovers/bad passes)
-    // Discourages poor ball control and interception-prone passes
+    // TURNOVER PENALTY — Rev 2.0 (2026-02-22, NJH)
+    // Penalizes touches that give the opponent a clear reachability advantage at
+    // the predicted ball landing zone.
+    //
+    // Rev 1.0 issues fixed:
+    //   - Checked current ball velocity direction instead of predicted landing zone.
+    //     Missed redirected passes (wall/ceiling bounces before reaching opponent).
+    //   - Measured proximity to the player, not the landing zone. An opponent
+    //     camped right where the ball was predicted to land was underweighted.
+    //
+    // Rev 2.0 approach:
+    //   - Uses BallPred::Cache to predict the ball at 0.5s, 1.0s, and 1.5s.
+    //   - At each checkpoint, estimates time-to-reach for self, all teammates,
+    //     and all opponents using distance / CAR_MAX_SPEED.
+    //   - Fires a penalty only when the opponent's best time-to-reach is
+    //     significantly shorter than the friendly team's best (ratio > threshold).
+    //   - Penalty scales with how large the advantage is and how fast the ball is.
+    //   - Works correctly in 1v1 (no teammates — friendlyTime = self only).
     // ============================================================================
     class PassToOpponentPenalty : public Reward {
     private:
-        static constexpr float BASE_PENALTY = -0.8f;
-        static constexpr float PASS_ALIGNMENT_THRESHOLD = 0.5f;  // 60 degrees toward opponent
+        static constexpr float BASE_PENALTY        = -1.0f;
+        static constexpr float MIN_BALL_SPEED      = 400.0f;   // UU/s — ignore soft nudges
+        static constexpr float CAR_MAX_SPEED       = 2300.0f;  // UU/s — time-to-reach baseline
+        // Opponent must be at least (1/0.65 ≈ 1.54x) faster than friendlies to trigger
+        static constexpr float ADVANTAGE_THRESHOLD = 0.65f;
+        static constexpr float CHECK_TIME_1        = 0.5f;
+        static constexpr float CHECK_TIME_2        = 1.0f;
+        static constexpr float CHECK_TIME_3        = 1.5f;
+
+        BallPred::Cache _ballCache;
+
+        // Estimated seconds for player p to reach targetPos at max car speed
+        float TimeToReach(const Player& p, const Vec& targetPos) const {
+            return (p.pos - targetPos).Length() / CAR_MAX_SPEED;
+        }
+
+        // Returns friendlyTime / opponentTime at a predicted ball position.
+        //   > 1.0  → opponent reaches faster than any friendly (bad)
+        //   <= 1.0 → friendly team wins the race (good, no penalty)
+        // friendlyTime = min(self, live teammates); opponentTime = min(live opponents).
+        float OpponentAdvantageAt(const Vec& ballPos,
+                                  const Player& player,
+                                  const GameState& state) const {
+            // Friendly: self + non-demoed teammates
+            float friendlyTime = TimeToReach(player, ballPos);
+            for (const auto& p : state.players) {
+                if (p.team != player.team || p.carId == player.carId) continue;
+                if (p.isDemoed) continue;
+                friendlyTime = RS_MIN(friendlyTime, TimeToReach(p, ballPos));
+            }
+
+            // Opponent: non-demoed enemies
+            float opponentTime = 1e6f;
+            for (const auto& p : state.players) {
+                if (p.team == player.team || p.isDemoed) continue;
+                opponentTime = RS_MIN(opponentTime, TimeToReach(p, ballPos));
+            }
+
+            if (opponentTime <= 0.0f) return 1e6f;
+            return friendlyTime / opponentTime;  // > 1.0 → opponent is faster
+        }
 
     public:
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (!state.prev) return 0.0f;
+        virtual void PreStep(const GameState& state) override {
+            _ballCache.Update(state);
+        }
 
-            // Only penalize when player just touched ball
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (!player.ballTouchedStep) return 0.0f;
 
             float ballSpeed = state.ball.vel.Length();
-            if (ballSpeed < 500.0f) return 0.0f;  // Too slow to be a pass
+            if (ballSpeed < MIN_BALL_SPEED) return 0.0f;
 
-            // Find closest OPPONENT and check if ball is traveling toward them
-            float closestOpponentDist = FLT_MAX;
-            for (const auto& opp : state.players) {
-                if (opp.team == player.team) continue;  // Skip teammates
-
-                float dist = (opp.pos - player.pos).Length();
-                if (dist < closestOpponentDist) {
-                    closestOpponentDist = dist;
-
-                    // Check if ball velocity is aligned toward this opponent
-                    Vec ballDir = state.ball.vel.Normalized();
-                    Vec toOpponent = (opp.pos - player.pos).Normalized();
-                    float alignment = ballDir.Dot(toOpponent);
-
-                    if (alignment > PASS_ALIGNMENT_THRESHOLD) {
-                        // Ball is traveling toward opponent - this is a turnover!
-                        float proximityFactor = RS_CLAMP(1.0f - (closestOpponentDist / 2000.0f), 0.0f, 1.0f);
-                        float speedFactor = RS_CLAMP(ballSpeed / 2000.0f, 0.0f, 1.0f);
-
-                        // Penalty scales with opponent proximity and ball speed
-                        return BASE_PENALTY * proximityFactor * speedFactor;
-                    }
-                }
+            // Find the worst-case opponent advantage across 3 prediction windows.
+            // "Worst" = largest ratio (opponent is most dominant at that checkpoint).
+            float worstAdvantage = 0.0f;
+            const float checkTimes[3] = { CHECK_TIME_1, CHECK_TIME_2, CHECK_TIME_3 };
+            for (int i = 0; i < 3; i++) {
+                Vec predictedPos = _ballCache.AtTime(checkTimes[i]).pos;
+                float advantage = OpponentAdvantageAt(predictedPos, player, state);
+                if (advantage > worstAdvantage) worstAdvantage = advantage;
             }
 
-            return 0.0f;  // Pass went to teammate or neutral
+            // Trigger threshold: opponent must be at least 1/ADVANTAGE_THRESHOLD faster
+            const float triggerRatio = 1.0f / ADVANTAGE_THRESHOLD; // ≈ 1.538
+            if (worstAdvantage < triggerRatio) return 0.0f;
+
+            // Scale: 0.0 at threshold, 1.0 when opponent is 1.5x beyond threshold
+            float penaltyScale = RS_CLAMP(
+                (worstAdvantage - triggerRatio) / 1.5f,
+                0.0f, 1.0f
+            );
+            float speedFactor = RS_CLAMP(ballSpeed / 2000.0f, 0.0f, 1.0f);
+
+            return BASE_PENALTY * penaltyScale * speedFactor;
         }
     };
 

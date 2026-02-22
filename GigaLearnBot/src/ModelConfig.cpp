@@ -53,12 +53,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.03f;
-        cfg.policyLR = 1.32e-4f;
-        cfg.criticLR = 1.32e-4f;
+        cfg.entropyScale = 0.025f;
+        cfg.policyLR = 1.3e-4f;
+        cfg.criticLR = 1.3e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.65f;
+        cfg.randomStateChance = 0.7f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
         break;

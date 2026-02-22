@@ -346,20 +346,28 @@ namespace RLGC {
 
                     float q = 0.0f;
 
-                    // On-goal: 0.7 (strong indicator of good flick)
+                    // On-goal: strongest indicator of a good flick
                     if (BallIntersectsOppGoalMouth(player, state, 5.0f)) {
                         q = 0.9f;  // Highest reward
                     }
                     else {
-                        // Pop-up (height > 600 units/s = ~1200+ units height potential): 0.35
+                        // Pop-up (ball.vel.z > 600 → ~1200+ units height potential)
                         if (state.ball.vel.z > 600.0f) q += 0.35f;
 
-                        // Behind/away from opponent: 0.35
+                        // Direction quality: toward goal + away from opponent
                         if (oppPtr && IsBallDirectionGood(state.ball.vel, state.ball.pos, *oppPtr, player)) {
-                            q += 0.40f;
+                            q += 0.35f;
+
+                            // Additional behind-score bonus: how much is the ball going BEHIND
+                            // the opponent relative to their facing direction?
+                            // ComputeBehindScore returns 0..1 (1 = directly behind their back).
+                            // Previously computed but discarded — now integrated as up to +0.15 quality.
+                            // Total non-on-goal budget: 0.35 + 0.35 + 0.15 = 0.85 max (clamped to 1.0).
+                            float behindScore = ComputeBehindScore(state.ball.vel, *oppPtr);
+                            q += 0.15f * behindScore;
                         }
                         else if (state.ball.vel.Dot(SafeNorm(pf.ballPosAtFlick - ci.oppPos)) < -200.0f) {
-                            q += 0.25f;  // At least going away
+                            q += 0.25f;  // At least going away from their position
                         }
                     }
 

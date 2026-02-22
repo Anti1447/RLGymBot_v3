@@ -35,6 +35,7 @@
 #include <RLGymCPP/Rewards/KickoffRandomizationReward.h>
 #include <RLGymCPP/Rewards/AirDribbleUtilities.h>
 #include <RLGymCPP/Rewards/CompositeFlickReward.h>
+#include <RLGymCPP/Rewards/GoalMultiplierReward.h>
 using namespace RLGC;
 
 enum class TrainingPhase {

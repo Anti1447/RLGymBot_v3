@@ -1,0 +1,8 @@
+﻿MSBuild version 17.14.23+b0019275e for .NET Framework
+
+  RocketSim.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RocketSim.lib
+  RLBotCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLBotCPP.lib
+  RLGymCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\lib\RLGymCPP.lib
+  GigaLearnCPP.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\GigaLearnCPP.dll
+  rlbot.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\rlbot.exe
+  GigaLearnBot.vcxproj -> C:\Projects\RLGymBot_v3\GigaLearnBot\build\bin\GigaLearnBot.exe

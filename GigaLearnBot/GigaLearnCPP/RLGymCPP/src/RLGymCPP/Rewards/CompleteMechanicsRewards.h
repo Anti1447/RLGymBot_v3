@@ -6,6 +6,7 @@
 #include "Reward.h"
 #include "../Math.h"
 #include <map>
+#include <unordered_map>
 #include <deque>
 #include <vector>
 #include <atomic>
@@ -100,86 +101,129 @@ public:
     }
 };
 
-// Landing on at least 3 wheels after aerial on any surface (ground, wall, ceiling)
+// Rev 2.0 (2026-02-22, NJH)
+// Landing on at least 3 wheels after aerial on any surface (ground, wall, ceiling).
+//
+// Improvements over Rev 1.0:
+//  - Minimum airtime gate (0.2s) — micro-hops are ignored.
+//  - Airtime scaling: payout scales 1.0x→2.0x from 0.2s to 3.0s+ airtime.
+//  - Wall nose-down bonus: +0.3 when far from ball (>1000 UU) and nose is
+//    pointing downward (rotMat.forward.z < -0.5) — ideal recovery posture.
+//  - Wall misalignment penalty: -0.3 * scale for side/back wall impacts.
+//  - PreStep tracks landing events cleanly; GetReward is read-only.
+//  - Ceiling logic unchanged (was already correct).
 class ProperLandingReward : public Reward {
 private:
-    mutable std::map<uint32_t, bool> wasAirborne;
+    static constexpr float MIN_AIR_TIME       = 0.2f;   // ignore hops shorter than 200ms
+    static constexpr float AIR_TIME_SCALE_MAX = 3.0f;   // cap scaling at 3s airtime
+    static constexpr float BALL_NEAR_THRESH   = 1000.0f; // UU — "close to ball" cutoff for nose bonus
+    static constexpr float NOSE_DOWN_Z        = -0.5f;  // forward.z below this = nose pointing down
+
+    std::unordered_map<uint32_t, bool>  _wasAirborne;
+    std::unordered_map<uint32_t, bool>  _hasLanding;
+    std::unordered_map<uint32_t, float> _airTimeAtLanding;
 
 public:
     virtual void Reset(const GameState& initialState) override {
-        wasAirborne.clear();
+        _wasAirborne.clear();
+        _hasLanding.clear();
+        _airTimeAtLanding.clear();
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        for (const auto& player : state.players) {
+            uint32_t id = player.carId;
+            bool nowAir = !player.isOnGround;
+
+            if (_wasAirborne[id] && !nowAir) {
+                // Just landed — snapshot the airtime from the previous frame
+                _airTimeAtLanding[id] = (player.prev != nullptr)
+                    ? player.prev->airTime
+                    : player.airTime;
+                _hasLanding[id] = true;
+            } else {
+                _hasLanding[id] = false;
+            }
+
+            _wasAirborne[id] = nowAir;
+        }
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        bool wasInAir = wasAirborne[player.carId];
-        wasAirborne[player.carId] = !player.isOnGround;
+        if (!_hasLanding[player.carId])
+            return 0.0f;
 
-        // Just landed from being airborne
-        if (wasInAir && player.isOnGround) {
-            // Count wheels with contact
-            int wheelsOnGround = 0;
-            for (int i = 0; i < 4; i++) {
-                if (player.wheelsWithContact[i]) {
-                    wheelsOnGround++;
-                }
-            }
+        float airTime = _airTimeAtLanding[player.carId];
+        if (airTime < MIN_AIR_TIME)
+            return 0.0f; // trivial hop — ignore
 
-            // Need at least 3 wheels for a proper landing
-            if (wheelsOnGround < 3) {
-                return 0.0f;
-            }
+        // Require 3+ wheels for a proper landing
+        int wheels = 0;
+        for (int i = 0; i < 4; i++)
+            if (player.wheelsWithContact[i]) wheels++;
+        if (wheels < 3)
+            return 0.0f;
 
-            // Check alignment with surface normal
-            if (player.worldContact.hasContact) {
-                // Car's up vector should align with surface normal
-                // This works for ground (normal pointing up), walls (sideways), and ceiling (pointing down)
-                Vec surfaceNormal = player.worldContact.contactNormal;
-                Vec carUp = player.rotMat.up;
+        if (!player.worldContact.hasContact)
+            return 0.0f;
 
-                // Dot product: 1.0 = perfectly aligned, 0.0 = perpendicular, -1.0 = opposite
-                float alignment = carUp.Dot(surfaceNormal);
+        // Airtime scale: 1.0x at MIN_AIR_TIME, up to 2.0x at AIR_TIME_SCALE_MAX
+        float airtimeScale = 1.0f + RS_CLAMP(
+            (airTime - MIN_AIR_TIME) / (AIR_TIME_SCALE_MAX - MIN_AIR_TIME),
+            0.0f, 1.0f
+        );
 
-                // NEW: Detect ceiling contact (surface normal pointing down, alignment < -0.5)
-                // Ceiling normal points downward (negative Z), car up points upward (positive Z) normally
-                // When aligned with ceiling, alignment is negative (car flipped)
-                bool isCeilingContact = surfaceNormal.z < -0.5f;  // Normal points downward = ceiling
+        Vec  surfaceNormal  = player.worldContact.contactNormal;
+        Vec  carUp          = player.rotMat.up;
+        float alignment     = carUp.Dot(surfaceNormal);
 
-                if (isCeilingContact) {
-                    // CEILING CONTACT - Reward wheels, penalize hood/roof
-                    // On ceiling: wheels should be on top (facing upward relative to ceiling surface)
-                    // This means we want carUp aligned with ceiling normal (both pointing down)
+        // Surface type detection via contact normal
+        bool isCeilingContact = surfaceNormal.z < -0.5f;
+        bool isWallContact    = !isCeilingContact && (std::abs(surfaceNormal.z) < 0.5f);
 
-                    if (alignment < -0.7f) {
-                        // Perfect ceiling contact with car upside-down (wheels up, hood down toward ground)
-                        // Flip is preserved! This is what we want.
-                        return 1.5f; // Excellent - wheels on ceiling, flip preserved
-                    } else if (alignment < -0.5f) {
-                        // Good ceiling contact - mostly upside-down with wheels on ceiling
-                        return 1.0f; // Good - wheels making ceiling contact
-                    } else if (alignment > 0.5f) {
-                        // BAD: Car is right-side-up on ceiling (hood/roof touching ceiling)
-                        // This is dangerous - flip is already used! Penalize heavily.
-                        return -0.8f; // Strong penalty - hood/roof contact wastes flip
-                    } else {
-                        // Mediocre ceiling contact (sideways or partially aligned)
-                        return 0.2f; // Weak bonus - contact made but not optimal
-                    }
-                } else {
-                    // GROUND/WALL CONTACT - Original logic
-                    // Reward based on alignment quality
-                    // > 0.9 = excellent landing (facing the right way)
-                    // > 0.7 = good landing (mostly aligned)
-                    // > 0.5 = acceptable landing (somewhat aligned)
-                    if (alignment > 0.9f) {
-                        return 1.0f; // Excellent landing
-                    } else if (alignment > 0.7f) {
-                        return 0.7f; // Good landing
-                    } else if (alignment > 0.5f) {
-                        return 0.4f; // Acceptable landing
-                    }
-                }
-            }
+        if (isCeilingContact) {
+            // ---------------------------------------------------------------
+            // CEILING CONTACT — car must be upside-down (wheels on ceiling)
+            // ---------------------------------------------------------------
+            // alignment < 0: carUp and ceilingNormal both point downward (correct)
+            // alignment > 0: car is right-side-up — hood/roof hitting ceiling (bad)
+            if (alignment < -0.7f)
+                return 1.5f * airtimeScale; // perfect: wheels on ceiling, flip preserved
+            if (alignment < -0.5f)
+                return 1.0f * airtimeScale; // good
+            if (alignment > 0.5f)
+                return -0.8f;               // hood/roof contact — no scaling, just penalize
+            return 0.2f;                    // mediocre (sideways)
+
+        } else if (isWallContact) {
+            // ---------------------------------------------------------------
+            // WALL CONTACT — wheels should face away from the wall surface
+            // ---------------------------------------------------------------
+            float baseReward;
+            if      (alignment > 0.9f) baseReward = 1.0f;  // excellent
+            else if (alignment > 0.7f) baseReward = 0.7f;  // good
+            else if (alignment > 0.5f) baseReward = 0.4f;  // acceptable
+            else if (alignment > 0.3f) baseReward = 0.1f;  // marginal
+            else
+                return -0.3f * airtimeScale; // side/back impact — penalize
+
+            // Nose-down bonus: when not near the ball, pointing nose down is
+            // ideal recovery posture on walls (easier to drive off quickly).
+            float ballDist = (player.pos - state.ball.pos).Length();
+            if (ballDist > BALL_NEAR_THRESH && player.rotMat.forward.z < NOSE_DOWN_Z)
+                baseReward += 0.3f;
+
+            return baseReward * airtimeScale;
+
+        } else {
+            // ---------------------------------------------------------------
+            // GROUND CONTACT
+            // ---------------------------------------------------------------
+            if      (alignment > 0.9f) return 1.0f * airtimeScale;
+            else if (alignment > 0.7f) return 0.7f * airtimeScale;
+            else if (alignment > 0.5f) return 0.4f * airtimeScale;
         }
+
         return 0.0f;
     }
 };

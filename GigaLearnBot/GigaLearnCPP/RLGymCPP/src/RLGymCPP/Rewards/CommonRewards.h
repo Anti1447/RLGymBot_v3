@@ -48,6 +48,41 @@ namespace RLGC {
 		}
 	};
 
+	// Penalizes any player on the team that last touched the ball into their own goal.
+	// - Fires only when state.goalScored and the last toucher was on the conceding team.
+	// - Every player on the responsible team receives -penalty (default -1.0).
+	// - Opposing team gets 0 (GoalReward already handles their payout).
+	// - Does NOT fire on regular goals — only when the own team caused it.
+	// Usage: WeightedReward(new OwnGoalPenalty(), 600.0f)  [no ZeroSum needed — already one-sided]
+	class OwnGoalPenalty : public Reward {
+	public:
+		float penalty;
+		OwnGoalPenalty(float penalty = -1.0f) : penalty(penalty) {}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.goalScored)
+				return 0.0f;
+
+			// Conceding team = team whose goal the ball is in
+			Team concedingTeam = RS_TEAM_FROM_Y(state.ball.pos.y);
+
+			// Only applies if the last touch was by someone on the conceding team
+			bool lastTouchWasOwnTeam = false;
+			for (const auto& p : state.players) {
+				if (p.carId == (uint32_t)state.lastTouchCarID) {
+					lastTouchWasOwnTeam = (p.team == concedingTeam);
+					break;
+				}
+			}
+
+			if (!lastTouchWasOwnTeam)
+				return 0.0f;
+
+			// Penalize every player on the responsible team
+			return (player.team == concedingTeam) ? penalty : 0.0f;
+		}
+	};
+
 	// 2025-12-17 | Rev 1.1 | NJH
 // - Speed-scaled Shot / Save / Goal rewards.
 // - <= 50 kph => 0.5x
