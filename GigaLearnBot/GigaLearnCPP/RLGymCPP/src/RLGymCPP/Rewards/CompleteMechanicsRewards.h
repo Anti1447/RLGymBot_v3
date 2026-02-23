@@ -101,7 +101,7 @@ public:
     }
 };
 
-// Rev 2.0 (2026-02-22, NJH)
+// Rev 2.1 (2026-02-22, NJH)
 // Landing on at least 3 wheels after aerial on any surface (ground, wall, ceiling).
 //
 // Improvements over Rev 1.0:
@@ -111,7 +111,14 @@ public:
 //    pointing downward (rotMat.forward.z < -0.5) — ideal recovery posture.
 //  - Wall misalignment penalty: -0.3 * scale for side/back wall impacts.
 //  - PreStep tracks landing events cleanly; GetReward is read-only.
-//  - Ceiling logic unchanged (was already correct).
+//
+// Rev 2.1 changes (ceiling):
+//  - Ceiling wheel-check gate: <3 wheels on ceiling → -1.0 * scale penalty.
+//    Catches roof/hood smashes and glancing ceiling contacts.
+//  - Raised ceiling rewards: perfect (alignment < -0.85) now pays 3.0 * scale
+//    (up from 1.5). Great alignment pays 2.0, acceptable pays 1.0.
+//  - Ceiling misalignment now always penalizes: hood contact → -1.5 * scale,
+//    sideways → -0.5 * scale. Previously mediocre ceiling gave +0.2 (no penalty).
 class ProperLandingReward : public Reward {
 private:
     static constexpr float MIN_AIR_TIME       = 0.2f;   // ignore hops shorter than 200ms
@@ -187,13 +194,29 @@ public:
             // ---------------------------------------------------------------
             // alignment < 0: carUp and ceilingNormal both point downward (correct)
             // alignment > 0: car is right-side-up — hood/roof hitting ceiling (bad)
+            //
+            // Ceiling landings are hard and valuable for ceiling shots / flip resets.
+            // We want to strongly reward proper wheel contact and strongly penalize
+            // any non-wheel ceiling contact (roof/hood/side), since those indicate
+            // the car is floating into the ceiling rather than intentionally riding it.
+            //
+            // Wheel check first: if 3+ wheels are NOT on the ceiling (wheelsWithContact),
+            // this is not a proper ceiling ride — penalize it.
+            if (wheels < 3) {
+                // Car is touching ceiling but wheels aren't planted.
+                // This is a roof/hood smash or a glancing angle — penalize.
+                return -1.0f * airtimeScale;
+            }
+
+            if (alignment < -0.85f)
+                return 3.0f * airtimeScale; // perfect: wheels flat on ceiling, very aligned
             if (alignment < -0.7f)
-                return 1.5f * airtimeScale; // perfect: wheels on ceiling, flip preserved
+                return 2.0f * airtimeScale; // great
             if (alignment < -0.5f)
-                return 1.0f * airtimeScale; // good
+                return 1.0f * airtimeScale; // acceptable
             if (alignment > 0.5f)
-                return -0.8f;               // hood/roof contact — no scaling, just penalize
-            return 0.2f;                    // mediocre (sideways)
+                return -1.5f * airtimeScale; // hood/roof smash — strong penalty
+            return -0.5f * airtimeScale;    // sideways/poor alignment — penalize
 
         } else if (isWallContact) {
             // ---------------------------------------------------------------

@@ -51,7 +51,7 @@ enum class TrainingPhase {
 };
 
 // >>> SET YOUR CURRENT PHASE HERE <<<
-constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_5_DIAMOND;
+constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_6_CHAMPION;
 
 /// <summary>
 /// Get the reward configuration for the current training phase

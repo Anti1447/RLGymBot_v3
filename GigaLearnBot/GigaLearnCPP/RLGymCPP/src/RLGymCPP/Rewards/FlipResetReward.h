@@ -16,6 +16,7 @@
 // ============================================================================
 
 #include <map>
+#include <unordered_map>
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
@@ -187,293 +188,209 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // FLIP RESET REWARD
+    // FLIP RESET REWARD — Rev 2.1 (2026-02-22, NJH)
+    //
+    // Acquisition-first design. Rewards the bot for obtaining a flip reset
+    // while airborne above Z=300 (no ground-level or trivially-low resets).
+    //
+    // Reward structure:
+    //   - One-shot acquisition: BASE_RESET_REWARD (1.0) + height bonus (0–0.5)
+    //     Height bonus is linear from 0 at Z=300 to +0.5 at Z>=1000.
+    //   - Per-frame aerial approach shaping: small reward for being airborne
+    //     within APPROACH_DIST_MAX (500 UU) of the ball.
+    //     This encourages the bot to fly toward the ball for reset attempts.
+    //
+    // Rev 2.1 changes:
+    //  - Apex timing multiplier: acquisition reward scaled by 1.0x–2.0x based on
+    //    ball vel.z at acquisition moment. Optimal: vel.z in [-300, 0] UU/s → 2.0x.
+    //    Falls linearly to 1.0x at vel.z = +300 (rising) or vel.z = -600 (falling).
+    //    BallPrediction infrastructure was considered but state.ball.vel.z is read
+    //    directly — it's current-frame data, not a future prediction.
+    //  - Handbrake bonus: +0.3 additive if handbrakeVal > 0.1 at acquisition moment.
+    //  - Boost-off bonus: +0.25 additive if !isHoldingBoost at acquisition moment.
+    //  Max acquisition reward: (1.0 + 0.5) * 2.0 + 0.3 + 0.25 = 3.55 (perfect reset)
+    //
+    // Validation gates (all must pass):
+    //   1. player.pos.z >= MIN_RESET_HEIGHT (300 UU)
+    //   2. state.ball.pos.z > BALL_RADIUS (ball off the ground)
+    //   3. player.airTime >= MIN_AIRTIME_FOR_FLIP (0.1s)
+    //   4. At least MIN_WHEEL_CONTACT (2) wheels had contact
+    //   5. Not a kickoff
+    //
+    // Note: HasFlipReset() from RocketSim already validates the physics
+    // (wheels-on-ball → flip restored). The gates above filter training edge
+    // cases only. We do NOT re-check normal parallelism — the engine is the
+    // ground truth for whether a valid flip reset occurred.
+    //
+    // Architecture: PreStep() detects the !HasFlipReset()→HasFlipReset()
+    // transition and queues the reward into _pendingReward[id]. GetReward()
+    // pays it out. This avoids mutable state in GetReward() and ensures the
+    // transition is captured exactly once per step.
+    //
+    // TODO (future phase): Re-enable ProductiveUseValidator to reward using
+    // the flip reset for shots/clears after the bot reliably acquires them.
     // ============================================================================
 
     class FlipResetReward : public Reward {
-    public:
-        struct Config {
-            // Acquisition phase rewards (incremental)
-            float underside_contact_reward = 0.1f;         // Small reward for any underside contact while airborne
-            float flip_reset_trigger_reward = 0.4f;        // Reward for actually getting flip reset
-            float wheel_contact_bonus = 0.15f;             // Bonus for good normal alignment
-
-            // Flip usage rewards (NEW - reward for using the flip)
-            float flip_used_reward = 0.3f;                 // Immediate reward for using the flip reset
-            float flip_toward_ball_bonus = 0.2f;           // Bonus if flipping toward ball
-
-            // Productive use rewards
-            float offensive_shot_reward = 1.0f;
-            float offensive_shot_wide_reward = 0.5f;
-            float defensive_clear_reward = 0.8f;
-            float delayed_shot_bonus = 0.2f;
-            float neutral_redirect_reward = 0.3f;
-
-            // Penalties (reduced to encourage experimentation)
-            float invalid_usage_penalty = -0.05f;          // Reduced penalty
-        };
-
-        Config config;
-
     private:
-        struct PendingFlipReset {
-            float timeLeft = 0.0f;
-            bool wasValidFlipReset = false;
-            bool flipWasUsed = false;                      // NEW: Track if flip was actually used
-            float normalParallelism = 0.0f;
-            Vec ballPosAtFlip;
-            Vec ballVelAtFlip;
-            ProductiveUseValidator::UsageType usageType = ProductiveUseValidator::INVALID;
-        };
+        // ----------------------------------------------------------------
+        // Constants
+        // ----------------------------------------------------------------
+        static constexpr float MIN_RESET_HEIGHT   = 300.0f;   // min Z for valid reset
+        static constexpr float HEIGHT_BONUS_MAX_Z = 1000.0f;  // Z where height bonus caps
+        static constexpr float BASE_RESET_REWARD  = 1.0f;     // one-shot acquisition reward
+        static constexpr float MAX_HEIGHT_BONUS   = 0.5f;     // added for Z >= HEIGHT_BONUS_MAX_Z
+        static constexpr float APPROACH_DIST_MAX  = 500.0f;   // UU: aerial proximity shaping range
+        static constexpr float APPROACH_REWARD    = 0.02f;    // per-frame aerial proximity reward
+        static constexpr int   MIN_WHEEL_CONTACT  = 2;        // min wheels touched for valid reset
 
-        mutable std::map<uint32_t, PendingFlipReset> pending;
-        mutable std::map<uint32_t, bool> previouslyFlipping;  // Track flipping state
+        // Apex timing multiplier — rewards resets when ball is near its apex
+        // Optimal window: ball vel.z in [-300, 0] UU/s → 2.0x multiplier
+        // Outside ±300 UU/s of the window → linearly falls to 1.0x
+        static constexpr float APEX_MULT_MAX      = 2.0f;    // multiplier inside optimal window
+        static constexpr float APEX_MULT_MIN      = 1.0f;    // multiplier at ±300 from window edges
+        static constexpr float APEX_WINDOW_LOW    = -300.0f; // optimal vel.z lower bound (UU/s)
+        static constexpr float APEX_WINDOW_HIGH   = 0.0f;    // optimal vel.z upper bound (UU/s)
+        static constexpr float APEX_FALLOFF_RANGE = 300.0f;  // UU/s over which mult falls 2.0→1.0
 
-        /**
-         * Calculate reward for flip reset acquisition
-         */
-        float CalculateFlipResetAcquisitionReward(
-            bool is_valid_flip_reset,
-            float normal_parallelism_dot
-        ) const {
-            if (!is_valid_flip_reset) {
-                return 0.0f;
+        // Handbrake bonus — binary: rewarded when handbrake is active at acquisition
+        // handbrakeVal threshold matches pattern in RecoveryRewards.h
+        static constexpr float HANDBRAKE_BONUS     = 0.3f;   // additive bonus
+        static constexpr float HANDBRAKE_THRESHOLD = 0.1f;   // analog threshold for "active"
+
+        // Boost-off bonus — binary: rewarded when NOT boosting at acquisition moment
+        // Uses prevAction.boost < 0.5f (0=off, 1=on binary action)
+        // Encourages saving boost for the follow-up shot after the reset
+        static constexpr float BOOST_OFF_BONUS     = 0.25f;  // additive bonus
+
+        // ----------------------------------------------------------------
+        // State
+        // ----------------------------------------------------------------
+        std::unordered_map<uint32_t, float> _pendingReward;  // queued in PreStep, paid in GetReward
+
+        // ----------------------------------------------------------------
+        // Helper: apex timing multiplier
+        // Returns 2.0x when ball vel.z is in the optimal descent window
+        // [APEX_WINDOW_LOW, APEX_WINDOW_HIGH], falling linearly to 1.0x
+        // at APEX_FALLOFF_RANGE outside either edge.
+        // ----------------------------------------------------------------
+        float ComputeApexMultiplier(float ballVelZ) const {
+            if (ballVelZ >= APEX_WINDOW_LOW && ballVelZ <= APEX_WINDOW_HIGH) {
+                return APEX_MULT_MAX;  // inside optimal window [−300, 0] UU/s
             }
-
-            float reward = config.flip_reset_trigger_reward;
-
-            // Bonus for perfect normal alignment (>0.95)
-            if (normal_parallelism_dot > 0.95f) {
-                reward += config.wheel_contact_bonus;
+            if (ballVelZ > APEX_WINDOW_HIGH) {
+                // Ball still rising — scale from 2.0x at 0 down to 1.0x at +300
+                float excess = ballVelZ - APEX_WINDOW_HIGH;
+                float t = RS_CLAMP(excess / APEX_FALLOFF_RANGE, 0.0f, 1.0f);
+                return APEX_MULT_MAX - (APEX_MULT_MAX - APEX_MULT_MIN) * t;
             }
-
-            return reward;
-        }
-
-        /**
-         * Calculate reward for productive use
-         */
-        float CalculateProductiveUseReward(
-            ProductiveUseValidator::UsageType usage_type,
-            const Vec& ball_pos,
-            const Vec& goal_center,
-            int team_id
-        ) const {
-            switch (usage_type) {
-            case ProductiveUseValidator::OFFENSIVE_SHOT: {
-                float x_distance = fabs(ball_pos.x - goal_center.x);
-                if (x_distance < NET_WIDTH / 2.0f) {
-                    return config.offensive_shot_reward;
-                }
-                else if (x_distance < NET_WIDTH / 2.0f + 300.0f) {
-                    return config.offensive_shot_wide_reward;
-                }
-                return config.invalid_usage_penalty;
-            }
-
-            case ProductiveUseValidator::DELAYED_SHOT: {
-                float x_distance = fabs(ball_pos.x - goal_center.x);
-                if (x_distance < NET_WIDTH / 2.0f) {
-                    return config.offensive_shot_reward + config.delayed_shot_bonus;
-                }
-                else if (x_distance < NET_WIDTH / 2.0f + 300.0f) {
-                    return config.offensive_shot_wide_reward + config.delayed_shot_bonus;
-                }
-                return config.invalid_usage_penalty;
-            }
-
-            case ProductiveUseValidator::DEFENSIVE_CLEAR: {
-                return config.defensive_clear_reward;
-            }
-
-            case ProductiveUseValidator::NEUTRAL_REDIRECT: {
-                return config.neutral_redirect_reward;
-            }
-
-            case ProductiveUseValidator::INVALID:
-            default: {
-                return config.invalid_usage_penalty;
-            }
-            }
+            // Ball falling below optimal — scale from 2.0x at -300 down to 1.0x at -600
+            float excess = (-ballVelZ) - (-APEX_WINDOW_LOW);
+            float t = RS_CLAMP(excess / APEX_FALLOFF_RANGE, 0.0f, 1.0f);
+            return APEX_MULT_MAX - (APEX_MULT_MAX - APEX_MULT_MIN) * t;
         }
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            pending.clear();
-            previouslyFlipping.clear();
+            _pendingReward.clear();
         }
 
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            // Don't reward flip resets during kickoff
-            bool isKickoff = (state.ball.pos.Length() < 300.0f && state.ball.vel.Length() < 200.0f);
-            if (isKickoff) {
-                return 0.0f;
-            }
+        // ----------------------------------------------------------------
+        // PreStep: detect flip reset acquisition transition for all players
+        // ----------------------------------------------------------------
+        virtual void PreStep(const GameState& state) override {
+            for (const auto& player : state.players) {
+                uint32_t id = player.carId;
+                _pendingReward[id] = 0.0f;
 
-            // Require minimum height (no ground-level flip resets)
-            if (player.pos.z < 300.0f) {
-                return 0.0f;
-            }
+                if (player.prev == nullptr) continue;
 
-            uint32_t id = player.carId;
-            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
-            float totalReward = 0.0f;
+                // Detect !HasFlipReset() → HasFlipReset() transition while airborne
+                bool prevHad = player.prev->HasFlipReset();
+                bool nowHas  = player.HasFlipReset();
 
-            // ====================================================================
-            // PHASE 2: Track pending flip reset and detect flip usage
-            // ====================================================================
+                if (!prevHad && nowHas && !player.isOnGround) {
+                    // Gate 1: minimum height
+                    if (player.pos.z < MIN_RESET_HEIGHT) continue;
 
-            auto pit = pending.find(id);
-            if (pit != pending.end()) {
-                PendingFlipReset& pfr = pit->second;
+                    // Gate 2: ball must be airborne (not resting on ground)
+                    if (state.ball.pos.z <= BALL_RADIUS) continue;
 
-                // Detect if player just started flipping (NEW)
-                bool wasFlipping = previouslyFlipping[id];
-                bool isFlippingNow = player.isFlipping;
+                    // Gate 3: car must have been airborne long enough (no instant resets)
+                    if (player.airTime < MIN_AIRTIME_FOR_FLIP) continue;
 
-                if (!wasFlipping && isFlippingNow && !pfr.flipWasUsed) {
-                    // Player just started using their flip reset!
-                    pfr.flipWasUsed = true;
-                    totalReward += config.flip_used_reward;
-
-                    // Bonus if flipping toward ball
-                    Vec toBall = (state.ball.pos - player.pos).Normalized();
-                    float flipAlignment = player.rotMat.forward.Dot(toBall);
-                    if (flipAlignment > 0.5f) {
-                        totalReward += config.flip_toward_ball_bonus;
-                    }
-                }
-
-                previouslyFlipping[id] = isFlippingNow;
-
-                pfr.timeLeft -= dt;
-
-                if (pfr.timeLeft <= 0.0f) {
-                    // Evaluate productive use after flip reset window (reduced from 5s to 2s)
-                    if (!pfr.wasValidFlipReset) {
-                        pending.erase(pit);
-                        return totalReward;
-                    }
-
-                    // Award productive use bonus (only if flip was used)
-                    if (pfr.flipWasUsed) {
-                        Vec oppGoal = (player.team == Team::BLUE) ? Vec(0.0f, GOAL_LINE_Y, GOAL_HEIGHT * 0.5f)
-                            : Vec(0.0f, -GOAL_LINE_Y, GOAL_HEIGHT * 0.5f);
-
-                        float usage_reward = CalculateProductiveUseReward(
-                            pfr.usageType,
-                            state.ball.pos,
-                            oppGoal,
-                            (player.team == Team::BLUE) ? 0 : 1
-                        );
-
-                        totalReward += usage_reward;
-                    }
-
-                    pending.erase(pit);
-                    return totalReward;
-                }
-
-                // Update usage classification as we wait
-                float timeSinceFlip = 2.0f - pfr.timeLeft;  // Reduced window from 5s to 2s
-                pfr.usageType = ProductiveUseValidator::ClassifyUsage(
-                    pfr.ballPosAtFlip,
-                    state.ball.pos,
-                    state.ball.vel,
-                    (player.team == Team::BLUE) ? 0 : 1,
-                    timeSinceFlip
-                );
-
-                return totalReward;
-            }
-
-            // ====================================================================
-            // PHASE 1: Detect flip reset acquisition
-            // ====================================================================
-
-            // Check if we just got a flip reset this frame
-            const Player* prevPlayer = player.prev;
-
-            if (prevPlayer) {
-                // Detect flip reset acquisition:
-                // - Previous frame: we had no flip reset (hasFlipReset = false)
-                // - Current frame: we have flip reset (HasFlipReset() = true)
-                bool prevHadFlipReset = prevPlayer->HasFlipReset();
-                bool nowHasFlipReset = player.HasFlipReset();
-
-                if (!prevHadFlipReset && nowHasFlipReset) {
-                    // We just got a flip reset! Give incremental rewards.
-
-                    // REQUIREMENT 1: Both car and ball must be airborne
-                    bool carWasAirborne = !prevPlayer->isOnGround;
-                    bool ballIsAirborne = state.ball.pos.z > BALL_RADIUS;
-
-                    // Give small reward for ANY underside contact while airborne
-                    if (carWasAirborne && prevPlayer->ballTouchedStep) {
-                        totalReward += config.underside_contact_reward;
-                    }
-
-                    // REQUIREMENT 2: Check wheel contact (RELAXED - at least 2 wheels instead of all 4)
-                    int wheelsContacted = 0;
+                    // Gate 4: at least 2 wheels contacted the ball
+                    int wheels = 0;
                     for (int i = 0; i < 4; i++) {
-                        if (prevPlayer->wheelsWithContact[i]) {
-                            wheelsContacted++;
-                        }
+                        if (player.wheelsWithContact[i]) wheels++;
                     }
-                    bool goodWheelContact = wheelsContacted >= 2;  // RELAXED: 2+ wheels instead of all 4
+                    if (wheels < MIN_WHEEL_CONTACT) continue;
 
-                    // Calculate normal vector parallelism
-                    float normalParallelism = 0.0f;
-                    if (prevPlayer->ballHitInfo.isValid) {
-                        Vec ballContactNormal = prevPlayer->ballHitInfo.relativePosOnBall.Normalized();
-                        normalParallelism = FlipResetValidator::CalculateNormalParallelism(
-                            player.rotMat.up,
-                            ballContactNormal
-                        );
-                    }
+                    // Gate 5: not a kickoff
+                    bool isKickoff = (state.ball.pos.Length() < 300.0f
+                                   && state.ball.vel.Length() < 200.0f);
+                    if (isKickoff) continue;
 
-                    // REQUIREMENT 3: Jump capability must be restored
-                    bool jumpCapabilityRestored = player.HasFlipReset();
+                    // All gates passed — compute acquisition reward
+                    float reward = BASE_RESET_REWARD;
 
-                    // REQUIREMENT 4: Reasonable airtime before contact
-                    float airTimeBeforeContact = prevPlayer->airTime;
-
-                    // Validate the flip reset (RELAXED validation)
-                    bool isValidFlipReset = (
-                        carWasAirborne &&
-                        ballIsAirborne &&
-                        goodWheelContact &&  // 2+ wheels instead of all 4
-                        normalParallelism > 0.5f &&  // RELAXED: 0.5 instead of 0.7
-                        jumpCapabilityRestored &&
-                        airTimeBeforeContact > MIN_AIRTIME_FOR_FLIP
+                    // Height bonus: 0 at Z=300, +MAX_HEIGHT_BONUS at Z>=1000
+                    float heightFactor = RS_CLAMP(
+                        (player.pos.z - MIN_RESET_HEIGHT) / (HEIGHT_BONUS_MAX_Z - MIN_RESET_HEIGHT),
+                        0.0f, 1.0f
                     );
+                    reward += MAX_HEIGHT_BONUS * heightFactor;
 
-                    if (isValidFlipReset) {
-                        // Give immediate acquisition reward
-                        totalReward += config.flip_reset_trigger_reward;
+                    // Apex timing multiplier: 2.0x when ball vel.z in [-300, 0] UU/s (just past apex),
+                    // linearly falling to 1.0x at +300 UU/s (rising) or -600 UU/s (falling fast).
+                    // Reads state.ball.vel.z directly — current-frame data, no prediction needed.
+                    float apexMult = ComputeApexMultiplier(state.ball.vel.z);
+                    reward *= apexMult;
 
-                        // Bonus for excellent normal alignment
-                        if (normalParallelism > 0.85f) {
-                            totalReward += config.wheel_contact_bonus;
-                        }
-
-                        // ARM PENDING FLIP RESET
-                        PendingFlipReset pfr;
-                        pfr.timeLeft = 2.0f;  // 2 second window (reduced from 5s)
-                        pfr.wasValidFlipReset = true;
-                        pfr.flipWasUsed = false;
-                        pfr.normalParallelism = normalParallelism;
-                        pfr.ballPosAtFlip = state.ball.pos;
-                        pfr.ballVelAtFlip = state.ball.vel;
-                        pfr.usageType = ProductiveUseValidator::INVALID;
-
-                        pending[id] = pfr;
-                        previouslyFlipping[id] = player.isFlipping;
+                    // Handbrake bonus: flat +0.3 when handbrake active at acquisition moment.
+                    // Teaches the bot to hold handbrake for controlled wheel-on-ball contact.
+                    if (player.handbrakeVal > HANDBRAKE_THRESHOLD) {
+                        reward += HANDBRAKE_BONUS;
                     }
+
+                    // Boost-off bonus: flat +0.25 when NOT boosting at acquisition moment.
+                    // Encourages saving boost for the follow-up shot after the reset.
+                    // prevAction.boost is 0 (off) or 1 (on) from the last action step.
+                    if (player.prevAction.boost < 0.5f) {
+                        reward += BOOST_OFF_BONUS;
+                    }
+
+                    _pendingReward[id] = reward;
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // GetReward: pay out queued acquisition + aerial approach shaping
+        // ----------------------------------------------------------------
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            uint32_t id = player.carId;
+            float reward = 0.0f;
+
+            // Pay out queued acquisition reward (set in PreStep, consumed here)
+            auto it = _pendingReward.find(id);
+            if (it != _pendingReward.end() && it->second != 0.0f) {
+                reward += it->second;
+                it->second = 0.0f;
+            }
+
+            // Aerial approach shaping: small per-frame reward for being airborne
+            // close to the ball above the height threshold.
+            // Teaches the bot to seek the ball for flip reset attempts.
+            if (!player.isOnGround && player.pos.z >= MIN_RESET_HEIGHT) {
+                float distToBall = (player.pos - state.ball.pos).Length();
+                if (distToBall < APPROACH_DIST_MAX) {
+                    float proximityFactor = 1.0f - (distToBall / APPROACH_DIST_MAX);
+                    reward += APPROACH_REWARD * proximityFactor;
                 }
             }
 
-            return totalReward;
+            return reward;
         }
     };
 
