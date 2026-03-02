@@ -436,7 +436,7 @@ namespace RLGC {
 
             // Check ball velocity direction
             Vec ballVel = state.ball.vel;
-            if (ballVel.Length() < 100.0f) return 0.0f;  // Ball too slow to be a pass
+            if (ballVel.Length() < 400.0f) return 0.0f;  // Ball too slow to be a pass (was 100)
 
             Vec ballVelNorm = ballVel.Normalized();
 
@@ -449,7 +449,9 @@ namespace RLGC {
                 ? CommonValues::ORANGE_GOAL_CENTER
                 : CommonValues::BLUE_GOAL_CENTER;
 
-            Vec towardTheirGoal = (theirGoal - player.pos).Normalized();
+            // Compute goal direction from ball position, not player position.
+            // Ball velocity is relative to ball, so the reference point should be ball too.
+            Vec towardTheirGoal = (theirGoal - state.ball.pos).Normalized();
 
             // Use the pre-computed ball prediction cache (populated in PreStep).
             // Check for surface redirects across the full prediction window.
@@ -487,7 +489,7 @@ namespace RLGC {
             }
 
             // SECONDARY REWARD: Ball moving toward team half (even if no clear receiver)
-            Vec teamHalfDir = (theirGoal - player.pos).Normalized();
+            Vec teamHalfDir = (theirGoal - state.ball.pos).Normalized();
             if (ballVelNorm.Dot(teamHalfDir) > 0.5f) {
                 reward += 0.8f;
             }
@@ -499,13 +501,22 @@ namespace RLGC {
                     reward += 1.0f;  // Surface-redirect pass with receiver in range
                 }
             } else {
-                // Direct / lob pass quality (use cached ground bounce count)
-                if (_ballCache.groundBounces == 0) {
+                // Direct / lob pass quality: count ground bounces within the first 2s only.
+                // The full _ballCache.groundBounces spans 4s — bounces after reception are irrelevant.
+                int earlyGroundBounces = 0;
+                for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                    if (_ballCache.slices[i].t > 2.0f) break;
+                    if (_ballCache.slices[i].hitGround &&
+                        (i == 0 || !_ballCache.slices[i - 1].hitGround)) {
+                        earlyGroundBounces++;
+                    }
+                }
+                if (earlyGroundBounces == 0) {
                     reward += 1.5f;  // Clean lob with no bounces - excellent!
-                } else if (_ballCache.groundBounces == 1) {
+                } else if (earlyGroundBounces == 1) {
                     reward += 0.8f;  // One ground bounce - acceptable
                 }
-                // groundBounces >= 2: chaotic, no bonus
+                // earlyGroundBounces >= 2: chaotic, no bonus
             }
 
             // Evaluate pass zone accuracy
@@ -637,13 +648,15 @@ namespace RLGC {
                     Vec ballVelNorm = ballVel.Normalized();
                     float goalwardComponent = ballVelNorm.Dot(towardGoal);
 
-                    Vec playerVelNorm = player.vel.Length() > 100.0f
-                        ? player.vel.Normalized()
-                        : ballVelNorm;
+                    // Reward receiver who is moving TOWARD the ball (approach alignment),
+                    // not just receivers moving in the same direction as the ball (old behavior
+                    // penalized players correctly sprinting INTO an incoming pass).
+                    Vec toBall = (state.ball.pos - player.pos).Normalized();
+                    float approachAlignment = player.vel.Length() > 100.0f
+                        ? player.vel.Normalized().Dot(toBall)
+                        : 1.0f;  // stationary receiver = fine (they'll flip/dodge to it)
 
-                    float alignmentBonus = RS_MAX(0.0f, playerVelNorm.Dot(ballVelNorm));
-
-                    if (goalwardComponent > 0.3f && alignmentBonus > 0.6f) {
+                    if (goalwardComponent > 0.3f && approachAlignment > 0.1f) {
                         reward += 0.5f;
 
                         float boostBonus = (player.boost / 100.0f) * 0.3f;
@@ -667,9 +680,10 @@ namespace RLGC {
                         reward += 0.5f;
                     }
 
-                    // BONUS: Converting receive into offense
+                    // BONUS: Converting receive into offense (threshold lowered 2000→1400 UU/s;
+                    // most good first-touch shots are 1300-1800 UU/s, 2000 was rarely reached)
                     Vec ballVel = state.ball.vel;
-                    if (ballVel.Length() > 2000.0f) {
+                    if (ballVel.Length() > 1400.0f) {
                         float boostBonus = (player.boost / 100.0f) * 0.5f;
                         reward += 2.0f + boostBonus;
                     }
@@ -683,8 +697,10 @@ namespace RLGC {
             if (recentPassToMe[id]) {
                 float timeSincePass = elapsedTime[id] - passReceiveTime[id];
 
-                // Surface passes need more time before we declare a miss
-                float missWindow = surfacePassActive[id] ? 1.5f : 0.5f;
+                // Surface passes need more time before we declare a miss.
+                // Direct pass window raised 0.5→1.0s: a ball at 1000 UU/s takes ~1.5s to
+                // travel 1500 UU — 0.5s was declaring misses before the ball even arrived.
+                float missWindow = surfacePassActive[id] ? 2.0f : 1.0f;
 
                 if (timeSincePass > missWindow) {
                     float distToBall = (player.pos - state.ball.pos).Length();

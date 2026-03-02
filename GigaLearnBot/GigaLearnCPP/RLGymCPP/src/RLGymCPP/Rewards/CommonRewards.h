@@ -272,6 +272,34 @@ namespace RLGC {
 			}
 		}
 	};
+
+	// WaveDashHeightReward — Rev 1.0 (2026-02-24, NJH)
+	// Height-scaled variant of WavedashBasicReward.
+	// Identical detection logic and kickoff gate. Reward scales linearly:
+	//   0.5x at Z=0  →  2.0x at Z=CEILING_Z (2044)
+	// Formula: reward = 0.5 + 1.5 * clamp(pos.z / CEILING_Z, 0, 1)
+	// Encourages wavedashes high on the wall and near the ceiling.
+	class WaveDashHeightReward : public Reward {
+	private:
+		static constexpr float HEIGHT_MULT_MIN = 0.5f;  // multiplier at Z = 0
+		static constexpr float HEIGHT_MULT_MAX = 2.0f;  // multiplier at Z = CEILING_Z
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!player.prev)
+				return 0.0f;
+
+			if (PositionAnalysis::IsKickoffFormation(player, state))
+				return 0.0f;
+
+			if (player.isOnGround && (player.prev->isFlipping && !player.prev->isOnGround)) {
+				float t = RS_CLAMP(player.pos.z / CommonValues::CEILING_Z, 0.0f, 1.0f);
+				return HEIGHT_MULT_MIN + (HEIGHT_MULT_MAX - HEIGHT_MULT_MIN) * t;
+			}
+			return 0.0f;
+		}
+	};
+
 	// ============================================================================
 // WavedashReward
 // 2025-12-16 | Rev 1.3 | NJH
@@ -843,10 +871,57 @@ namespace RLGC {
 	// ClosestPlayerSpeedReward (2025-02-17)
 	// Rewards ONLY the closest player on the team to the ball with velocity toward ball
 	// If two players are equidistant, rewards the leftmost player (smallest x)
-	// Purpose: Encourages the nearest player to get first to the ball during kickoff
+	// Fires every step regardless of game phase — see ClosestPlayerKickoffSpeedReward
+	// for the kickoff-only variant.
 	class ClosestPlayerSpeedReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Find the closest teammate to the ball
+			float closestDist = std::numeric_limits<float>::max();
+			int closestIdx = -1;
+
+			for (size_t i = 0; i < state.players.size(); i++) {
+				const Player& teammate = state.players[i];
+
+				// Only consider teammates
+				if (teammate.team != player.team)
+					continue;
+
+				float dist = (teammate.pos - state.ball.pos).Length();
+
+				// Update if closer, or same distance but more to the left (smaller x)
+				if (dist < closestDist || (dist == closestDist && closestIdx != -1 && teammate.pos.x < state.players[closestIdx].pos.x)) {
+					closestDist = dist;
+					closestIdx = (int)i;
+				}
+			}
+
+			// No teammates found (shouldn't happen) or not the closest player
+			if (closestIdx == -1 || state.players[closestIdx].carId != player.carId)
+				return 0.0f;
+
+			// Reward this player's velocity toward ball (same as VelocityPlayerToBallReward)
+			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
+			return dirToBall.Dot(normVel);
+		}
+	};
+
+	// ClosestPlayerKickoffSpeedReward (2026-02-23)
+	// Kickoff-only variant of ClosestPlayerSpeedReward.
+	// Identical logic, but gated: only fires when ball is within 500 UU of center.
+	// Use this in kickoff-focused phases; use ClosestPlayerSpeedReward for open play.
+	class ClosestPlayerKickoffSpeedReward : public Reward {
+	private:
+		// Ball within this radius of center = kickoff active (matches KickoffNoChaseTeamPenalty.h)
+		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Gate: only active during kickoff
+			if (state.ball.pos.Length() >= KICKOFF_BALL_RADIUS)
+				return 0.0f;
+
 			// Find the closest teammate to the ball
 			float closestDist = std::numeric_limits<float>::max();
 			int closestIdx = -1;

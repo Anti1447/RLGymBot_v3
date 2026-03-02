@@ -1,6 +1,11 @@
 #pragma once
 #include "Reward.h"
 #include "../Math.h"
+// Note: BallPred::Cache (used by ShotPlacementReward at the bottom) is defined in
+// BallPrediction.h, which is pulled in via CompleteMechanicsRewards.h before this
+// file in RewardConfig.h. No direct include needed here.
+
+namespace RLGC {
 
 // ============================================================================
 // SHOOTING REWARDS - Hard shots & outplay focus
@@ -871,3 +876,133 @@ public:
 		currentStep++;
 	}
 };
+
+// ============================================================================
+// ShotPlacementReward — Defender-Aware Shot Quality
+// ============================================================================
+// Fires on ball touch when BallPred confirms the shot is heading into the goal
+// mouth. Scores the shot by how hard the nearest defender must work to reach
+// the landing point: rewards corners, shots behind defenders, and exploiting
+// low-boost opponents.
+//
+// Score per defender = normalize(dist_to_shot_point) x aerial_boost_mult x behind_mult
+// Overall = min over all defenders (hardest to beat) x MAX_REWARD
+//
+// 2026-03-01 | NJH
+// ============================================================================
+class ShotPlacementReward : public Reward {
+private:
+    // Goal geometry (ball-radius adjusted — same values as UnifiedAirDribbleReward)
+    static constexpr float BALL_R        = 91.25f;
+    static constexpr float MOUTH_HALF_W  = 892.755f - BALL_R;   // 801.505 UU
+    static constexpr float MOUTH_H_MIN   = BALL_R;               //  91.25  UU
+    static constexpr float MOUTH_H_MAX   = 642.775f - BALL_R;   // 551.525 UU
+
+    // Gating
+    static constexpr float MIN_BALL_SPEED = 500.0f;              // UU/s minimum to count as a shot
+
+    // Reward scaling
+    static constexpr float MAX_REWARD    = 3.0f;
+    static constexpr float MAX_DIST      = 4000.0f;  // defender beyond this -> normalizedDist = 1.0
+
+    // Aerial difficulty parameters
+    static constexpr float AERIAL_Z      = 150.0f;   // shot Z above which boost matters
+    static constexpr float LOW_BOOST     = 30.0f;    // defender boost below this = aerial penalty
+    static constexpr float AERIAL_MULT   = 0.5f;     // extra multiplier headroom for aerial+low-boost
+
+    // Behind-defender bonus
+    static constexpr float BEHIND_BONUS  = 0.5f;     // extra multiplier headroom for behind-shot
+
+    // Result of velocity-ray goal-crossing search
+    struct GoalCrossing {
+        float x = 0.f, z = 0.f, t = 0.f;
+        bool  valid = false;
+    };
+
+    // Extrapolate where the ball will cross the opponent's goal plane using current
+    // velocity + gravity (~650 UU/s²). Fires for any on-target shot regardless of
+    // distance — no BallPred 4-second window limitation.
+    GoalCrossing FindGoalCrossing(const Player& player, const GameState& state) const {
+        GoalCrossing c;
+        float goalY = (player.team == Team::BLUE)
+                       ?  CommonValues::BACK_WALL_Y
+                       : -CommonValues::BACK_WALL_Y;
+
+        Vec ballPos = state.ball.pos;
+        Vec ballVel = state.ball.vel;
+
+        // Ball must be moving toward the opponent's goal
+        bool movingToGoal = (player.team == Team::BLUE) ? (ballVel.y > 50.f) : (ballVel.y < -50.f);
+        if (!movingToGoal) return c;
+
+        // Time to reach goal plane
+        float tToGoal = (goalY - ballPos.y) / ballVel.y;
+        if (tToGoal < 0.f) return c;
+
+        // Extrapolate x,z with gravity correction (~650 UU/s² in RocketSim)
+        float xAtGoal = ballPos.x + ballVel.x * tToGoal;
+        float zAtGoal = ballPos.z + ballVel.z * tToGoal - 0.5f * 650.f * tToGoal * tToGoal;
+
+        if (fabsf(xAtGoal) < MOUTH_HALF_W &&
+            zAtGoal        > MOUTH_H_MIN  &&
+            zAtGoal        < MOUTH_H_MAX) {
+            c = { xAtGoal, zAtGoal, tToGoal, true };
+        }
+        return c;
+    }
+
+public:
+    float GetReward(const Player& player,
+                    const GameState& state,
+                    bool isFinal) override
+    {
+        if (!player.ballTouchedStep)                  return 0.0f;
+        if (!state.prev)                              return 0.0f;
+        if (state.ball.vel.Length() < MIN_BALL_SPEED) return 0.0f;
+
+        // Confirm shot is aimed at the goal mouth via velocity ray + gravity
+        GoalCrossing c = FindGoalCrossing(player, state);
+        if (!c.valid) return 0.0f;
+
+        float goalY = (player.team == Team::BLUE)
+                       ?  CommonValues::BACK_WALL_Y
+                       : -CommonValues::BACK_WALL_Y;
+        Vec shotPoint(c.x, goalY, c.z);
+
+        float worstScore = 1.0f;  // 1 = no defender can save it, 0 = guaranteed saved
+        bool  hasOpp     = false;
+
+        for (const auto& opp : state.players) {
+            if (opp.team == player.team) continue;
+            hasOpp = true;
+
+            // Distance: how far must the defender travel to reach the shot?
+            float dist     = (opp.pos - shotPoint).Length();
+            float normDist = RS_CLAMP(dist / MAX_DIST, 0.0f, 1.0f);
+
+            // Aerial difficulty: low-boost defenders can't reach high shots
+            float boostMult = 1.0f;
+            if (c.z > AERIAL_Z && opp.boost < LOW_BOOST) {
+                float boostFrac = opp.boost / LOW_BOOST;               // 0 (empty) -> 1 (= LOW_BOOST)
+                boostMult = 1.0f + (1.0f - boostFrac) * AERIAL_MULT;  // 1.0x -> 1.5x
+            }
+
+            // Behind bonus: shot lands behind the defender (they must turn)
+            Vec   toShot     = (shotPoint - opp.pos).Normalized();
+            float behindDot  = -opp.rotMat.forward.Dot(toShot);       // +1 = shot directly behind them
+            float behindMult = 1.0f + RS_CLAMP(behindDot, 0.0f, 1.0f) * BEHIND_BONUS;
+
+            // Combined difficulty for this defender (clamped to [0,1])
+            float defScore = RS_CLAMP(normDist * boostMult * behindMult, 0.0f, 1.0f);
+
+            // Most dangerous defender limits the shot quality (take min)
+            worstScore = RS_MIN(worstScore, defScore);
+        }
+
+        if (!hasOpp) return MAX_REWARD;  // No opponents -> free goal
+
+        return worstScore * MAX_REWARD;
+    }
+};
+
+} // namespace RLGC

@@ -12,6 +12,7 @@
 #include <atomic>
 #include "RewardMath.h"
 #include "AirDribbleAccuracyReward.h"
+#include "BallPrediction.h"
 
 namespace RLGC {
     // Helpers
@@ -625,10 +626,39 @@ public:
 //  - If player then follows up within a short timeout and
 //    hits a strong shot toward goal from near net, reward.
 // 2025-12-09 - Rev 1 (NJH)
+// 2026-02-23 - Rev 2 (NJH) — BallPrediction.h integration
+//   Two new reward layers on top of the existing reactive touch reward:
+//
+//   Layer 1 — Predictive Positioning (continuous, no touch required):
+//     Scans the 4-second ball trajectory for an upcoming backboard bounce.
+//     If one is predicted within PRED_HORIZON (1.5s), finds the post-bounce
+//     rebound position (bounceTime + 0.4s) and gives an exponential proximity
+//     reward: PRED_PROX_REWARD * exp(-dist / PRED_DIST_SCALE) * dt.
+//     Only fires when rebound lands in the attacking half. Teaches the bot
+//     to anticipate and chase backboard rebounds proactively.
+//
+//   Layer 2 — Trajectory Quality Multiplier (on touch reward only):
+//     After all existing gates pass, checks where the ball will be 0.75s
+//     from now. If it's heading toward goal → up to 1.5x multiplier.
+//     If drifting away → down to 0.5x. Validates shot trajectory, not
+//     just instantaneous velocity.
+//
+//   All original gates (backboard timer, scoring zone, speed, alignment)
+//   are unchanged. RewardConfig.h/cpp require no changes.
 // ============================================================================
 class BackboardReboundReward : public Reward {
 private:
     float currentTime = 0.0f;
+
+    // ---- Layer 1: predictive positioning constants ----
+    static constexpr float PRED_HORIZON     = 1.5f;    // max lookahead for backboard bounce (s)
+    static constexpr float POST_BOUNCE_SEC  = 0.4f;    // seconds after bounce to sample rebound pos
+    static constexpr float PRED_PROX_REWARD = 1.2f;    // per-second reward at zero distance
+    static constexpr float PRED_DIST_SCALE  = 900.0f;  // exponential falloff distance (UU)
+
+    // ---- Layer 2: trajectory quality multiplier constants ----
+    static constexpr float TRAJ_CHECK_TIME  = 0.75f;   // seconds ahead to sample ball position
+    static constexpr float TRAJ_SCALE       = 1000.0f; // UU of goal-approach for full ±0.5 factor
 
     struct BoardState {
         float lastBackboardTime = -1.0f;
@@ -637,6 +667,8 @@ private:
     };
 
     mutable std::map<uint32_t, BoardState> boardStates;  // Per-player tracking instead of per-team
+
+    BallPred::Cache _ballCache;  // Updated once per step in PreStep()
 
     bool IsNearOpponentBackboard(const Vec& pos, Team playerTeam) const {
         // Opponent back wall Y
@@ -659,6 +691,10 @@ public:
         boardStates.clear();
     }
 
+    virtual void PreStep(const GameState& state) override {
+        _ballCache.Update(state);
+    }
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
         currentTime += dt;
@@ -666,27 +702,59 @@ public:
         Team playerTeam = player.team;
         auto& bs = boardStates[player.carId];  // Per-player state
 
-        // Track when ball is near opponent backboard
+        // Reactive tracking: record when ball is near opponent backboard
         if (IsNearOpponentBackboard(state.ball.pos, playerTeam)) {
             bs.lastBackboardTime = currentTime;
             bs.lastBackboardPos = state.ball.pos;
             bs.lastBackboardPlayerId = player.carId;
         }
 
+        // ----------------------------------------------------------------
+        // Layer 1: Predictive positioning reward
+        // Scans ball prediction for an upcoming backboard bounce.
+        // If predicted within PRED_HORIZON, rewards proximity to the
+        // post-bounce rebound landing position. No touch required.
+        // ----------------------------------------------------------------
+        float positioningReward = 0.0f;
+        if (_ballCache.valid) {
+            // Find first slice where the sticky hitBackboard flag turns true
+            int bounceSlice = -1;
+            for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                if (_ballCache.slices[i].hitBackboard) { bounceSlice = i; break; }
+            }
+            if (bounceSlice >= 0) {
+                float bounceTime = _ballCache.slices[bounceSlice].t;
+                if (bounceTime <= PRED_HORIZON) {
+                    // Sample where ball will be 0.4s after the backboard impact
+                    Vec reboundPos = _ballCache.AtTime(bounceTime + POST_BOUNCE_SEC).pos;
+                    // Only reward if the rebound lands in the attacking half
+                    bool inAttackHalf = (playerTeam == Team::BLUE) ? (reboundPos.y > 0.0f)
+                                                                    : (reboundPos.y < 0.0f);
+                    if (inAttackHalf) {
+                        float dist = (player.pos - reboundPos).Length();
+                        positioningReward = PRED_PROX_REWARD * expf(-dist / PRED_DIST_SCALE) * dt;
+                    }
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Existing touch-based reward (all gates unchanged from Rev 1)
+        // ----------------------------------------------------------------
         if (!player.ballTouchedStep)
-            return 0.0f;
+            return positioningReward;
 
         // Require recent backboard contact AND same player who triggered it
         if (bs.lastBackboardTime < 0.0f || (currentTime - bs.lastBackboardTime) > 2.5f)
-            return 0.0f;
+            return positioningReward;
 
         // Only credit the player who initiated the backboard rebound
         if (bs.lastBackboardPlayerId != player.carId)
-            return 0.0f;
+            return positioningReward;
 
-        // Player touch after backboard: check if this is near scoring zone
+        // Player touch after backboard: check if near scoring zone
         if (!IsInScoringZone(state.ball.pos, playerTeam))
-            return 0.0f;
+            return positioningReward;
 
         Vec targetGoal = (playerTeam == Team::BLUE)
             ? CommonValues::ORANGE_GOAL_BACK
@@ -694,25 +762,39 @@ public:
 
         Vec toGoal = (targetGoal - state.ball.pos).Normalized();
         float speed = state.ball.vel.Length();
-        if (speed < 1200.0f)  // Increased threshold from 900 to 1200 UU/s
-            return 0.0f;
+        if (speed < 1200.0f)  // Threshold: 1200 UU/s (unchanged)
+            return positioningReward;
 
         Vec dir = state.ball.vel / speed;
         float align = dir.Dot(toGoal);
         if (align < 0.6f)
-            return 0.0f;
+            return positioningReward;
 
         float alignScore = RS_CLAMP((align - 0.6f) / 0.4f, 0.0f, 1.0f);
         float speedScore = RS_CLAMP(speed / 2300.0f, 0.0f, 1.0f);
 
         float reward = 4.0f * alignScore * speedScore;
 
-        // Optional: big bonus if this frame caused a goal
+        // ----------------------------------------------------------------
+        // Layer 2: Trajectory quality multiplier
+        // Checks where the ball is predicted to be TRAJ_CHECK_TIME seconds
+        // from now. Heading toward goal → up to 1.5x; drifting away → 0.5x.
+        // ----------------------------------------------------------------
+        if (_ballCache.valid) {
+            Vec futurePos     = _ballCache.AtTime(TRAJ_CHECK_TIME).pos;
+            float currentDist = (state.ball.pos - targetGoal).Length();
+            float futureDist  = (futurePos - targetGoal).Length();
+            float improvement = currentDist - futureDist;   // positive = ball heading toward goal
+            float trajFactor  = RS_CLAMP(improvement / TRAJ_SCALE, -0.5f, 0.5f);
+            reward *= (1.0f + trajFactor);                  // range [0.5x … 1.5x]
+        }
+
+        // Goal bonus (unchanged)
         if (state.goalScored) {
             reward += 3.0f;
         }
 
-        return RS_CLAMP(reward, 0.0f, 8.0f);
+        return positioningReward + RS_CLAMP(reward, 0.0f, 8.0f);
     }
 };
 
@@ -1355,17 +1437,17 @@ public:
 
         // Goal boundary constants (with ball radius subtracted)
         // Ball center must be within these bounds for a "good" shot
-        const float ADJUSTED_WIDTH = CommonValues::GOAL_WIDTH_FROM_CENTER - CommonValues::BALL_RADIUS;  // ±800.005f
-        const float ADJUSTED_HEIGHT = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS; // 550.025f
+        const float ADJUSTED_WIDTH = CommonValues::GOAL_WIDTH_FROM_CENTER - CommonValues::BALL_RADIUS - 40.0f;  // ±800.005f
+        const float ADJUSTED_HEIGHT = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS - 40.0f; // 550.025f
 
         // Check if shot is within adjusted boundaries (X and Z axes)
         bool withinLeftRight = std::abs(ballPos.x) <= ADJUSTED_WIDTH;
         bool withinHeight = ballPos.z >= 0.0f && ballPos.z <= ADJUSTED_HEIGHT;
 
         if (withinLeftRight && withinHeight) {
-            return 1.5f; // In-bounds shot - 1.5x multiplier bonus!
+            return 2.0f; // In-bounds shot - 1.5x multiplier bonus!
         }
-        return 0.7f; // Out-of-bounds shot - 0.7x multiplier penalty
+        return 0.5f; // Out-of-bounds shot - 0.7x multiplier penalty
     }
 };
 
@@ -2565,6 +2647,14 @@ public:
 // UnifiedAirDribbleReward (2025-02-17)
 // Consolidates three separate air dribble rewards into one unified reward
 // with mode detection (offensive, defensive, general)
+//
+// Rev 3.0 changes (2026-02-24):
+//  - Added BallPred::Cache _ballCache + PreStep() override
+//  - Per-touch trajectory quality multiplier (0.7x–1.5x) applied in all three
+//    Evaluate functions based on predicted ball position at 0.75s ahead.
+//    Offensive/General: reward * (1 + clamp((curDist - futureDist)/1200, -0.3, 0.5))
+//    Defensive: reward * (1 + clamp((futureDist - curDist)/1200, -0.3, 0.5))
+//    where dist is to opponent goal (off/gen) or own goal (def).
 // ============================================================================
 class UnifiedAirDribbleReward : public Reward {
 private:
@@ -2582,6 +2672,9 @@ private:
         bool heightBonusApplied = false;
         Vec firstTouchBallVel;
         bool firstTouchProcessed = false;
+        float boostAtStart     = -1.0f;  // boost level when sequence opened (-1 = unset)
+        Vec   playerPosAtStart = {};     // player position when sequence opened
+        float timeSinceLastTouch = 0.0f; // seconds since last rewarded touch; 0 = sequence open
     };
 
     mutable std::map<uint32_t, SequenceState> sequenceStates;
@@ -2597,35 +2690,83 @@ private:
 
     const float EPS_REWARD_SKIP = 1e-7f;
 
+    BallPred::Cache _ballCache;  // Updated once per step in PreStep(); read in Evaluate*()
+
     // ========================================================================
     // MODE DETECTION
     // ========================================================================
 
     Mode DetectMode(const Player& player, const GameState& state) const {
-        // Offensive: ball in opponent's half AND close to opponent goal
-        bool inOpponentHalf = (player.team == Team::BLUE) ?
-            (state.ball.pos.y > 0) : (state.ball.pos.y < 0);
+        // Always use OFFENSIVE mode — air dribbles should always target the opponent's goal.
+        return Mode::OFFENSIVE;
+    }
 
-        if (inOpponentHalf) {
-            Vec oppGoal = (player.team == Team::BLUE) ?
-                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-            float distToGoal = (state.ball.pos - oppGoal).Length();
+    // ========================================================================
+    // OUTPLAY / BOOST-CONSERVATION HELPERS
+    // ========================================================================
 
-            if (distToGoal < 900.0f) {
-                return Mode::OFFENSIVE;
+    // Returns a multiplier based on whether the ball is moving past an actively-challenging
+    // opponent.  1.0x = no challenger (or ball heading into them), 1.15x = 50/50 contest,
+    // 1.45x = ball clearly redirected past them (outplay).
+    float ComputeOutplayMultiplier(const Player& player, const GameState& state) const {
+        constexpr float CHALLENGE_DIST      = 900.0f;   // UU from ball — "in a challenge"
+        constexpr float MIN_VEL_TOWARD_BALL = 250.0f;   // min approach speed to count
+        constexpr float OUTPLAY_BONUS       = 1.45f;    // ball going past challenger
+        constexpr float CONTEST_BONUS       = 1.15f;    // 50/50 or sideways redirect
+
+        float bestDist = 1e9f;
+        const Player* challenger = nullptr;
+        for (const auto& opp : state.players) {
+            if (opp.team == player.team) continue;
+            float distToBall = (opp.pos - state.ball.pos).Length();
+            if (distToBall >= CHALLENGE_DIST) continue;
+            Vec oppToBall = (state.ball.pos - opp.pos).Normalized();
+            float velTowardBall = RS_MAX(0.0f, opp.vel.Dot(oppToBall));
+            if (velTowardBall < MIN_VEL_TOWARD_BALL) continue;
+            if (distToBall < bestDist) {
+                bestDist = distToBall;
+                challenger = &opp;
             }
         }
 
-        // Defensive: ball in own half
-        bool inOwnHalf = (player.team == Team::BLUE) ?
-            (state.ball.pos.y < 0) : (state.ball.pos.y > 0);
+        if (!challenger) return 1.0f;  // nobody actively challenging
 
-        if (inOwnHalf) {
-            return Mode::DEFENSIVE;
+        // awayScore: +1 = ball moving directly away from challenger (outplay),
+        //            -1 = ball heading straight into challenger
+        Vec ballToChallenger = (challenger->pos - state.ball.pos).Normalized();
+        float ballLen = state.ball.vel.Length();
+        float awayScore = (ballLen > 1.0f)
+            ? -(state.ball.vel * (1.0f / ballLen)).Dot(ballToChallenger)
+            : 0.0f;
+
+        if (awayScore >  0.3f) return OUTPLAY_BONUS;
+        if (awayScore > -0.3f) return CONTEST_BONUS;
+        return 1.0f;  // heading into challenger, no bonus
+    }
+
+    // Returns true if BallPred shows the ball crossing the offensive goal plane
+    // through the actual goal opening (accounting for ball radius).
+    // Used to waive the boost-conservation penalty when committing all boost is correct.
+    bool IsHeadingToGoalMouth(const Player& player) const {
+        if (!_ballCache.valid) return false;
+        constexpr float BALL_R      = 91.25f;
+        constexpr float MOUTH_W     = 892.755f - BALL_R;   // 801.505 UU half-width
+        constexpr float MOUTH_H_MAX = 642.775f - BALL_R;   // 551.525 UU top
+        float goalPlaneY = (player.team == Team::BLUE)
+                            ?  CommonValues::BACK_WALL_Y
+                            : -CommonValues::BACK_WALL_Y;
+        for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+            const auto& sl = _ballCache.slices[i];
+            bool pastPlane = (player.team == Team::BLUE)
+                              ? (sl.pos.y >= goalPlaneY)
+                              : (sl.pos.y <= goalPlaneY);
+            if (pastPlane) {
+                return fabsf(sl.pos.x) < MOUTH_W &&
+                       sl.pos.z > BALL_R          &&
+                       sl.pos.z < MOUTH_H_MAX;
+            }
         }
-
-        // General: everything else
-        return Mode::GENERAL;
+        return false;
     }
 
     // ========================================================================
@@ -2634,16 +2775,18 @@ private:
 
     float EvaluateOffensive(const Player& player, const GameState& state, SequenceState& seq) const {
         // Constants for offensive mode
-        const float PROGRESS_SCALE = 0.0105f;
-        const float PER_TOUCH_MAX = 7.0f;
-        const float SEQ_REWARD_CAP = 65.0f;
-        const float MAX_SEQ_DURATION = 13.0f;
-        const int MAX_TOUCHES = 40;
-        const float MIN_PROGRESS_UU = 12.0f;
-        const float DECAY_EXPONENT = 0.5f;
-        const float ENTRY_BONUS = 0.65f;
-        const float SECOND_TOUCH_BONUS = 1.0f;
-        const float MIN_DIR_MULTIPLIER = 0.46f;
+        // Rev 2.1: reduced per-touch reward, increased duration/touch limits
+        // to encourage sustained multi-touch sequences over single-touch spikes.
+        const float PROGRESS_SCALE = 0.007f;      // was 0.0105 — 33% less per unit of progress
+        const float PER_TOUCH_MAX = 4.5f;         // was 7.0 — lower per-touch ceiling
+        const float SEQ_REWARD_CAP = 65.0f;       // unchanged — same total ceiling, just more touches to reach it
+        const float MAX_SEQ_DURATION = 18.0f;     // was 13.0 — 5s longer
+        const int MAX_TOUCHES = 65;               // was 40 — 25 more touches allowed
+        const float MIN_PROGRESS_UU = 8.0f;       // was 12.0 — softer touches qualify
+        const float DECAY_EXPONENT = 0.35f;       // was 0.5 — slower decay, later touches still pay
+        const float ENTRY_BONUS = 0.45f;          // was 0.65 — reduced to match lower per-touch scale
+        const float SECOND_TOUCH_BONUS = 0.65f;   // was 1.0 — reduced to match
+        const float MIN_DIR_MULTIPLIER = 0.30f;  // was 0.46 — stronger penalty for bad-direction touches
         const float GOOD_DIR_THRESHOLD = 0.525f;
         const float ROUGH_TOUCH_THRESHOLD = 1200.0f;
         const float ROUGH_TOUCH_PENALTY = 0.7f;
@@ -2690,6 +2833,17 @@ private:
 
         float reward = rewardBeforeDir * dirMul;
 
+        // Touch spacing multiplier: discourage rapid successive contacts (micro-taps),
+        // reward deliberate well-timed touches. First touch always exempt (touchCount == 0).
+        // Gap = 0s → 0.40x  |  gap >= 0.5s → 1.0x  |  linear between.
+        if (seq.touchCount > 0) {
+            constexpr float IDEAL_SPACING   = 0.5f;
+            constexpr float MIN_SPACING_MUL = 0.40f;
+            float spacingMult = RS_CLAMP(seq.timeSinceLastTouch / IDEAL_SPACING,
+                                         MIN_SPACING_MUL, 1.0f);
+            reward *= spacingMult;
+        }
+
         // Entry/second-touch bonuses
         if (seq.consecutiveAirTouches == 0) {
             reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
@@ -2718,9 +2872,100 @@ private:
             seq.firstTouchProcessed = true;
         }
 
+        // Trajectory quality multiplier: boost touches that predict ball approaching goal
+        // 0.7x when drifting away, 1.0x neutral, up to 1.5x heading straight to goal
+        {
+            const float TRAJ_CHECK_TIME = 0.75f;    // seconds ahead to sample
+            const float TRAJ_SCALE      = 1200.0f;  // UU of approach for full factor
+            const float TRAJ_MIN_FACTOR = -0.3f;
+            const float TRAJ_MAX_FACTOR =  0.5f;
+            if (_ballCache.valid) {
+                Vec futurePos    = _ballCache.AtTime(TRAJ_CHECK_TIME).pos;
+                float futureDist = (futurePos - oppGoal).Length();
+                float improvement = curDist - futureDist;  // positive = ball moving toward goal
+                float trajFactor = RS_CLAMP(improvement / TRAJ_SCALE, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+                reward *= (1.0f + trajFactor);
+            }
+        }
+
+        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
+        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
+        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
+        if (seq.boostAtStart >= 0.0f) {
+            constexpr float MIN_BOOST   = 13.0f;
+            constexpr float BOOST_FLOOR = 13.0f;
+            constexpr float NEUTRAL_EFF = 80.0f;
+            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
+            if (boostConsumed < MIN_BOOST) {
+                return 0.0f;  // not a real air dribble — insufficient boost committed
+            }
+            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
+            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
+            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
+            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
+            reward *= efficiencyFactor;
+        }
+
+        // Outplay multiplier: when an opponent is actively challenging, reward redirecting
+        // the ball past them. Neutral (1.0x) when no challenger is present.
+        reward *= ComputeOutplayMultiplier(player, state);
+
+        // Boost conservation: soft penalty for holding fewer than 20 boost (bot needs it for
+        // recovery after the dribble ends). Waived if trajectory is already heading into the goal.
+        if (player.boost < 20.0f && !IsHeadingToGoalMouth(player)) {
+            float boostFactor = RS_CLAMP(player.boost / 20.0f, 0.5f, 1.0f);
+            reward *= boostFactor;
+        }
+
+        // Goal mouth bonus / backboard penalty via BallPred.
+        // Stage 1: ball crosses the goal plane through the opening → big bonus.
+        //   (BallPred does NOT bounce the ball in the goal opening, so slices continue
+        //    past BACK_WALL_Y only when the ball is actually goal-bound.)
+        // Stage 2: if not goal-bound, check hitBackboard — BallPred bounces the ball
+        //   off the solid back wall; if this happens within 2.5s, zero the reward.
+        if (_ballCache.valid) {
+            constexpr float GOAL_BONUS    = 3.0f;   // was 1.5f — strong on-target signal
+            constexpr float BALL_R        = 91.25f;
+            constexpr float MOUTH_W       = 892.755f - BALL_R;
+            constexpr float MOUTH_H_MAX   = 642.775f - BALL_R;
+            constexpr float BB_TIME_LIMIT = 2.5f;
+            float goalPlaneY = (player.team == Team::BLUE)
+                                ?  CommonValues::BACK_WALL_Y
+                                : -CommonValues::BACK_WALL_Y;
+
+            bool goalBound = false;
+            for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                const auto& sl = _ballCache.slices[i];
+                bool pastPlane = (player.team == Team::BLUE)
+                                  ? (sl.pos.y >= goalPlaneY)
+                                  : (sl.pos.y <= goalPlaneY);
+                if (pastPlane) {
+                    if (fabsf(sl.pos.x) < MOUTH_W &&
+                        sl.pos.z > BALL_R          &&
+                        sl.pos.z < MOUTH_H_MAX) {
+                        reward *= GOAL_BONUS;
+                        goalBound = true;
+                    }
+                    break;
+                }
+            }
+
+            if (!goalBound) {
+                for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                    if (_ballCache.slices[i].hitBackboard) {
+                        if (_ballCache.slices[i].t <= BB_TIME_LIMIT) {
+                            reward = 0.0f;  // backboard-bound trajectory — penalize
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         if (reward > EPS_REWARD_SKIP) {
             seq.accumReward += reward;
             seq.touchCount++;
+            seq.timeSinceLastTouch = 0.0f;   // restart gap timer — next touch measured from now
             offensiveCompletions.fetch_add(1);
             if (seq.accumReward >= SEQ_REWARD_CAP - 1e-3f) {
                 seq.exhausted = true;
@@ -2736,15 +2981,16 @@ private:
 
     float EvaluateDefensive(const Player& player, const GameState& state, SequenceState& seq) const {
         // Constants for defensive mode
-        const float PROGRESS_SCALE = 0.008f;
-        const float PER_TOUCH_MAX = 5.0f;
-        const float SEQ_REWARD_CAP = 40.0f;
-        const float MAX_SEQ_DURATION = 12.0f;
-        const int MAX_TOUCHES = 35;
-        const float MIN_PROGRESS_UU = 10.0f;
-        const float DECAY_EXPONENT = 0.45f;
-        const float ENTRY_BONUS = 0.5f;
-        const float SECOND_TOUCH_BONUS = 0.8f;
+        // Rev 2.1: reduced per-touch reward, increased duration/touch limits
+        const float PROGRESS_SCALE = 0.005f;      // was 0.008 — 38% less per unit
+        const float PER_TOUCH_MAX = 3.0f;         // was 5.0 — lower per-touch ceiling
+        const float SEQ_REWARD_CAP = 40.0f;       // unchanged
+        const float MAX_SEQ_DURATION = 17.0f;     // was 12.0 — 5s longer
+        const int MAX_TOUCHES = 60;               // was 35 — 25 more touches
+        const float MIN_PROGRESS_UU = 7.0f;       // was 10.0 — softer touches qualify
+        const float DECAY_EXPONENT = 0.30f;       // was 0.45 — slower decay
+        const float ENTRY_BONUS = 0.35f;          // was 0.5 — reduced to match
+        const float SECOND_TOUCH_BONUS = 0.55f;   // was 0.8 — reduced to match
         const float MIN_DIR_MULTIPLIER = 0.4f;
         const float GOOD_DIR_THRESHOLD = 0.45f;
         const float ROUGH_TOUCH_THRESHOLD = 1200.0f;
@@ -2829,6 +3075,51 @@ private:
             seq.firstTouchProcessed = true;
         }
 
+        // Trajectory quality multiplier: boost touches that predict ball clearing from own goal
+        // 0.7x when ball drifting back toward own goal, 1.0x neutral, up to 1.5x clearing well
+        {
+            const float TRAJ_CHECK_TIME = 0.75f;
+            const float TRAJ_SCALE      = 1200.0f;
+            const float TRAJ_MIN_FACTOR = -0.3f;
+            const float TRAJ_MAX_FACTOR =  0.5f;
+            if (_ballCache.valid) {
+                Vec futurePos    = _ballCache.AtTime(TRAJ_CHECK_TIME).pos;
+                float futureDist = (futurePos - ownGoal).Length();
+                float improvement = futureDist - curDist;  // positive = ball moving away from own goal
+                float trajFactor = RS_CLAMP(improvement / TRAJ_SCALE, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+                reward *= (1.0f + trajFactor);
+            }
+        }
+
+        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
+        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
+        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
+        if (seq.boostAtStart >= 0.0f) {
+            constexpr float MIN_BOOST   = 13.0f;
+            constexpr float BOOST_FLOOR = 13.0f;
+            constexpr float NEUTRAL_EFF = 80.0f;
+            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
+            if (boostConsumed < MIN_BOOST) {
+                return 0.0f;  // not a real air dribble — insufficient boost committed
+            }
+            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
+            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
+            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
+            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
+            reward *= efficiencyFactor;
+        }
+
+        // Outplay multiplier: when an opponent is actively challenging, reward redirecting
+        // the ball past them. Neutral (1.0x) when no challenger is present.
+        reward *= ComputeOutplayMultiplier(player, state);
+
+        // Boost conservation: soft penalty for holding fewer than 20 boost (bot needs it for
+        // recovery after the dribble ends). Waived if trajectory is already heading into the goal.
+        if (player.boost < 20.0f && !IsHeadingToGoalMouth(player)) {
+            float boostFactor = RS_CLAMP(player.boost / 20.0f, 0.5f, 1.0f);
+            reward *= boostFactor;
+        }
+
         if (reward > EPS_REWARD_SKIP) {
             seq.accumReward += reward;
             seq.touchCount++;
@@ -2847,15 +3138,16 @@ private:
 
     float EvaluateGeneral(const Player& player, const GameState& state, SequenceState& seq) const {
         // Constants for general mode
-        const float PROGRESS_SCALE = 0.013f;
-        const float PER_TOUCH_MAX = 10.0f;
-        const float SEQ_REWARD_CAP = 80.0f;
-        const float MAX_SEQ_DURATION = 12.0f;
-        const int MAX_TOUCHES = 50;
-        const float MIN_PROGRESS_UU = 8.0f;
-        const float DECAY_EXPONENT = 0.25f;
-        const float ENTRY_BONUS = 1.0f;
-        const float SECOND_TOUCH_BONUS = 1.2f;
+        // Rev 2.1: reduced per-touch reward, increased duration/touch limits
+        const float PROGRESS_SCALE = 0.008f;      // was 0.013 — 38% less per unit
+        const float PER_TOUCH_MAX = 5.5f;         // was 10.0 — ~45% lower per-touch ceiling
+        const float SEQ_REWARD_CAP = 80.0f;       // unchanged
+        const float MAX_SEQ_DURATION = 17.0f;     // was 12.0 — 5s longer
+        const int MAX_TOUCHES = 75;               // was 50 — 25 more touches
+        const float MIN_PROGRESS_UU = 6.0f;       // was 8.0 — softer touches qualify
+        const float DECAY_EXPONENT = 0.18f;       // was 0.25 — keep very flat decay
+        const float ENTRY_BONUS = 0.65f;          // was 1.0 — reduced to match
+        const float SECOND_TOUCH_BONUS = 0.80f;   // was 1.2 — reduced to match
         const float MIN_DIR_MULTIPLIER = 0.3f;
         const float GOOD_DIR_THRESHOLD = 0.5f;
         const float HEIGHT_BONUS_THRESHOLD_1 = 250.0f;
@@ -2922,6 +3214,82 @@ private:
 
         reward *= heightBonus;
 
+        // Trajectory quality multiplier: boost touches that predict ball approaching opponent goal
+        // 0.7x when drifting away, 1.0x neutral, up to 1.5x heading toward goal
+        {
+            const float TRAJ_CHECK_TIME = 0.75f;
+            const float TRAJ_SCALE      = 1200.0f;
+            const float TRAJ_MIN_FACTOR = -0.3f;
+            const float TRAJ_MAX_FACTOR =  0.5f;
+            if (_ballCache.valid) {
+                Vec futurePos    = _ballCache.AtTime(TRAJ_CHECK_TIME).pos;
+                float futureDist = (futurePos - oppGoal).Length();
+                float improvement = curDist - futureDist;  // positive = ball moving toward goal
+                float trajFactor = RS_CLAMP(improvement / TRAJ_SCALE, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+                reward *= (1.0f + trajFactor);
+            }
+        }
+
+        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
+        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
+        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
+        if (seq.boostAtStart >= 0.0f) {
+            constexpr float MIN_BOOST   = 13.0f;
+            constexpr float BOOST_FLOOR = 13.0f;
+            constexpr float NEUTRAL_EFF = 80.0f;
+            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
+            if (boostConsumed < MIN_BOOST) {
+                return 0.0f;  // not a real air dribble — insufficient boost committed
+            }
+            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
+            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
+            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
+            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
+            reward *= efficiencyFactor;
+        }
+
+        // Outplay multiplier: when an opponent is actively challenging, reward redirecting
+        // the ball past them. Neutral (1.0x) when no challenger is present.
+        reward *= ComputeOutplayMultiplier(player, state);
+
+        // Boost conservation: soft penalty for holding fewer than 20 boost (bot needs it for
+        // recovery after the dribble ends). Waived if trajectory is already heading into the goal.
+        if (player.boost < 20.0f && !IsHeadingToGoalMouth(player)) {
+            float boostFactor = RS_CLAMP(player.boost / 20.0f, 0.5f, 1.0f);
+            reward *= boostFactor;
+        }
+
+        // Goal mouth bonus: BallPred trajectory hits the actual goal opening.
+        // Scans slices to find first goal-plane crossing; checks X and Z against
+        // goal dimensions minus ball radius (ball must fully fit through opening).
+        if (_ballCache.valid) {
+            constexpr float GOAL_BONUS  = 1.3f;   // slightly weaker than offensive (1.5x)
+            constexpr float BALL_R      = 91.25f;
+            constexpr float MOUTH_W     = 892.755f - BALL_R;  // 801.505 UU half-width
+            constexpr float MOUTH_H_MAX = 642.775f - BALL_R;  // 551.525 UU top
+            float goalPlaneY = (player.team == Team::BLUE)
+                                ?  CommonValues::BACK_WALL_Y
+                                : -CommonValues::BACK_WALL_Y;
+            for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                const auto& sl = _ballCache.slices[i];
+                bool pastPlane = (player.team == Team::BLUE)
+                                  ? (sl.pos.y >= goalPlaneY)
+                                  : (sl.pos.y <= goalPlaneY);
+                if (pastPlane) {
+                    if (fabsf(sl.pos.x) < MOUTH_W &&
+                        sl.pos.z > BALL_R          &&
+                        sl.pos.z < MOUTH_H_MAX) {
+                        reward *= GOAL_BONUS;
+                    } else if (fabsf(sl.pos.x) < MOUTH_W &&
+                               sl.pos.z >= MOUTH_H_MAX) {
+                        // Ball heading into backboard above the goal — not a scoring trajectory
+                        reward = 0.0f;
+                    }
+                    break;  // only check first crossing
+                }
+            }
+        }
+
         if (reward > EPS_REWARD_SKIP) {
             seq.accumReward += reward;
             seq.touchCount++;
@@ -2935,6 +3303,10 @@ private:
     }
 
 public:
+    virtual void PreStep(const GameState& state) override {
+        _ballCache.Update(state);
+    }
+
     virtual void Reset(const GameState& initialState) override {
         sequenceStates.clear();
         offensiveAttempts = 0;
@@ -2955,6 +3327,14 @@ public:
             return 0.0f;
         }
 
+        // Advance timeSinceLastTouch every frame the sequence is alive — touch or not.
+        // Must run before the ballTouchedStep early-return so non-touch frames still tick.
+        {
+            auto tIt = sequenceStates.find(id);
+            if (tIt != sequenceStates.end())
+                tIt->second.timeSinceLastTouch += dt;
+        }
+
         if (!state.prev || !player.ballTouchedStep) {
             return 0.0f;
         }
@@ -2962,8 +3342,10 @@ public:
         // Initialize sequence state if absent
         if (sequenceStates.find(id) == sequenceStates.end()) {
             sequenceStates[id] = SequenceState();
-            sequenceStates[id].startHeight = state.ball.pos.z;
-            sequenceStates[id].maxHeight = state.ball.pos.z;
+            sequenceStates[id].startHeight      = state.ball.pos.z;
+            sequenceStates[id].maxHeight        = state.ball.pos.z;
+            sequenceStates[id].boostAtStart     = player.boost;
+            sequenceStates[id].playerPosAtStart = player.pos;
         }
 
         SequenceState& seq = sequenceStates[id];
@@ -5680,8 +6062,256 @@ public:
         lastBallWallContact[player.carId] = ballWallContact;
         lastBallBackboardContact[player.carId] = ballBackboardContact;
         lastBallCeilingContact[player.carId] = ballCeilingContact;
-        
+
         return reward;
+    }
+};
+
+// ============================================================================
+// UnifiedDoubleTapReward — Rev 1.0 (2026-02-24, NJH)
+//
+// Rewards aerial double-tap mechanics: aerial first touch → ball contacts
+// backboard/sidewall/corner → aerial rebound touch WITHOUT landing on the
+// floor between first and finish touch.
+//
+// Surfaces: backboard (Y-axis ±5120), side wall (X-axis ±4096), corner (both).
+// Does NOT cover ceiling (separate skill).
+//
+// Architecture:
+//   PreStep() computes all state transitions + pending rewards (once per step).
+//   GetReward() is read-only — consumes pending rewards from PreStep map.
+//   Per-player state in std::unordered_map<uint32_t, DTState> keyed by carId.
+//
+// BallPred::Cache uses:
+//   1. First touch:      FindPredictedSurface() — classify surface + get rebound pos
+//   2. AWAITING_FINISH:  per-frame proximity shaping toward predicted rebound pos
+//   3. Finish touch:     trajectory quality multiplier (0.7x–1.5x) via AtTime(0.75s)
+//
+// Fixes timer inflation in AdvancedDoubleTapReward + EnhancedDoubleTapReward:
+//   phaseTimer advances in PreStep() once per step, not in GetReward() once per player.
+//
+// Floor-touch invalidation: isOnGround && pos.z < FLOOR_Z_THRESHOLD.
+//   This correctly handles RocketSim where isOnGround=true on wall AND floor.
+// ============================================================================
+class UnifiedDoubleTapReward : public Reward {
+private:
+    enum class DTPhase   : uint8_t { IDLE, AWAITING_SURFACE, AWAITING_FINISH };
+    enum class DTSurface : uint8_t { NONE, BACKBOARD, SIDEWALL, CORNER };
+
+    struct DTState {
+        DTPhase   phase        = DTPhase::IDLE;
+        DTSurface surface      = DTSurface::NONE;
+        float     phaseTimer   = 0.0f;
+        Vec       reboundPos   = {};
+        bool      reboundKnown = false;
+        float     posReward    = 0.0f;    // per-frame positioning shaping; set in PreStep
+        float     finishReward = 0.0f;    // finish touch reward; set in PreStep, consumed in GetReward
+    };
+
+    std::unordered_map<uint32_t, DTState> _states;
+    BallPred::Cache _ballCache;
+
+    // Surface proximity
+    static constexpr float SURFACE_DIST       = 300.0f;   // UU — ball near wall = surface contact
+    static constexpr float FLOOR_Z_THRESHOLD  = 100.0f;   // Z below this = player on floor (not wall)
+    static constexpr float MIN_FLIGHT_TIME    = 0.1f;     // min sec in AWAITING_SURFACE before checking contact
+
+    // Prediction
+    static constexpr float PRED_HORIZON       = 2.0f;     // max lookahead for surface detection (sec)
+    static constexpr float POST_BOUNCE_SEC    = 0.35f;    // sec after predicted bounce to sample rebound pos
+
+    // Timeouts
+    static constexpr float MAX_FLIGHT_TO_SURFACE = 2.0f;  // AWAITING_SURFACE phase timeout
+    static constexpr float MAX_SURFACE_TO_FINISH = 1.8f;  // AWAITING_FINISH phase timeout
+
+    // Positioning shaping (per-frame, AWAITING_FINISH)
+    static constexpr float PROX_REWARD_PER_SEC = 0.8f;   // reward/sec at dist=0
+    static constexpr float PROX_DIST_SCALE     = 900.0f; // exponential falloff (UU)
+
+    // Finish reward
+    static constexpr float BASE_FINISH_REWARD  = 3.0f;
+    static constexpr float SPEED_BONUS_MAX     = 1.0f;   // added at full ball speed
+    static constexpr float ALIGN_BONUS_MAX     = 1.0f;   // added at full toward-goal alignment
+    static constexpr float SURF_MULT_BACKBOARD = 1.5f;
+    static constexpr float SURF_MULT_CORNER    = 1.3f;
+    static constexpr float SURF_MULT_SIDEWALL  = 1.1f;
+
+    // Trajectory multiplier (BallPred at finish touch)
+    static constexpr float TRAJ_CHECK_TIME = 0.75f;
+    static constexpr float TRAJ_SCALE      = 1200.0f;
+    static constexpr float TRAJ_MIN_FACTOR = -0.3f;
+    static constexpr float TRAJ_MAX_FACTOR =  0.5f;
+
+    // Minimum elapsed time in AWAITING_FINISH before a finish touch is recognized.
+    // Prevents pinch contacts (ball barely left the wall) from scoring as double-taps.
+    static constexpr float MIN_FINISH_DELAY = 0.25f;
+
+    bool IsOnFloor(const Player& player) const {
+        return player.isOnGround && player.pos.z < FLOOR_Z_THRESHOLD;
+    }
+
+    DTSurface FindPredictedSurface(int& outBounceSlice) const {
+        outBounceSlice = -1;
+        for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+            const auto& sl = _ballCache.slices[i];
+            if (sl.t > PRED_HORIZON) break;
+            bool newWall = sl.hitWall      && (i == 0 || !_ballCache.slices[i-1].hitWall);
+            bool newBack = sl.hitBackboard && (i == 0 || !_ballCache.slices[i-1].hitBackboard);
+            if (newWall || newBack) {
+                outBounceSlice = i;
+                bool wallNear = false, backNear = false;
+                int  jEnd = RS_MIN(BallPred::NUM_SLICES - 1, i + 2);
+                for (int j = i; j <= jEnd; j++) {
+                    if (_ballCache.slices[j].hitWall)      wallNear = true;
+                    if (_ballCache.slices[j].hitBackboard) backNear = true;
+                }
+                if (wallNear && backNear) return DTSurface::CORNER;
+                if (backNear) return DTSurface::BACKBOARD;
+                return DTSurface::SIDEWALL;
+            }
+        }
+        return DTSurface::NONE;
+    }
+
+    DTSurface DetectSurfaceContact(const Vec& ballPos) const {
+        float distBack = fabsf(fabsf(ballPos.y) - CommonValues::BACK_WALL_Y);
+        float distSide = fabsf(fabsf(ballPos.x) - CommonValues::SIDE_WALL_X);
+        bool nearBack = distBack < SURFACE_DIST;
+        bool nearSide = distSide < SURFACE_DIST;
+        if (nearBack && nearSide) return DTSurface::CORNER;
+        if (nearBack) return DTSurface::BACKBOARD;
+        if (nearSide) return DTSurface::SIDEWALL;
+        return DTSurface::NONE;
+    }
+
+    float GetSurfaceMultiplier(DTSurface surf) const {
+        switch (surf) {
+            case DTSurface::BACKBOARD: return SURF_MULT_BACKBOARD;
+            case DTSurface::CORNER:   return SURF_MULT_CORNER;
+            case DTSurface::SIDEWALL: return SURF_MULT_SIDEWALL;
+            default: return 1.0f;
+        }
+    }
+
+public:
+    virtual void Reset(const GameState&) override {
+        _states.clear();
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        _ballCache.Update(state);
+        float dt = state.deltaTime > 0.0f ? state.deltaTime : (1.0f / 120.0f);
+
+        for (const auto& player : state.players) {
+            uint32_t  id = player.carId;
+            DTState&  s  = _states[id];  // default-constructs IDLE if absent
+
+            // Reset per-step pending rewards
+            s.posReward    = 0.0f;
+            s.finishReward = 0.0f;
+
+            // ---- IDLE: watch for aerial first touch ----
+            if (s.phase == DTPhase::IDLE) {
+                if (player.ballTouchedStep && !IsOnFloor(player)) {
+                    int bounceSlice = -1;
+                    s.surface      = _ballCache.valid ? FindPredictedSurface(bounceSlice) : DTSurface::NONE;
+                    s.reboundKnown = false;
+                    if (bounceSlice >= 0 && _ballCache.valid) {
+                        float bounceTime = _ballCache.slices[bounceSlice].t;
+                        s.reboundPos   = _ballCache.AtTime(bounceTime + POST_BOUNCE_SEC).pos;
+                        s.reboundKnown = true;
+                    }
+                    s.phase      = DTPhase::AWAITING_SURFACE;
+                    s.phaseTimer = 0.0f;
+                }
+                continue;
+            }
+
+            // Non-IDLE: advance timer; floor touch invalidates entire sequence
+            s.phaseTimer += dt;
+            if (IsOnFloor(player)) {
+                s.phase = DTPhase::IDLE;
+                continue;
+            }
+
+            // ---- AWAITING_SURFACE ----
+            if (s.phase == DTPhase::AWAITING_SURFACE) {
+                if (s.phaseTimer > MAX_FLIGHT_TO_SURFACE) {
+                    s.phase = DTPhase::IDLE;
+                    continue;
+                }
+                // Reactive surface detection (skip first MIN_FLIGHT_TIME to avoid false positives)
+                if (s.phaseTimer > MIN_FLIGHT_TIME) {
+                    DTSurface reactSurf = DetectSurfaceContact(state.ball.pos);
+                    if (reactSurf != DTSurface::NONE) {
+                        if (s.surface == DTSurface::NONE) s.surface = reactSurf;
+                        if (!s.reboundKnown && _ballCache.valid) {
+                            s.reboundPos   = _ballCache.AtTime(POST_BOUNCE_SEC).pos;
+                            s.reboundKnown = true;
+                        }
+                        s.phase      = DTPhase::AWAITING_FINISH;
+                        s.phaseTimer = 0.0f;
+                    }
+                }
+                continue;
+            }
+
+            // ---- AWAITING_FINISH ----
+            if (s.phase == DTPhase::AWAITING_FINISH) {
+                if (s.phaseTimer > MAX_SURFACE_TO_FINISH) {
+                    s.phase = DTPhase::IDLE;
+                    continue;
+                }
+
+                // Per-frame positioning shaping toward predicted rebound
+                if (s.reboundKnown) {
+                    float dist  = (player.pos - s.reboundPos).Length();
+                    s.posReward = PROX_REWARD_PER_SEC * expf(-dist / PROX_DIST_SCALE) * dt;
+                }
+
+                // Aerial rebound touch → issue finish reward
+                // Guard: ignore touches arriving < MIN_FINISH_DELAY after wall contact.
+                // Bot stays in AWAITING_FINISH and may attempt a valid follow-up touch.
+                if (player.ballTouchedStep && !IsOnFloor(player) &&
+                    s.phaseTimer >= MIN_FINISH_DELAY) {
+                    Vec oppGoal = (player.team == Team::BLUE)
+                        ? Vec(0.0f,  CommonValues::BACK_WALL_Y, CommonValues::GOAL_HEIGHT / 2.0f)
+                        : Vec(0.0f, -CommonValues::BACK_WALL_Y, CommonValues::GOAL_HEIGHT / 2.0f);
+
+                    float ballSpeed  = state.ball.vel.Length();
+                    float speedBonus = SPEED_BONUS_MAX * RS_CLAMP(ballSpeed / CommonValues::BALL_MAX_SPEED, 0.0f, 1.0f);
+
+                    Vec   ballToGoal = (oppGoal - state.ball.pos).Normalized();
+                    float alignScore = RS_MAX(0.0f, state.ball.vel.Normalized().Dot(ballToGoal));
+                    float alignBonus = ALIGN_BONUS_MAX * alignScore;
+
+                    float reward = (BASE_FINISH_REWARD + speedBonus + alignBonus)
+                                 * GetSurfaceMultiplier(s.surface);
+
+                    // Trajectory quality multiplier: 0.7x–1.5x based on ball heading toward goal
+                    if (_ballCache.valid) {
+                        Vec   futurePos   = _ballCache.AtTime(TRAJ_CHECK_TIME).pos;
+                        float curDist     = (state.ball.pos - oppGoal).Length();
+                        float futureDist  = (futurePos - oppGoal).Length();
+                        float improvement = curDist - futureDist;
+                        float trajFactor  = RS_CLAMP(improvement / TRAJ_SCALE, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+                        reward *= (1.0f + trajFactor);
+                    }
+
+                    s.finishReward = reward;
+                    s.phase        = DTPhase::IDLE;
+                }
+            }
+        }
+    }
+
+    virtual float GetReward(const Player& player, const GameState&, bool) override {
+        auto it = _states.find(player.carId);
+        if (it == _states.end()) return 0.0f;
+        DTState& s   = it->second;
+        float    out = s.posReward + s.finishReward;
+        s.finishReward = 0.0f;   // consume; posReward zeroed at top of next PreStep
+        return out;
     }
 };
 

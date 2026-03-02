@@ -419,4 +419,94 @@ namespace RLGC {
 		}
 	};
 
+	// ============================================================================
+	// InvertedAerialReward — Rewards flying upside-down (wheels toward ceiling)
+	// 2026-02-25 | Rev 1.0 | NJH
+	//
+	// Detects and rewards the car for maintaining an inverted aerial orientation
+	// while airborne. This is the "wheels-up" / upside-down flying mechanic used
+	// for ceiling approaches, unexpected redirects, and flip-reset setups.
+	//
+	// Gate conditions (all must pass):
+	//   - Airborne (!isOnGround)
+	//   - airTime >= 0.2s (ignore brief inverted flips/rolls off the ground)
+	//   - pos.z >= 300 UU (no low-altitude inversions)
+	//   - rotMat.up.z <= -0.7 (clearly inverted; threshold for "wheels mostly up")
+	//
+	// Reward structure:
+	//   1. Per-frame inversion quality (framerate-independent via deltaTime):
+	//        invertQuality = clamp((-upZ - 0.7) / 0.3, 0, 1)
+	//        reward = REWARD_PER_SEC * invertQuality * dt
+	//      up.z = -0.7 → quality 0, up.z = -1.0 → quality 1 (perfect upside-down)
+	//
+	//   2. Ball proximity multiplier (keeps inversion purposeful, not random):
+	//      If distToBall < BALL_PROX_MAX (1500 UU):
+	//        proxFactor = 1 - distToBall/BALL_PROX_MAX   (0 to 1 as dist approaches 0)
+	//        reward *= (1.0 + proxFactor)                 (up to 2x near ball)
+	//
+	//   3. Ball touch while inverted (one-shot event):
+	//        +BALL_TOUCH_BONUS (0.5) when ballTouchedStep && inverted
+	//
+	// Stateless — no PreStep, no stored state. All logic in GetReward.
+	//
+	// Typical exposure (Phase 6, 8-tick skip at 120Hz -> 15 steps/s):
+	//   Max per step: ~0.067 * invertQuality * proxMultiplier (before weight)
+	//   Near ball, perfectly inverted: ~0.133/step -> ~2 units/s at weight 20
+	// ============================================================================
+	class InvertedAerialReward : public Reward {
+	private:
+		static constexpr float INVERT_THRESHOLD  = -0.7f;   // up.z below this = inverted
+		static constexpr float INVERT_MAX        = -1.0f;   // up.z at perfect upside-down
+		static constexpr float MIN_HEIGHT        = 300.0f;  // UU, min altitude
+		static constexpr float MIN_AIRTIME       = 0.2f;    // s, ignore brief inversions
+		static constexpr float REWARD_PER_SEC    = 1.0f;    // raw reward/s at perfect inversion
+		static constexpr float BALL_PROX_MAX     = 1500.0f; // UU, proximity multiplier range
+		static constexpr float BALL_TOUCH_BONUS  = 0.5f;    // one-shot for touching while inverted
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Gate 1: must be airborne
+			if (player.isOnGround) return 0.0f;
+
+			// Gate 2: minimum airtime (filter out brief ground flips/rolls)
+			if (player.airTime < MIN_AIRTIME) return 0.0f;
+
+			// Gate 3: minimum height
+			if (player.pos.z < MIN_HEIGHT) return 0.0f;
+
+			// Gate 4: must be clearly inverted (wheels pointing toward ceiling)
+			float upZ = player.rotMat.up.z;
+			if (upZ > INVERT_THRESHOLD) return 0.0f;
+
+			// Gate 5: only reward when climbing (+Z velocity) or already high up (Z >= 600)
+			if (player.vel.z <= 0.0f && player.pos.z < 600.0f) return 0.0f;
+
+			// Inversion quality: 0 at threshold (-0.7), 1 at perfect upside-down (-1.0)
+			float invertQuality = RS_CLAMP(
+				(INVERT_THRESHOLD - upZ) / (INVERT_THRESHOLD - INVERT_MAX),
+				0.0f, 1.0f
+			);
+
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
+			// Per-frame sustained reward, scaled by how upside-down the car is
+			float reward = REWARD_PER_SEC * invertQuality * dt;
+
+			// Ball proximity multiplier: up to 2x when very close to ball.
+			// Encourages purposeful inversion toward the ball, not aimless spinning.
+			float distToBall = (player.pos - state.ball.pos).Length();
+			if (distToBall < BALL_PROX_MAX) {
+				float proxFactor = 1.0f - RS_CLAMP(distToBall / BALL_PROX_MAX, 0.0f, 1.0f);
+				reward *= (1.0f + proxFactor);
+			}
+
+			// Event: bonus for touching the ball while inverted
+			if (player.ballTouchedStep) {
+				reward += BALL_TOUCH_BONUS;
+			}
+
+			return reward;
+		}
+	};
+
 }

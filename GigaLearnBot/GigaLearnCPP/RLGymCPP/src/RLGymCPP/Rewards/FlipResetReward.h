@@ -394,4 +394,97 @@ namespace RLGC {
         }
     };
 
+    // ============================================================================
+    // SIMPLE FLIP RESET REWARD — Rev 1.0 (2026-02-23, NJH)
+    //
+    // Bare-minimum flip reset reward. No gates, no bonuses, no shaping.
+    // Detects the !HasFlipReset() → HasFlipReset() transition while airborne
+    // and returns a flat 1.0 reward. The engine (RocketSim) is the sole arbiter
+    // of whether a flip reset occurred — no additional validation applied.
+    //
+    // Use case: earlier curriculum phases, baseline comparison, or any context
+    // where the full gated FlipResetReward (Rev 2.1) is too restrictive.
+    // ============================================================================
+    class SimpleFlipResetReward : public Reward {
+    private:
+        static constexpr float RESET_REWARD = 1.0f;  // flat reward per acquisition
+
+        std::unordered_map<uint32_t, float> _pendingReward;
+
+    public:
+        virtual void Reset(const GameState&) override {
+            _pendingReward.clear();
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            for (const auto& player : state.players) {
+                uint32_t id = player.carId;
+                _pendingReward[id] = 0.0f;
+
+                if (player.prev == nullptr) continue;
+
+                // Detect !HasFlipReset() → HasFlipReset() while airborne
+                bool prevHad = player.prev->HasFlipReset();
+                bool nowHas  = player.HasFlipReset();
+
+                if (!prevHad && nowHas && !player.isOnGround) {
+                    _pendingReward[id] = RESET_REWARD;
+                }
+            }
+        }
+
+        virtual float GetReward(const Player& player, const GameState&, bool) override {
+            auto it = _pendingReward.find(player.carId);
+            if (it != _pendingReward.end() && it->second != 0.0f) {
+                float r = it->second;
+                it->second = 0.0f;
+                return r;
+            }
+            return 0.0f;
+        }
+    };
+
+    // ============================================================================
+    // AIR ROLL REWARD — Rev 1.0 (2026-02-23, NJH)
+    //
+    // Per-frame reward for actively using air roll while airborne.
+    // Encourages the bot to develop aerial rotation habit — prerequisite for
+    // flip resets, aerial redirects, and musty flicks.
+    //
+    // Detection: player is airborne AND |prevAction.roll| > ROLL_THRESHOLD.
+    // Roll action range is [-1, 1]; threshold 0.5 requires a committed roll
+    // input rather than incidental analog drift from the network.
+    //
+    // Framerate-independent: REWARD_PER_SECOND scaled by deltaTime each step.
+    // No PreStep needed — fully stateless, read-only in GetReward.
+    //
+    // Constants:
+    //   ROLL_THRESHOLD    = 0.5f  — min |roll| considered intentional
+    //   REWARD_PER_SECOND = 1.0f  — reward rate while actively rolling
+    //
+    // Typical exposure: at 120 ticks/s with 8-tick skip → ~15 steps/s.
+    // Continuous rolling yields 1.0 * (8/120) ≈ 0.067 per step, ~1.0/s total.
+    // At weight 5 in training: ~5.0 reward units/s for sustained air rolling.
+    // ============================================================================
+    class AirRollReward : public Reward {
+    private:
+        static constexpr float ROLL_THRESHOLD    = 0.5f;
+        static constexpr float REWARD_PER_SECOND = 1.0f;
+
+    public:
+        virtual float GetReward(const Player& player, const GameState& state, bool) override {
+            // Must be airborne
+            if (player.isOnGround) return 0.0f;
+
+            // Must be actively rolling — |roll| > 0.5 filters out zero input
+            if (fabsf(player.prevAction.roll) <= ROLL_THRESHOLD || player.pos.z < 300.0f) return 0.0f;
+
+            // Only reward when climbing (+Z velocity) or already high up (Z >= 600)
+            if (player.vel.z <= 0.0f && player.pos.z < 600.0f) return 0.0f;
+
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            return REWARD_PER_SECOND * dt;
+        }
+    };
+
 } // namespace RLGC
