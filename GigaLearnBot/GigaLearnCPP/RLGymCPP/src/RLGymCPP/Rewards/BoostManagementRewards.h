@@ -755,6 +755,8 @@ namespace RLGC {
             float defensiveReductionFactor = 0.5f;
             float dribbleReductionFactor = 0.3f;
             float rotationReductionFactor = 0.7f;
+            float minBoostRemaining = 50.0f;              // Don't penalize if remaining boost is above this (boost to land quicker is OK)
+            float minBoostRetentionRatio = 0.5f;         // Don't penalize if kept at least 50% of previous boost
             bool enablePenalty = true;
         };
 
@@ -906,6 +908,16 @@ namespace RLGC {
             }
 
             if (inContestablePosition) {
+                previousBoost[player.carId] = currentBoost;
+                previousSpeed[player.carId] = currentSpeed;
+                return 0.0f;
+            }
+
+            // Don't penalize if player used boost to land quicker but maintained good boost reserves
+            // This happens when: recovering from air, using boost to accelerate recovery, but still has plenty left
+            bool hasGoodBoostRemaining = currentBoost >= config.minBoostRemaining;
+            bool maintainedBoostRatio = (prev_boost > 0.0f && currentBoost >= prev_boost * config.minBoostRetentionRatio);
+            if (hasGoodBoostRemaining || maintainedBoostRatio) {
                 previousBoost[player.carId] = currentBoost;
                 previousSpeed[player.carId] = currentSpeed;
                 return 0.0f;

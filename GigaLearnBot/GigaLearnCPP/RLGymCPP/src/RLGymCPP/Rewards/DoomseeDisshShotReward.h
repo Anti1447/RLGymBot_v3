@@ -42,6 +42,7 @@ namespace RLGC {
 			float phaseStartTime = 0.0f;
 			float sequenceStartTime = 0.0f;
 			float totalElapsedTime = 0.0f;
+			float timeAccum = 0.0f;  // per-player elapsed time (avoids globalTime × N-players bug)
 
 			// Sequence metrics
 			float minBallSpeed = FLT_MAX;
@@ -61,7 +62,6 @@ namespace RLGC {
 
 	private:
 		mutable std::map<uint32_t, DoomseeState> playerStates;
-		mutable float globalTime = 0.0f;
 
 		// Phase timeouts
 		static constexpr float PHASE_1_TIMEOUT = 3.5f;
@@ -105,16 +105,14 @@ namespace RLGC {
 	public:
 		virtual void Reset(const GameState& initialState) override {
 			playerStates.clear();
-			globalTime = 0.0f;
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.prev) return 0.0f;
 
 			float dt = state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
-			globalTime += dt;
-
 			auto& dState = playerStates[player.carId];
+			dState.timeAccum += dt;  // per-player clock — not shared, advances once per player per step
 			const Player& prevPlayer = state.prev->players[player.index];
 
 			// ====================================================================
@@ -123,8 +121,8 @@ namespace RLGC {
 			if (dState.phase == DoomseeState::IDLE) {
 				if (ShouldEnterBackboardApproach(player, state)) {
 					dState.phase = DoomseeState::BACKBOARD_APPROACH;
-					dState.phaseStartTime = globalTime;
-					dState.sequenceStartTime = globalTime;
+					dState.phaseStartTime = dState.timeAccum;
+					dState.sequenceStartTime = dState.timeAccum;
 					dState.accumulatedReward = 0.0f;
 					return 0.0f;
 				}
@@ -132,8 +130,8 @@ namespace RLGC {
 			}
 
 			// Check for phase timeout
-			float phaseElapsed = globalTime - dState.phaseStartTime;
-			float sequenceElapsed = globalTime - dState.sequenceStartTime;
+			float phaseElapsed = dState.timeAccum - dState.phaseStartTime;
+			float sequenceElapsed = dState.timeAccum - dState.sequenceStartTime;
 			bool phaseTimedOut = false;
 
 			switch (dState.phase) {
@@ -172,7 +170,7 @@ namespace RLGC {
 					// Check transition
 					if (ShouldEnterSlowRoll(player, state, dState)) {
 						dState.phase = DoomseeState::SLOW_ROLL_TRACKING;
-						dState.phaseStartTime = globalTime;
+						dState.phaseStartTime = dState.timeAccum;
 					}
 					break;
 
@@ -181,7 +179,7 @@ namespace RLGC {
 					// Check transition
 					if (ShouldEnterDishSetup(player, state, dState)) {
 						dState.phase = DoomseeState::DISH_SETUP;
-						dState.phaseStartTime = globalTime;
+						dState.phaseStartTime = dState.timeAccum;
 						dState.ballSpeedAtDish = state.ball.vel.Length();
 					}
 					break;
@@ -198,7 +196,7 @@ namespace RLGC {
 					// Check transition
 					if (ShouldEnterGravityDrop(player, state, dState)) {
 						dState.phase = DoomseeState::GRAVITY_DROP;
-						dState.phaseStartTime = globalTime;
+						dState.phaseStartTime = dState.timeAccum;
 						dState.maxBallHeightDuringDrop = state.ball.pos.z;
 					}
 					break;
@@ -210,7 +208,7 @@ namespace RLGC {
 					// Check transition
 					if (ShouldEnterAerialConversion(player, state, dState)) {
 						dState.phase = DoomseeState::AERIAL_CONVERSION;
-						dState.phaseStartTime = globalTime;
+						dState.phaseStartTime = dState.timeAccum;
 					}
 					break;
 
@@ -250,13 +248,12 @@ namespace RLGC {
 		// ====================================================================
 
 		bool IsBallNearBackboard(const Vec& ballPos) const {
-			bool inZone = ballPos.z < BACKBOARD_ZONE_Z;
-			float distToGoalLine = RS_MIN(
-				fabs(fabs(ballPos.y) - CommonValues::BACK_WALL_Y),
-				fabs(fabs(ballPos.x) - CommonValues::SIDE_WALL_X)
-			);
-			bool nearGoalLine = distToGoalLine < BACKBOARD_ZONE_DIST_TO_GOAL;
-			return inZone && nearGoalLine;
+			// Check only back wall Y-distance — the old RS_MIN(backWall, sideWall) fired for ANY
+			// ball near ANY side wall (e.g. midfield side wall at x=3700), causing constant triggers.
+			float distToBackWall = fabsf(fabsf(ballPos.y) - CommonValues::BACK_WALL_Y);
+			bool nearBackWall    = distToBackWall < 400.0f;   // within 400 UU of back wall
+			bool lowEnough       = ballPos.z < 300.0f;        // ball low (not airborne above backboard)
+			return nearBackWall && lowEnough;
 		}
 
 		bool IsBallRollingSlowly(const Vec& ballVel) const {
@@ -313,7 +310,7 @@ namespace RLGC {
 
 		bool ShouldEnterSlowRoll(const Player& player, const GameState& state,
 		                         const DoomseeState& dState) const {
-			if (globalTime - dState.phaseStartTime + 0.05f > PHASE_1_TIMEOUT) return false;
+			if (dState.timeAccum - dState.phaseStartTime + 0.05f > PHASE_1_TIMEOUT) return false;
 			float distToBall = (player.pos - state.ball.pos).Length();
 			if (distToBall > 300.0f) return false;
 			return IsBallRollingSlowly(state.ball.vel);
@@ -321,7 +318,7 @@ namespace RLGC {
 
 		bool ShouldEnterDishSetup(const Player& player, const GameState& state,
 		                          const DoomseeState& dState) const {
-			if (globalTime - dState.phaseStartTime + 0.05f > PHASE_2_TIMEOUT) return false;
+			if (dState.timeAccum - dState.phaseStartTime + 0.05f > PHASE_2_TIMEOUT) return false;
 			if (state.ball.vel.Length() > 150.0f) return false;
 			return IsPlayerSetupForDish(player, state);
 		}
@@ -362,21 +359,12 @@ namespace RLGC {
 
 		float GetBackboardApproachReward(const Player& player, const GameState& state,
 		                                  const DoomseeState& dState) const {
-			float reward = 0.0f;
-
-			float distToBall = (player.pos - state.ball.pos).Length();
-			if (distToBall > APPROACH_DISTANCE) return 0.0f;
-
-			float proximity = 1.0f - RS_CLAMP(distToBall / APPROACH_DISTANCE, 0.0f, 1.0f);
-			reward += 0.08f * proximity;
-
-			float backboardDist = DistToBackboardSurface(player.pos);
-			if (backboardDist < 300.0f) {
-				float backboardBonus = (1.0f - RS_CLAMP(backboardDist / 300.0f, 0.0f, 1.0f)) * 0.05f;
-				reward += backboardBonus;
+			// One-time entry bonus only — the old per-frame proximity shaping (~0.08–0.13/step)
+			// accumulated to ~1.2 reward/sec for normal play near any wall, swamping the sparse signal.
+			if (dState.timeAccum - dState.phaseStartTime < 0.1f) {
+				return 0.3f;
 			}
-
-			return reward;
+			return 0.0f;
 		}
 
 		float GetSlowRollReward(const Player& player, const GameState& state,
@@ -420,7 +408,7 @@ namespace RLGC {
 			float reward = 0.0f;
 
 			// One-time entry bonus
-			if (globalTime - dState.phaseStartTime < 0.05f) {
+			if (dState.timeAccum - dState.phaseStartTime < 0.05f) {
 				reward += ENTRY_BONUS_PHASE_3;
 			}
 

@@ -1774,12 +1774,34 @@ namespace RLGC {
 
             // Check if player is between ball and goal
             float alignment = ballToPlayer.Normalized().Dot(goalDir);
-            if (alignment < 0.0f) return 0.0f; // Wrong side
+
+            // P0: Soft penalty for wrong side (gradient instead of hard zero)
+            // Map [-0.3, 0] to [0, 0.15] reward for overshooting goal line
+            // Beyond -0.3: clamp to -0.3 (don't penalize harshly for far overshoots)
+            if (alignment < 0.0f) {
+                alignment = RS_CLAMP(alignment, -0.3f, 0.0f) * 0.5f;  // Result in [-0.15, 0]
+            }
 
             // Reward for being in defensive position (distance to defensive line)
             float distToDefensiveLine = fabs(ballToPlayer.Dot(goalDir));
-            float optimalDistance = 2000.0f;
-            float distanceReward = 1.0f / (1.0f + fabs(distToDefensiveLine - optimalDistance) / 1000.0f);
+
+            // P1: Tighter bell-curve with optimal zone 1800-2200 UU
+            // Provides clearer feedback on positioning accuracy
+            static constexpr float optimalMin = 1800.0f;
+            static constexpr float optimalMax = 2200.0f;
+            float distanceReward;
+
+            if (distToDefensiveLine >= optimalMin && distToDefensiveLine <= optimalMax) {
+                distanceReward = 1.0f;  // Full reward in sweet spot
+            } else {
+                // Smooth decay outside optimal range (0.67% penalty per 100 UU)
+                float distFromOptimal = (distToDefensiveLine < optimalMin) ?
+                    (optimalMin - distToDefensiveLine) :
+                    (distToDefensiveLine - optimalMax);
+
+                // Decay from 1.0 to 0.2 over 1500 UU beyond optimal
+                distanceReward = 1.0f - RS_CLAMP(distFromOptimal / 1500.0f, 0.0f, 0.8f);
+            }
 
             // Base score
             float baseScore = alignment * distanceReward;
@@ -1807,9 +1829,18 @@ namespace RLGC {
                 proximityFactor = 1.0f - 0.65f * t; // in [1.0 .. 0.35]
             }
 
-            // --- Opponent movement threat boost ---
-            float opponentInfluenceRadius = 1500.0f;
+            // --- Opponent movement threat boost (P1 improvements) ---
+            // P1: Adaptive threat radius based on game mode (fewer opponents = tighter detection)
+            int numEnemies = 0;
+            for (const auto& p : state.players) {
+                if (p.team != player.team && !p.isDemoed) numEnemies++;
+            }
+            float opponentInfluenceRadius = (numEnemies == 1) ? 1000.0f :  // 1v1: tight
+                                             (numEnemies == 2) ? 1500.0f :  // 2v2: medium
+                                             2000.0f;  // 3v3: wide threat detection
+
             float threatSum = 0.0f;
+            int threatCount = 0;
 
             for (const auto& opp : state.players) {
                 if (opp.team == player.team) continue;
@@ -1820,17 +1851,16 @@ namespace RLGC {
                 float minD = RS_MIN(dToBall, dToPlayer);
                 if (minD > opponentInfluenceRadius) continue;
 
-                // Check movement toward ball and/or toward player
-                float alignmentToBall = 0.0f;
-                float alignmentToPlayer = 0.0f;
+                // P1: Skip stationary opponents (no threat)
                 float vlen = opp.vel.Length();
-                if (vlen > 1e-4f) {
-                    Vec velN = opp.vel.Normalized();
-                    Vec toBallN = (state.ball.pos - opp.pos).Normalized();
-                    Vec toPlayerN = (player.pos - opp.pos).Normalized();
-                    alignmentToBall = RS_MAX(0.0f, velN.Dot(toBallN));
-                    alignmentToPlayer = RS_MAX(0.0f, velN.Dot(toPlayerN));
-                }
+                if (vlen < 1e-4f) continue;
+
+                // Check movement toward ball and/or toward player
+                Vec velN = opp.vel.Normalized();
+                Vec toBallN = (state.ball.pos - opp.pos).Normalized();
+                Vec toPlayerN = (player.pos - opp.pos).Normalized();
+                float alignmentToBall = RS_MAX(0.0f, velN.Dot(toBallN));
+                float alignmentToPlayer = RS_MAX(0.0f, velN.Dot(toPlayerN));
 
                 float align = RS_MAX(alignmentToBall, alignmentToPlayer); // 0..1
 
@@ -1838,12 +1868,15 @@ namespace RLGC {
                 float closeness = 1.0f - RS_CLAMP(minD / opponentInfluenceRadius, 0.0f, 1.0f);
 
                 float contrib = align * closeness;
-                // keep max contribution across opponents (we care about the strongest nearby threat)
-                threatSum = RS_MAX(threatSum, contrib);
+                // P1: ACCUMULATE threat from multiple opponents (not just max)
+                // Correctly handles multiple simultaneous threats
+                threatSum += contrib;
+                threatCount++;
             }
 
-            // threatSum in [0,1]. Convert to multiplicative boost up to +75% at full threat.
-            float threatMultiplier = 1.0f + 0.75f * threatSum;
+            // P1: Scale threat - cap at 2.0 for 2.0x multiplier (up from 1.75x)
+            threatSum = RS_MIN(threatSum, 2.0f);
+            float threatMultiplier = 1.0f + 0.5f * threatSum;  // [1.0, 2.0] range
 
             // --- Half-field penalty: if we're on the opponent's half, reduce defensive weighting ---
             bool onOpponentHalf = (player.team == Team::BLUE && player.pos.y > 0.0f) ||

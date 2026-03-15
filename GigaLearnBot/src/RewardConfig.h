@@ -35,9 +35,11 @@
 #include <RLGymCPP/Rewards/KickoffRandomizationReward.h>
 #include <RLGymCPP/Rewards/KickoffNoChaseTeamPenalty.h>
 #include <RLGymCPP/Rewards/AirDribbleUtilities.h>
+#include <RLGymCPP/Rewards/AirDribbleBumpReward.h>
 #include <RLGymCPP/Rewards/CompositeFlickReward.h>
 #include <RLGymCPP/Rewards/GoalMultiplierReward.h>
 #include <RLGymCPP/Rewards/ShootingRewards.h>
+#include <RLGymCPP/Rewards/SpatialPassingLaneRewards.h>
 using namespace RLGC;
 
 enum class TrainingPhase {

@@ -18,18 +18,29 @@ namespace RLGC {
     //
     // Rev 1.0 (2025-01-15, NJH)
     class DoubleCommitPenalty : public Reward {
+    private:
+        // State tracking for event-based penalty with timing window
+        mutable std::map<uint32_t, float> commitStartTime;  // When teammate commit began for this player
+
     public:
-        float commitDistance;      // Distance within which bots are "committing"
-        float penaltyPerBot;       // Punishment per additional committing teammate
+        float commitDistance;       // Distance within which bots are "committing"
+        float penaltyPerBot;        // Punishment per additional committing teammate
         float minDistBeforePenalty; // Don't penalize if ball is extremely close
+        float commitThreshold;      // Time (seconds) before penalty applies (default 0.5s)
 
         DoubleCommitPenalty(
             float distance = 1500.0f,
             float penalty = 0.1f,
-            float minDist = 300.0f
+            float minDist = 300.0f,
+            float threshold = 0.5f
         ) : commitDistance(distance),
             penaltyPerBot(penalty),
-            minDistBeforePenalty(minDist) {
+            minDistBeforePenalty(minDist),
+            commitThreshold(threshold) {
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            commitStartTime.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -41,7 +52,27 @@ namespace RLGC {
             // Don't penalize if we're basically on the ball
             if (distToBall < minDistBeforePenalty) return 0.0f;
 
-            // Count how many teammates are within commit range of ball
+            // Helper: Check if teammate is actively heading toward ball (intent detection)
+            auto IsActivelyCommitting = [&](const Player& p) -> bool {
+                if (p.isDemoed) return false;
+
+                Vec toBallTeammate = (state.ball.pos - p.pos);
+                float distToBallTeammate = toBallTeammate.Length();
+
+                // If already on ball, definitely committing
+                if (distToBallTeammate < 1e-3f) return true;
+
+                // Check if velocity is aligned with ball direction
+                Vec ballDir = toBallTeammate.Normalized();
+                float velocityAlignment = p.vel.Dot(ballDir);
+                float speed = p.vel.Length();
+
+                // Actively committing: moving toward ball at >300 UU/s
+                // AND velocity vector aligned with ball (dot > 0.3 ≈ 73° cone)
+                return (speed > 300.0f && velocityAlignment > 0.3f * speed);
+            };
+
+            // Count how many teammates are within commit range AND actively heading toward ball
             int commitCount = 0;
             for (const auto& teammate : state.players) {
                 if (teammate.team != player.team) continue;
@@ -50,14 +81,35 @@ namespace RLGC {
 
                 float tmDist = (state.ball.pos - teammate.pos).Length();
                 if (tmDist < commitDistance) {
-                    commitCount++;
+                    // NEW: Only count if ALSO actively heading toward ball
+                    if (IsActivelyCommitting(teammate)) {
+                        commitCount++;
+                    }
                 }
             }
 
-            // First teammate is allowed (2v2 has 2 per team, so max 1 other)
-            // Penalize for each additional one
-            if (commitCount > 0) {
-                return -penaltyPerBot * commitCount;  // Immediate continuous penalty
+            // NEW: Event-based penalty with timing window
+            // Only apply penalty if 2+ teammates are committing
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+            uint32_t playerId = player.carId;
+
+            if (commitCount > 1) {
+                // First frame of commit: initialize timer
+                if (commitStartTime.find(playerId) == commitStartTime.end()) {
+                    commitStartTime[playerId] = 0.0f;
+                }
+
+                // Increment commit timer
+                commitStartTime[playerId] += dt;
+
+                // Only apply penalty if overlap persists > threshold (default 0.5s)
+                // This prevents false positives from brief rotations and is frame-rate independent
+                if (commitStartTime[playerId] > commitThreshold) {
+                    return -penaltyPerBot * (commitCount - 1);  // Penalize only extra teammates
+                }
+            } else {
+                // Reset timer when separation occurs (fewer teammates in range)
+                commitStartTime.erase(playerId);
             }
 
             return 0.0f;

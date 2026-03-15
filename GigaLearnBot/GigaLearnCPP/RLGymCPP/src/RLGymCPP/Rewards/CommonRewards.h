@@ -84,21 +84,36 @@ namespace RLGC {
 	};
 
 	// 2025-12-17 | Rev 1.1 | NJH
-// - Speed-scaled Shot / Save / Goal rewards.
-// - <= 50 kph => 0.5x
-// - >= 120 kph => 1.0x
-// - linear ramp in-between
+	// 2026-03-08 | Rev 1.2 | NJH — replaced SpeedScale_50to140kph with SpeedScale_PowerShot
+	// Speed-scaled Shot / Save / Goal rewards.
 	inline float BallSpeedKph(const GameState& state) {
 		// uu/s; uu = 1 cm => 1 uu/s = 0.01 m/s = 0.036 kph
 		return state.ball.vel.Length() * 0.036f;
 	}
 
+	// Legacy linear scale (50-140 kph, 0.5x-1.0x). Kept for any future use.
 	inline float SpeedScale_50to140kph(const GameState& state) {
 		float kph = BallSpeedKph(state);
 		if (kph <= 50.0f) return 0.5f;
 		if (kph >= 140.0f) return 1.0f;
 		float t = (kph - 50.0f) / (140.0f - 50.0f); // 0..1
 		return 0.5f + 0.5f * t;
+	}
+
+	// Power shot scale: two-segment linear ramp.
+	// <= 50 kph  => 0.1x  (tap shots get almost nothing)
+	// >= 100 kph => 1.0x  (baseline full reward)
+	// >= 140 kph => 1.5x  (bonus for hard shots/saves)
+	inline float SpeedScale_PowerShot(const GameState& state) {
+		float kph = BallSpeedKph(state);
+		if (kph <= 50.0f)  return 0.1f;
+		if (kph >= 140.0f) return 1.5f;
+		if (kph >= 100.0f) {
+			float t = (kph - 100.0f) / (140.0f - 100.0f); // 0..1
+			return 1.0f + 0.5f * t;                        // 1.0 -> 1.5
+		}
+		float t = (kph - 50.0f) / (100.0f - 50.0f); // 0..1
+		return 0.1f + 0.9f * t;                      // 0.1 -> 1.0
 	}
 
 	class SpeedScaledShotReward : public Reward {
@@ -108,7 +123,7 @@ namespace RLGC {
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			float r = inner.GetReward(player, state, isFinal);
 			if (r == 0.0f) return 0.0f;
-			return r * SpeedScale_50to140kph(state);
+			return r * SpeedScale_PowerShot(state);
 		}
 	};
 
@@ -119,7 +134,7 @@ namespace RLGC {
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			float r = inner.GetReward(player, state, isFinal);
 			if (r == 0.0f) return 0.0f;
-			return r * SpeedScale_50to140kph(state);
+			return r * SpeedScale_PowerShot(state);
 		}
 	};
 
@@ -136,7 +151,7 @@ namespace RLGC {
 
 			// Only scale the positive "we scored" side (leave concedeScale untouched)
 			if (r > 0.0f) {
-				return r * SpeedScale_50to140kph(state);
+				return r * SpeedScale_PowerShot(state);
 			}
 			return r;
 		}
@@ -168,6 +183,68 @@ namespace RLGC {
 			
 			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
 			return ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
+		}
+	};
+
+	// ============================================================================
+	// EnhancedVelocityBallToGoalReward (Improved variant with distance + intent weighting)
+	// 2026-03-06 | Rev 1.0 | Claude / NJH
+	// Strategy 4 (Composite Enhanced): Distance weighting + Intent gating + Alignment threshold
+	// - Favors closer shots (distance multiplier: 1.0x at 2000 UU, 0.4x at 5000 UU)
+	// - Rewards active touches with +0.25 bonus
+	// - Requires MIN_ALIGNMENT >= 0.15 (~82°) to avoid rewarding sideways motion
+	// - Gradual migration from original variant over 20B steps
+	// ============================================================================
+	class EnhancedVelocityBallToGoalReward : public Reward {
+	private:
+		static constexpr float TOUCH_BONUS = 0.25f;             // +25% for active touches
+		static constexpr float OPTIMAL_SHOT_DISTANCE = 2000.0f; // Peak reward distance
+		static constexpr float MAX_REWARD_DISTANCE = 5000.0f;   // Decay cutoff
+		static constexpr float MIN_ALIGNMENT = 0.15f;           // ~82° angle min
+
+	public:
+		bool ownGoal = false;
+		EnhancedVelocityBallToGoalReward(bool ownGoal = false) : ownGoal(ownGoal) {}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			bool targetOrangeGoal = player.team == Team::BLUE;
+			if (ownGoal)
+				targetOrangeGoal = !targetOrangeGoal;
+
+			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+
+			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
+			float goalAlignment = ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
+
+			// Must be at least somewhat aimed at goal
+			if (goalAlignment < MIN_ALIGNMENT) return 0.0f;
+
+			// Clamp to [0, 1] for conservative reward
+			float baseAlignment = RS_CLAMP(goalAlignment, 0.0f, 1.0f);
+
+			// Distance weighting: favor shots closer to goal
+			float distToGoal = (state.ball.pos - targetPos).Length();
+			float distanceWeight = 1.0f;
+
+			if (distToGoal < OPTIMAL_SHOT_DISTANCE) {
+				// In optimal range: full reward
+				distanceWeight = 1.0f;
+			} else if (distToGoal < MAX_REWARD_DISTANCE) {
+				// Decay beyond optimal
+				float decay = (distToGoal - OPTIMAL_SHOT_DISTANCE) / (MAX_REWARD_DISTANCE - OPTIMAL_SHOT_DISTANCE);
+				distanceWeight = 1.0f - 0.6f * decay;  // 1.0x at optimal, 0.4x at max
+			} else {
+				return 0.0f;  // Too far, no reward
+			}
+
+			float reward = baseAlignment * distanceWeight;
+
+			// Intent bonus: reward active touches more heavily
+			if (player.ballTouchedStep) {
+				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.3f);
+			}
+
+			return reward;
 		}
 	};
 
@@ -873,9 +950,18 @@ namespace RLGC {
 	// If two players are equidistant, rewards the leftmost player (smallest x)
 	// Fires every step regardless of game phase — see ClosestPlayerKickoffSpeedReward
 	// for the kickoff-only variant.
+	// minPlayers (default 4): skip entirely if fewer total players are in the game.
+	//   4 = 2v2 and 3v3 only (skips 1v1); 2 = all game modes.
 	class ClosestPlayerSpeedReward : public Reward {
+	private:
+		int _minPlayers;
 	public:
+		ClosestPlayerSpeedReward(int minPlayers = 6) : _minPlayers(minPlayers) {}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if ((int)state.players.size() < _minPlayers)
+				return 0.0f;
+
 			// Find the closest teammate to the ball
 			float closestDist = std::numeric_limits<float>::max();
 			int closestIdx = -1;

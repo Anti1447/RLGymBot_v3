@@ -79,7 +79,24 @@
       "Bash(echo:*)",
       "Bash(Get-Content \"C:\\\\Users\\\\nhafe\\\\.claude\\\\projects\\\\C--Projects-RLGymBot-v3\\\\b9c25953-6ed4-4b62-9dd8-e11fb0aec786\\\\tool-results\\\\b10ba5b.txt\")",
       "Bash(Select-String -Pattern \"error|Build succeeded|failed\" -CaseSensitive:$false)",
-      "Bash(Select-Object -Last 30)"
+      "Bash(Select-Object -Last 30)",
+      "Bash(Select-String -Pattern \"error|warning C4|GigaLearnBot.exe\")",
+      "Bash(Select-Object -First 30)",
+      "Bash(awk 'NR>=420 && NR<=625 && /TimeToBalPossession/' /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.cpp)",
+      "Bash(awk 'NR>=420 && NR<=625' /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.cpp)",
+      "Bash(awk 'NR>=189 && NR<=425' /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.cpp)",
+      "Bash(awk 'NR>=189 && NR<=420' /c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.cpp)",
+      "Bash(where python3)",
+      "Bash(where python)",
+      "Bash(where py)",
+      "Bash(C:UsersnhafeAppDataLocalProgramsPythonPython311python.exe -:*)",
+      "Bash(/tmp/positioning_edit.py:*)",
+      "Bash(powershell.exe -Command \"& ''C:\\\\Users\\\\nhafe\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe'' ''C:\\\\tmp\\\\positioning_edit.py'' 2>&1\")",
+      "Bash(powershell.exe -Command \"Write-Output $env:TEMP\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\GigaLearnCPP\\\\RLGymCPP\\\\src\\\\RLGymCPP\\\\Rewards\\\\PositioningRewards.h | Select-Object Name, Length\")",
+      "Bash(powershell.exe -NoProfile -Command \":*)",
+      "Bash(powershell.exe -NoProfile:*)",
+      "Bash(grep -l \"state\\\\.players\\\\.size\\(\\)\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)"
     ]
   }
 }

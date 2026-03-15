@@ -102,24 +102,34 @@ public:
     }
 };
 
-// Rev 2.1 (2026-02-22, NJH)
-// Landing on at least 3 wheels after aerial on any surface (ground, wall, ceiling).
+// Rev 2.2 (2026-03-04, NJH)
+// Landing on at least 2 wheels after aerial on any surface (ground, wall, ceiling).
 //
 // Improvements over Rev 1.0:
 //  - Minimum airtime gate (0.2s) — micro-hops are ignored.
 //  - Airtime scaling: payout scales 1.0x→2.0x from 0.2s to 3.0s+ airtime.
 //  - Wall nose-down bonus: +0.3 when far from ball (>1000 UU) and nose is
 //    pointing downward (rotMat.forward.z < -0.5) — ideal recovery posture.
-//  - Wall misalignment penalty: -0.3 * scale for side/back wall impacts.
 //  - PreStep tracks landing events cleanly; GetReward is read-only.
 //
 // Rev 2.1 changes (ceiling):
 //  - Ceiling wheel-check gate: <3 wheels on ceiling → -1.0 * scale penalty.
 //    Catches roof/hood smashes and glancing ceiling contacts.
-//  - Raised ceiling rewards: perfect (alignment < -0.85) now pays 3.0 * scale
-//    (up from 1.5). Great alignment pays 2.0, acceptable pays 1.0.
-//  - Ceiling misalignment now always penalizes: hood contact → -1.5 * scale,
-//    sideways → -0.5 * scale. Previously mediocre ceiling gave +0.2 (no penalty).
+//  - Raised ceiling rewards: perfect alignment pays 3.0 * scale.
+//  - Ceiling misalignment always penalizes: up to -1.5 * scale.
+//
+// Rev 2.2 changes (code review pass):
+//  - Zero-normal fallback now uses car position to estimate surface type
+//    (ceiling / wall / ground) before choosing the fallback formula. Previously
+//    it always used carUp.z, giving 0 reward to proper ceiling landings when
+//    contactNormal was zero on the landing frame.
+//  - Ceiling reward is now a single continuous curve across [-1,+1] alignment.
+//    Previously had a hard jump from 0→-0.5 at alignment=0.5 (0.56/step
+//    discontinuity). Now: alignment≥0 → 0→+3.0, alignment<0 → 0→-1.5.
+//  - Wall misalignment penalty is now a smooth curve: 0 at alignment=0.3,
+//    -0.5 at alignment=-1.0. Previously a flat -0.3 for all alignment≤0.3.
+//  - Ground misaligned landings now penalized: smooth 0→-0.3 curve for
+//    alignment < 0.3 (consistent with wall behavior; previously returned 0).
 class ProperLandingReward : public Reward {
 private:
     static constexpr float MIN_AIR_TIME       = 0.2f;   // ignore hops shorter than 200ms
@@ -165,15 +175,16 @@ public:
         if (airTime < MIN_AIR_TIME)
             return 0.0f; // trivial hop — ignore
 
-        // Require 3+ wheels for a proper landing
+        // Require 2+ wheels for a proper landing (isOnGround can be true with only 2 wheels
+        // on glancing/diagonal landings — matching on 3 discards real landings)
         int wheels = 0;
         for (int i = 0; i < 4; i++)
             if (player.wheelsWithContact[i]) wheels++;
-        if (wheels < 3)
+        if (wheels < 2)
             return 0.0f;
-
-        if (!player.worldContact.hasContact)
-            return 0.0f;
+        // Note: worldContact.hasContact gate removed — on the exact landing frame in
+        // RocketSim's 8-tick step, worldContact may not be populated yet even though
+        // isOnGround flipped to true. The hasContact gate silently dropped valid landings.
 
         // Airtime scale: 1.0x at MIN_AIR_TIME, up to 2.0x at AIR_TIME_SCALE_MAX
         float airtimeScale = 1.0f + RS_CLAMP(
@@ -185,6 +196,34 @@ public:
         Vec  carUp          = player.rotMat.up;
         float alignment     = carUp.Dot(surfaceNormal);
 
+        // Zero-normal guard: on the exact landing frame in RocketSim's 8-tick sub-step,
+        // contactNormal may not be populated yet even though isOnGround flipped to true.
+        // Use car position to estimate the likely surface instead of blindly assuming ground.
+        if (surfaceNormal.Length() < 0.1f) {
+            const float dx    = CommonValues::SIDE_WALL_X - std::abs(player.pos.x);
+            const float dy    = CommonValues::BACK_WALL_Y - std::abs(player.pos.y);
+            const float dCeil = CommonValues::CEILING_Z   - player.pos.z;
+            const float near  = 150.0f; // UU — close enough to be on that surface
+
+            bool nearCeiling = (dCeil < near);
+            bool nearWall    = !nearCeiling && (dx < near || dy < near);
+
+            if (nearCeiling) {
+                // Ceiling fallback: carUp.z ≈ -1 for proper inversion
+                float alignScore = RS_CLAMP((-carUp.z - 0.3f) / 0.7f, 0.0f, 1.0f);
+                return alignScore * 1.5f * airtimeScale;
+            } else if (nearWall) {
+                // Wall fallback: horizontal carUp magnitude ≈ 1.0 for a proper wall landing
+                float hLen       = std::sqrt(carUp.x*carUp.x + carUp.y*carUp.y);
+                float alignScore = RS_CLAMP((hLen - 0.3f) / 0.7f, 0.0f, 1.0f);
+                return alignScore * 0.8f * airtimeScale;
+            } else {
+                // Ground fallback: carUp.z ≈ +1 for a right-side-up landing
+                float alignScore = RS_CLAMP((carUp.z - 0.3f) / 0.7f, 0.0f, 1.0f);
+                return alignScore * 1.0f * airtimeScale;
+            }
+        }
+
         // Surface type detection via contact normal
         bool isCeilingContact = surfaceNormal.z < -0.5f;
         bool isWallContact    = !isCeilingContact && (std::abs(surfaceNormal.z) < 0.5f);
@@ -193,13 +232,10 @@ public:
             // ---------------------------------------------------------------
             // CEILING CONTACT — car must be upside-down (wheels on ceiling)
             // ---------------------------------------------------------------
-            // alignment < 0: carUp and ceilingNormal both point downward (correct)
-            // alignment > 0: car is right-side-up — hood/roof hitting ceiling (bad)
-            //
-            // Ceiling landings are hard and valuable for ceiling shots / flip resets.
-            // We want to strongly reward proper wheel contact and strongly penalize
-            // any non-wheel ceiling contact (roof/hood/side), since those indicate
-            // the car is floating into the ceiling rather than intentionally riding it.
+            // Ceiling contactNormal ≈ {0,0,-1} (points INTO arena, downward).
+            // Properly inverted car: rotMat.up.z ≈ -1 (wheels face ceiling, roof faces floor).
+            // alignment = carUp.Dot(ceilingNormal) = (-1)*(-1) = +1.0 for perfect inversion.
+            // So alignment > 0 = good (inverted), alignment < 0 = bad (right-side-up smash).
             //
             // Wheel check first: if 3+ wheels are NOT on the ceiling (wheelsWithContact),
             // this is not a proper ceiling ride — penalize it.
@@ -209,27 +245,28 @@ public:
                 return -1.0f * airtimeScale;
             }
 
-            if (alignment < -0.85f)
-                return 3.0f * airtimeScale; // perfect: wheels flat on ceiling, very aligned
-            if (alignment < -0.7f)
-                return 2.0f * airtimeScale; // great
-            if (alignment < -0.5f)
-                return 1.0f * airtimeScale; // acceptable
-            if (alignment > 0.5f)
-                return -1.5f * airtimeScale; // hood/roof smash — strong penalty
-            return -0.5f * airtimeScale;    // sideways/poor alignment — penalize
+            // Continuous curve across full [-1, +1] alignment range (no hard step).
+            // Positive alignment = good inversion → up to +3.0 reward.
+            // Negative alignment = right-side-up smash → up to -1.5 penalty.
+            if (alignment >= 0.0f) {
+                float alignScore = RS_CLAMP(alignment, 0.0f, 1.0f);
+                return alignScore * 3.0f * airtimeScale;
+            } else {
+                float penaltyScore = RS_CLAMP(-alignment, 0.0f, 1.0f);
+                return -penaltyScore * 1.5f * airtimeScale;
+            }
 
         } else if (isWallContact) {
             // ---------------------------------------------------------------
             // WALL CONTACT — wheels should face away from the wall surface
             // ---------------------------------------------------------------
-            float baseReward;
-            if      (alignment > 0.9f) baseReward = 1.0f;  // excellent
-            else if (alignment > 0.7f) baseReward = 0.7f;  // good
-            else if (alignment > 0.5f) baseReward = 0.4f;  // acceptable
-            else if (alignment > 0.3f) baseReward = 0.1f;  // marginal
-            else
-                return -0.3f * airtimeScale; // side/back impact — penalize
+            if (alignment <= 0.3f) {
+                // Smooth penalty: 0 at alignment=0.3, -0.5 at alignment=-1.0
+                float penaltyScore = RS_CLAMP((0.3f - alignment) / 1.3f, 0.0f, 1.0f);
+                return -penaltyScore * 0.5f * airtimeScale;
+            }
+            // Smooth curve: 0 at alignment=0.3, 1.0 at alignment=1.0
+            float baseReward = RS_CLAMP((alignment - 0.3f) / 0.7f, 0.0f, 1.0f);
 
             // Nose-down bonus: when not near the ball, pointing nose down is
             // ideal recovery posture on walls (easier to drive off quickly).
@@ -243,9 +280,13 @@ public:
             // ---------------------------------------------------------------
             // GROUND CONTACT
             // ---------------------------------------------------------------
-            if      (alignment > 0.9f) return 1.0f * airtimeScale;
-            else if (alignment > 0.7f) return 0.7f * airtimeScale;
-            else if (alignment > 0.5f) return 0.4f * airtimeScale;
+            // Smooth curve: 0 at alignment=0.3, 1.0 at alignment=1.0
+            float alignScore = RS_CLAMP((alignment - 0.3f) / 0.7f, 0.0f, 1.0f);
+            if (alignScore > 0.0f)
+                return alignScore * 1.0f * airtimeScale;
+            // Smooth penalty for sideways/inverted ground landings: 0 at 0.3, -0.3 at -1.0
+            float penaltyScore = RS_CLAMP((0.3f - alignment) / 1.3f, 0.0f, 1.0f);
+            return -penaltyScore * 0.3f * airtimeScale;
         }
 
         return 0.0f;
@@ -2675,6 +2716,10 @@ private:
         float boostAtStart     = -1.0f;  // boost level when sequence opened (-1 = unset)
         Vec   playerPosAtStart = {};     // player position when sequence opened
         float timeSinceLastTouch = 0.0f; // seconds since last rewarded touch; 0 = sequence open
+
+        // NEW: Velocity tracking (distance-dependent requirements)
+        float initialBallVelocity = 0.0f;       // Ball speed when sequence started
+        float distanceToOpponentGoal = 0.0f;    // Distance from start position to opponent goal
     };
 
     mutable std::map<uint32_t, SequenceState> sequenceStates;
@@ -2699,6 +2744,50 @@ private:
     Mode DetectMode(const Player& player, const GameState& state) const {
         // Always use OFFENSIVE mode — air dribbles should always target the opponent's goal.
         return Mode::OFFENSIVE;
+    }
+
+    // ========================================================================
+    // VELOCITY REQUIREMENT HELPERS (NEW - Distance-dependent)
+    // ========================================================================
+
+    float GetDistanceToOpponentGoal(const Player& player, const GameState& state) const {
+        Vec oppGoal = (player.team == Team::BLUE) ?
+            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+        return (player.pos - oppGoal).Length();
+    }
+
+    float GetMinVelocityForDistance(float distanceToGoal) const {
+        // Distance-based minimum velocity requirements (scaled for 10240 UU field)
+        if (distanceToGoal >= 9000.0f) return 1800.0f;      // Very far (own corner ~9000+ UU)
+        if (distanceToGoal >= 7000.0f) return 1700.0f;      // Far
+        if (distanceToGoal >= 5000.0f) return 1500.0f;      // Medium
+        if (distanceToGoal >= 3000.0f) return 1200.0f;      // Close
+        return 0.0f;                                         // Very close - no minimum
+    }
+
+    float GetMaxBonusVelocity(float distanceToGoal) const {
+        // Optimal velocity ranges for bonuses (scaled for 10240 UU field)
+        if (distanceToGoal >= 9000.0f) return 2300.0f;
+        if (distanceToGoal >= 7000.0f) return 2200.0f;
+        if (distanceToGoal >= 5000.0f) return 2000.0f;
+        if (distanceToGoal >= 3000.0f) return 1800.0f;
+        return 1500.0f;
+    }
+
+    float GetInitialVelocityBonus(float ballVelocity, float distanceToGoal) const {
+        // Higher bonus for faster starts when far from goal
+        float minVelocity = GetMinVelocityForDistance(distanceToGoal);
+
+        if (ballVelocity < minVelocity && minVelocity > 0.0f) {
+            // Penalize slow starts from far away
+            float penalty = RS_CLAMP(ballVelocity / minVelocity, 0.5f, 1.0f);
+            return penalty;
+        }
+
+        // Bonus for exceeding minimum (up to 1.2x)
+        float maxVelocity = GetMaxBonusVelocity(distanceToGoal);
+        float bonus = RS_CLAMP((ballVelocity - minVelocity) / (maxVelocity - minVelocity), 0.0f, 0.2f);
+        return 1.0f + bonus;  // Range [1.0, 1.2x]
     }
 
     // ========================================================================
@@ -2833,21 +2922,12 @@ private:
 
         float reward = rewardBeforeDir * dirMul;
 
-        // Touch spacing multiplier: discourage rapid successive contacts (micro-taps),
-        // reward deliberate well-timed touches. First touch always exempt (touchCount == 0).
-        // Gap = 0s → 0.40x  |  gap >= 0.5s → 1.0x  |  linear between.
-        if (seq.touchCount > 0) {
-            constexpr float IDEAL_SPACING   = 0.5f;
-            constexpr float MIN_SPACING_MUL = 0.40f;
-            float spacingMult = RS_CLAMP(seq.timeSinceLastTouch / IDEAL_SPACING,
-                                         MIN_SPACING_MUL, 1.0f);
-            reward *= spacingMult;
-        }
-
-        // Entry/second-touch bonuses
-        if (seq.consecutiveAirTouches == 0) {
+        // Entry/second-touch bonuses (touchCount = qualifying touches rewarded so far;
+        // consecutiveAirTouches was already incremented before Evaluate* is called, so
+        // checking it against 0 never fired — touchCount is the correct gate here)
+        if (seq.touchCount == 0) {
             reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
-        } else if (seq.consecutiveAirTouches == 1) {
+        } else if (seq.touchCount == 1) {
             reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
         }
 
@@ -2888,23 +2968,9 @@ private:
             }
         }
 
-        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
-        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
-        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
-        if (seq.boostAtStart >= 0.0f) {
-            constexpr float MIN_BOOST   = 13.0f;
-            constexpr float BOOST_FLOOR = 13.0f;
-            constexpr float NEUTRAL_EFF = 80.0f;
-            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
-            if (boostConsumed < MIN_BOOST) {
-                return 0.0f;  // not a real air dribble — insufficient boost committed
-            }
-            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
-            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
-            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
-            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
-            reward *= efficiencyFactor;
-        }
+        // (Boost efficiency gate removed — boostAtStart was set at first-touch frame,
+        //  making boostConsumed = 0 on touch 1, so the gate always killed the first touch.
+        //  Quality is already filtered by directional multiplier + BallPred trajectory.)
 
         // Outplay multiplier: when an opponent is actively challenging, reward redirecting
         // the ball past them. Neutral (1.0x) when no challenger is present.
@@ -2917,23 +2983,21 @@ private:
             reward *= boostFactor;
         }
 
-        // Goal mouth bonus / backboard penalty via BallPred.
-        // Stage 1: ball crosses the goal plane through the opening → big bonus.
-        //   (BallPred does NOT bounce the ball in the goal opening, so slices continue
-        //    past BACK_WALL_Y only when the ball is actually goal-bound.)
-        // Stage 2: if not goal-bound, check hitBackboard — BallPred bounces the ball
-        //   off the solid back wall; if this happens within 2.5s, zero the reward.
+        // Goal mouth bonus via BallPred: if ball crosses the goal plane through the
+        // opening, apply big bonus. No backboard penalty — setup touches are legitimate.
         if (_ballCache.valid) {
             constexpr float GOAL_BONUS    = 3.0f;   // was 1.5f — strong on-target signal
             constexpr float BALL_R        = 91.25f;
             constexpr float MOUTH_W       = 892.755f - BALL_R;
             constexpr float MOUTH_H_MAX   = 642.775f - BALL_R;
-            constexpr float BB_TIME_LIMIT = 2.5f;
             float goalPlaneY = (player.team == Team::BLUE)
                                 ?  CommonValues::BACK_WALL_Y
                                 : -CommonValues::BACK_WALL_Y;
 
-            bool goalBound = false;
+            // Goal-mouth bonus: ball crosses goal plane through actual opening → reward.
+            // Backboard zero-penalty removed — during setup air dribbles the ball is NOT
+            // aimed at the goal yet (carry phase). BallPred correctly predicts backboard hit,
+            // but zeroing those touches killed most of the proc rate. Only reward on-target.
             for (int i = 0; i < BallPred::NUM_SLICES; i++) {
                 const auto& sl = _ballCache.slices[i];
                 bool pastPlane = (player.team == Team::BLUE)
@@ -2944,22 +3008,19 @@ private:
                         sl.pos.z > BALL_R          &&
                         sl.pos.z < MOUTH_H_MAX) {
                         reward *= GOAL_BONUS;
-                        goalBound = true;
                     }
                     break;
                 }
             }
+        }
 
-            if (!goalBound) {
-                for (int i = 0; i < BallPred::NUM_SLICES; i++) {
-                    if (_ballCache.slices[i].hitBackboard) {
-                        if (_ballCache.slices[i].t <= BB_TIME_LIMIT) {
-                            reward = 0.0f;  // backboard-bound trajectory — penalize
-                        }
-                        break;
-                    }
-                }
-            }
+        // NEW: Apply velocity-distance multiplier to the reward
+        if (state.ball.vel.Length() > 0.0f) {
+            float velocityBonus = GetInitialVelocityBonus(
+                seq.initialBallVelocity,
+                seq.distanceToOpponentGoal
+            );
+            reward *= velocityBonus;
         }
 
         if (reward > EPS_REWARD_SKIP) {
@@ -3043,10 +3104,12 @@ private:
 
         float reward = rewardBeforeDir * dirMul;
 
-        // Entry/second-touch bonuses
-        if (seq.consecutiveAirTouches == 0) {
+        // Entry/second-touch bonuses (touchCount = qualifying touches rewarded so far;
+        // consecutiveAirTouches was already incremented before Evaluate* is called, so
+        // checking it against 0 never fired — touchCount is the correct gate here)
+        if (seq.touchCount == 0) {
             reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
-        } else if (seq.consecutiveAirTouches == 1) {
+        } else if (seq.touchCount == 1) {
             reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
         }
 
@@ -3091,23 +3154,9 @@ private:
             }
         }
 
-        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
-        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
-        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
-        if (seq.boostAtStart >= 0.0f) {
-            constexpr float MIN_BOOST   = 13.0f;
-            constexpr float BOOST_FLOOR = 13.0f;
-            constexpr float NEUTRAL_EFF = 80.0f;
-            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
-            if (boostConsumed < MIN_BOOST) {
-                return 0.0f;  // not a real air dribble — insufficient boost committed
-            }
-            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
-            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
-            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
-            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
-            reward *= efficiencyFactor;
-        }
+        // (Boost efficiency gate removed — boostAtStart was set at first-touch frame,
+        //  making boostConsumed = 0 on touch 1, so the gate always killed the first touch.
+        //  Quality is already filtered by directional multiplier + BallPred trajectory.)
 
         // Outplay multiplier: when an opponent is actively challenging, reward redirecting
         // the ball past them. Neutral (1.0x) when no challenger is present.
@@ -3118,6 +3167,15 @@ private:
         if (player.boost < 20.0f && !IsHeadingToGoalMouth(player)) {
             float boostFactor = RS_CLAMP(player.boost / 20.0f, 0.5f, 1.0f);
             reward *= boostFactor;
+        }
+
+        // NEW: Apply velocity-distance multiplier to the reward
+        if (state.ball.vel.Length() > 0.0f) {
+            float velocityBonus = GetInitialVelocityBonus(
+                seq.initialBallVelocity,
+                seq.distanceToOpponentGoal
+            );
+            reward *= velocityBonus;
         }
 
         if (reward > EPS_REWARD_SKIP) {
@@ -3192,10 +3250,12 @@ private:
 
         float reward = rewardBeforeDir * dirMul;
 
-        // Entry/second-touch bonuses
-        if (seq.consecutiveAirTouches == 0) {
+        // Entry/second-touch bonuses (touchCount = qualifying touches rewarded so far;
+        // consecutiveAirTouches was already incremented before Evaluate* is called, so
+        // checking it against 0 never fired — touchCount is the correct gate here)
+        if (seq.touchCount == 0) {
             reward += ENTRY_BONUS * RS_MIN(1.0f, dirMul);
-        } else if (seq.consecutiveAirTouches == 1) {
+        } else if (seq.touchCount == 1) {
             reward += SECOND_TOUCH_BONUS * RS_MIN(1.0f, dirMul);
         }
 
@@ -3230,23 +3290,9 @@ private:
             }
         }
 
-        // Boost efficiency: minimum 13 boost consumed required (gate), then distance/boost ratio.
-        // At 13 (floor): effective boost = 0 → efficiency = huge → 1.5x cap (floor bonus).
-        // Above 13: neutral at 80 UU per effective boost unit; high dist/boost → 1.5x, low → 0.3x.
-        if (seq.boostAtStart >= 0.0f) {
-            constexpr float MIN_BOOST   = 13.0f;
-            constexpr float BOOST_FLOOR = 13.0f;
-            constexpr float NEUTRAL_EFF = 80.0f;
-            float boostConsumed = RS_MAX(0.0f, seq.boostAtStart - player.boost);
-            if (boostConsumed < MIN_BOOST) {
-                return 0.0f;  // not a real air dribble — insufficient boost committed
-            }
-            float effectiveBoost   = boostConsumed - BOOST_FLOOR;
-            float distTraveled     = (player.pos - seq.playerPosAtStart).Length();
-            float efficiency       = distTraveled / RS_MAX(1.0f, effectiveBoost);
-            float efficiencyFactor = RS_CLAMP(efficiency / NEUTRAL_EFF, 0.3f, 1.5f);
-            reward *= efficiencyFactor;
-        }
+        // (Boost efficiency gate removed — boostAtStart was set at first-touch frame,
+        //  making boostConsumed = 0 on touch 1, so the gate always killed the first touch.
+        //  Quality is already filtered by directional multiplier + BallPred trajectory.)
 
         // Outplay multiplier: when an opponent is actively challenging, reward redirecting
         // the ball past them. Neutral (1.0x) when no challenger is present.
@@ -3288,6 +3334,15 @@ private:
                     break;  // only check first crossing
                 }
             }
+        }
+
+        // NEW: Apply velocity-distance multiplier to the reward
+        if (state.ball.vel.Length() > 0.0f) {
+            float velocityBonus = GetInitialVelocityBonus(
+                seq.initialBallVelocity,
+                seq.distanceToOpponentGoal
+            );
+            reward *= velocityBonus;
         }
 
         if (reward > EPS_REWARD_SKIP) {
@@ -3346,6 +3401,10 @@ public:
             sequenceStates[id].maxHeight        = state.ball.pos.z;
             sequenceStates[id].boostAtStart     = player.boost;
             sequenceStates[id].playerPosAtStart = player.pos;
+
+            // NEW: Track initial ball velocity and distance to opponent goal
+            sequenceStates[id].initialBallVelocity = state.ball.vel.Length();
+            sequenceStates[id].distanceToOpponentGoal = GetDistanceToOpponentGoal(player, state);
         }
 
         SequenceState& seq = sequenceStates[id];
@@ -5506,305 +5565,125 @@ public:
 
 
 // ============================================================================
-// AirDribbleBumpReward
+// DEPRECATED: OLD AirDribbleBumpReward - REPLACED BY NEW AIRDRIBBLEBUMPREWARD.H
 // ============================================================================
-// Rewards a specific sequence:
-// 1. Start air dribbling (multiple air touches with ball control)
-// 2. Bump or demo opponent while maintaining air dribble
-// 3. Get in front of the ball (between ball and opponent goal)
+// This implementation is NO LONGER USED. It has been replaced by a new
+// AirDribbleBumpReward class in a separate file (AirDribbleBumpReward.h).
 //
-// This teaches aggressive air dribble plays where you remove defenders
+// Issues with this old implementation:
+// - Did not properly validate ball trajectory toward goal
+// - Had thread-safe state management issues
+// - No BallPrediction.h usage for trajectory validation
+// - Overly simplistic reward model
+//
+// NEW IMPLEMENTATION FEATURES (in AirDribbleBumpReward.h):
+// - Uses BallPrediction.h for proper trajectory validation
+// - Validates ball will intersect goal mouth before bouncing
+// - Thread-safe per-player state tracking
+// - Proper multiplier system (trajectory quality × timing bonus × boost efficiency)
+// - Wraps in ZeroSumReward for competitive balance
 // ============================================================================
-class AirDribbleBumpReward : public Reward {
-private:
-    struct PlayerState {
-        bool isAirDribbling = false;
-        int airTouchCount = 0;
-        float airDribbleStartTime = 0.0f;
-        bool hasBumpedDuringDribble = false;
-        bool hasPositionedInFront = false;
-        bool rewardPaid = false;
-        float lastTouchTime = 0.0f;
-    };
+//
+// CODE BELOW IS DISABLED - DO NOT EDIT
+//
+// class AirDribbleBumpReward_DEPRECATED : public Reward {
+// private:
+//     struct PlayerState {
+//         bool isAirDribbling = false;
+//         int airTouchCount = 0;
+//         float airDribbleStartTime = 0.0f;
+//         bool hasBumpedDuringDribble = false;
+//         bool hasPositionedInFront = false;
+//         bool rewardPaid = false;
+//         float lastTouchTime = 0.0f;
+//     };
+//
+//     mutable std::map<uint32_t, PlayerState> playerStates;
+//     mutable float gameTime = 0.0f;
+//
+//     struct Config {
+//         float minAirTouchCount = 2.0f;
+//         float minBallHeight = 200.0f;
+//         float maxDistToBall = 300.0f;
+//         float touchTimeout = 1.5f;
+//         float bumpProximity = 250.0f;
+//         float minBumpSpeed = 1800.0f;
+//         float inFrontThreshold = 200.0f;
+//         float maxLateralDistance = 800.0f;
+//         float airDribbleStartReward = 1.0f;
+//         float bumpDuringDribbleReward = 15.0f;
+//         float demoDuringDribbleReward = 25.0f;
+//         float positionInFrontReward = 5.0f;
+//         float maxSequenceDuration = 5.0f;
+//     };
+//
+//     Config config;
+//
+//     bool IsAirDribbling(const Player& player, const GameState& state, PlayerState& ps) const;
+//     float CheckBumpOrDemo(const Player& player, const GameState& state) const;
+//     bool IsPositionedInFrontOfBall(const Player& player, const GameState& state) const;
+//
+// public:
+//     AirDribbleBumpReward() : config() {}
+//     explicit AirDribbleBumpReward(const Config& cfg) : config(cfg) {}
+//
+//     virtual void Reset(const GameState& initialState) override {
+//         playerStates.clear();
+//         gameTime = 0.0f;
+//     }
+//
+//     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+//         // Implementation disabled - use new AirDribbleBumpReward.h instead
+//         return 0.0f;
+//     }
+// };
+// ============================================================================
+// END DEPRECATED AirDribbleBumpReward_DEPRECATED
 
-    mutable std::map<uint32_t, PlayerState> playerStates;
-    mutable float gameTime = 0.0f;
-
-    struct Config {
-        // Air dribble detection
-        float minAirTouchCount = 2.0f;              // Need at least 2 air touches to qualify
-        float minBallHeight = 200.0f;               // Ball must be this high
-        float maxDistToBall = 300.0f;               // Max distance to ball during air dribble
-        float touchTimeout = 1.5f;                  // Max time between touches
-
-        // Bump/demo detection
-        float bumpProximity = 250.0f;               // Distance to opponent for bump detection
-        float minBumpSpeed = 1800.0f;               // Minimum speed for bump to count
-
-        // Positioning detection (in front of ball)
-        float inFrontThreshold = 200.0f;            // Must be this far in front of ball
-        float maxLateralDistance = 800.0f;          // Max distance to ball's path to goal
-
-        // Rewards
-        float airDribbleStartReward = 1.0f;         // Starting air dribble
-        float bumpDuringDribbleReward = 15.0f;      // Bump during air dribble
-        float demoDuringDribbleReward = 25.0f;      // Demo during air dribble (even better)
-        float positionInFrontReward = 5.0f;         // Getting in front after bump
-
-        // Timeouts
-        float maxSequenceDuration = 5.0f;           // Max time for entire sequence
-    };
-
-    Config config;
-
-    /**
-     * Check if player is air dribbling
-     */
-    bool IsAirDribbling(const Player& player, const GameState& state, PlayerState& ps) const {
-        // Must be airborne
-        if (player.isOnGround) return false;
-
-        // Ball must be airborne and at minimum height
-        if (state.ball.pos.z < config.minBallHeight) return false;
-
-        // Must be close to ball
-        float distToBall = (player.pos - state.ball.pos).Length();
-        if (distToBall > config.maxDistToBall) return false;
-
-        return true;
-    }
-
-    /**
-     * Check if player bumped or demoed an opponent
-     */
-    float CheckBumpOrDemo(const Player& player, const GameState& state) const {
-        // Check if we demoed someone this frame
-        if (player.eventState.demo) {
-            return config.demoDuringDribbleReward;
-        }
-
-        // Check if we bumped someone this frame
-        if (player.eventState.bump) {
-            return config.bumpDuringDribbleReward;
-        }
-
-        return 0.0f;
-    }
-
-    /**
-     * Check if player is positioned in front of ball (between ball and opponent goal)
-     */
-    bool IsPositionedInFrontOfBall(const Player& player, const GameState& state) const {
-        Vec oppGoal = (player.team == Team::BLUE) ?
-            CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-        // Calculate distances to goal
-        float playerDistToGoal = (player.pos - oppGoal).Length();
-        float ballDistToGoal = (state.ball.pos - oppGoal).Length();
-
-        // Player must be closer to goal than ball
-        if (playerDistToGoal > ballDistToGoal - config.inFrontThreshold) {
-            return false;
-        }
-
-        // Check lateral distance to ball-to-goal path
-        Vec ballToGoal = (oppGoal - state.ball.pos).Normalized();
-        Vec ballToPlayer = player.pos - state.ball.pos;
-        float lateralDist = fabsf(ballToPlayer.Dot(Vec(-ballToGoal.y, ballToGoal.x, 0.0f)));
-
-        if (lateralDist > config.maxLateralDistance) {
-            return false;
-        }
-
-        return true;
-    }
-
-public:
-    AirDribbleBumpReward() : config() {}
-    explicit AirDribbleBumpReward(const Config& cfg) : config(cfg) {}
-
-    virtual void Reset(const GameState& initialState) override {
-        playerStates.clear();
-        gameTime = 0.0f;
-    }
-
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        gameTime += state.deltaTime;
-        uint32_t id = player.carId;
-
-        // Initialize player state
-        if (playerStates.find(id) == playerStates.end()) {
-            playerStates[id] = PlayerState();
-        }
-
-        PlayerState& ps = playerStates[id];
-        float reward = 0.0f;
-
-        // Check for sequence timeout
-        if (ps.isAirDribbling) {
-            float sequenceDuration = gameTime - ps.airDribbleStartTime;
-            if (sequenceDuration > config.maxSequenceDuration) {
-                // Timeout - reset state
-                ps = PlayerState();
-                return 0.0f;
-            }
-        }
-
-        // Reset if on ground and no active sequence
-        if (player.isOnGround && !ps.hasBumpedDuringDribble) {
-            ps = PlayerState();
-            return 0.0f;
-        }
-
-        // PHASE 1: Detect air dribble start
-        if (!ps.isAirDribbling && IsAirDribbling(player, state, ps)) {
-            if (player.ballTouchedStep) {
-                ps.airTouchCount++;
-                ps.lastTouchTime = gameTime;
-
-                if (ps.airTouchCount >= config.minAirTouchCount) {
-                    // Air dribble started!
-                    ps.isAirDribbling = true;
-                    ps.airDribbleStartTime = gameTime;
-                    reward += config.airDribbleStartReward;
-                }
-            }
-        }
-
-        // PHASE 2: During air dribble - maintain touches and look for bump/demo
-        if (ps.isAirDribbling && !ps.hasBumpedDuringDribble) {
-            // Update touch count
-            if (player.ballTouchedStep) {
-                ps.lastTouchTime = gameTime;
-            }
-
-            // Check for touch timeout
-            if (gameTime - ps.lastTouchTime > config.touchTimeout) {
-                // Lost air dribble
-                ps = PlayerState();
-                return 0.0f;
-            }
-
-            // Check for bump or demo
-            float bumpReward = CheckBumpOrDemo(player, state);
-            if (bumpReward > 0.0f) {
-                ps.hasBumpedDuringDribble = true;
-                reward += bumpReward;
-            }
-        }
-
-        // PHASE 3: After bump - reward getting in front of ball
-        if (ps.hasBumpedDuringDribble && !ps.hasPositionedInFront && !ps.rewardPaid) {
-            if (IsPositionedInFrontOfBall(player, state)) {
-                ps.hasPositionedInFront = true;
-                ps.rewardPaid = true;
-                reward += config.positionInFrontReward;
-
-                // Sequence complete - reset for next one
-                ps = PlayerState();
-            }
-        }
-
-        return reward;
-    }
-};
-
-// NOTE: REMOVED OLD AIRDRIBBLEBUMP -- too situational, unreliable detection!
-// Air bump / demo reward - more general-purpose
-// - Renamed to AirBumpDemoReward
-// - Require >= 1s airborne before counting
-// - Single solid demo → full reward
-// - Single solid bump (close contact with opponent) → 0.75 reward
-// - Less strict proximity so this is more likely to trigger in varied scenarios
-class AirBumpDemoReward : public Reward {
-private:
-    mutable std::map<uint32_t, float> airborneTime;    // seconds in air per car
-    mutable std::map<uint32_t, bool>  paidThisAir;     // avoid duplicate payouts while airborne
-
-    // configuration (relaxed for general use)
-    const float MIN_AIRBORNE_SEC = 1.0f;          // 1s airborne required
-    const float BUMP_PROXIMITY_RADIUS = 1200.0f;  // ball reasonably close to car
-    const float CONTACT_RADIUS = 350.0f;         // proximity to opponent to consider contact
-    const float BASE_REWARD = 20.0f;             // base reward for a demo
-    const float BUMP_MULT = 0.75f;               // bump pays 75% of demo
-
-public:
-    virtual void Reset(const GameState& initialState) override {
-        airborneTime.clear();
-        paidThisAir.clear();
-    }
-
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        uint32_t id = player.carId;
-        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-
-        // Track airborne time and reset when landed
-        if (!player.isOnGround) {
-            airborneTime[id] += dt;
-        }
-        else {
-            airborneTime[id] = 0.0f;
-            paidThisAir[id] = false;
-            return 0.0f;
-        }
-
-        // Only evaluate while airborne and if not already paid this air sequence
-        if (player.isOnGround) return 0.0f;
-        if (paidThisAir[id]) return 0.0f;
-
-        // Ball must be reasonably near the car to consider a bump/demo
-        float distToBall = (state.ball.pos - player.pos).Length();
-        if (distToBall > BUMP_PROXIMITY_RADIUS) return 0.0f;
-
-        // Need minimum airborne time
-        if (airborneTime[id] < MIN_AIRBORNE_SEC) return 0.0f;
-
-        // Only evaluate on touch frames
-        if (!player.ballTouchedStep) return 0.0f;
-
-        // Detect demo (opponent becomes demoed this frame) — prefer explicit flags
-        bool didDemo = false;
-        if (player.eventState.demo) {
-            didDemo = true;
-        }
-        else if (state.prev) {
-            for (const auto& opp : state.players) {
-                if (opp.team == player.team) continue;
-                const Player& prevOpp = state.prev->players[opp.index];
-                if (!prevOpp.eventState.demoed && opp.eventState.demoed) {
-                    // ensure demo is plausibly caused by this car (distance check)
-                    if ((opp.pos - player.pos).Length() < CONTACT_RADIUS) {
-                        didDemo = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Detect solid bump/contact (non-demo) with an opponent nearby
-        bool didBump = false;
-        for (const auto& opp : state.players) {
-            if (opp.team == player.team) continue;
-            if ((opp.pos - player.pos).Length() < CONTACT_RADIUS) {
-                didBump = true;
-                break;
-            }
-        }
-
-        // Nothing relevant happened
-        if (!didDemo && !didBump) return 0.0f;
-
-        // Mark paid for this airborne sequence to avoid multiple payouts
-        paidThisAir[id] = true;
-
-        // Payout: full for demo, reduced for bump
-        if (didDemo) {
-            return BASE_REWARD;
-        }
-
-        return BASE_REWARD * BUMP_MULT;
-    }
-};
+// ============================================================================
+// DEPRECATED: AirBumpDemoReward - REPLACED BY NEW AIRDRIBBLEBUMPREWARD.H
+// ============================================================================
+// This was an earlier attempt at a general "bump/demo while airborne" reward.
+// NOT USED - DISABLED
+//
+// Issues with this implementation:
+// - Did not validate ball trajectory toward goal (no BallPrediction.h usage)
+// - Overly simple: reward for ANY bump/demo while in air (no goal context)
+// - No trajectory validation for ground bounces
+// - Not weighted toward actual goal-scoring opportunities
+//
+// REPLACED WITH: AirDribbleBumpReward.h (new implementation)
+// - Uses BallPrediction.h for proper trajectory validation
+// - Validates ball will intersect goal mouth before bouncing
+// - Requires air dribble setup toward goal (context-aware)
+// - Thread-safe per-player state tracking
+// ============================================================================
+//
+// CODE BELOW IS DISABLED - DO NOT EDIT
+//
+// class AirBumpDemoReward : public Reward {
+// private:
+//     mutable std::map<uint32_t, float> airborneTime;
+//     mutable std::map<uint32_t, bool>  paidThisAir;
+//     const float MIN_AIRBORNE_SEC = 1.0f;
+//     const float BUMP_PROXIMITY_RADIUS = 1200.0f;
+//     const float CONTACT_RADIUS = 350.0f;
+//     const float BASE_REWARD = 20.0f;
+//     const float BUMP_MULT = 0.75f;
+//
+// public:
+//     virtual void Reset(const GameState& initialState) override {
+//         airborneTime.clear();
+//         paidThisAir.clear();
+//     }
+//
+//     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+//         // Implementation disabled - use new AirDribbleBumpReward.h instead
+//         return 0.0f;
+//     }
+// };
+// ============================================================================
+// END DEPRECATED AirBumpDemoReward
 
 // Ceiling ground pinch - pinching from ceiling to ground
 class CeilingGroundPinchReward : public Reward {
@@ -6650,9 +6529,12 @@ private:
         bool hadPossession = false;
         Vec lastBallVel;
         float timeSinceLastTouch = 999.0f;
+        Vec lastTouchBallPos;  // Track ball position at last touch for distance-based timeout
     };
 
-    mutable PossessionMemory memory;
+    // Per-player possession state (immutable in GetReward, updated in PreStep)
+    std::map<uint32_t, PossessionMemory> playerMemory;
+    PossessionMemory globalMemory;  // Tracks team-level possession state
 
     // Possession detection parameters
     const float POSSESSION_DISTANCE = 250.0f;  // Max distance to ball to have possession
@@ -6668,12 +6550,12 @@ private:
             return false;
         }
 
-        // Just touched ball
+        // Criteria 1: Just touched ball (most recent frame)
         if (player.ballTouchedStep) {
             return true;
         }
 
-        // Ball moving in same direction as player
+        // Criteria 2: Moving together (both have significant velocity, aligned)
         if (player.vel.Length() > 100.0f && state.ball.vel.Length() > 100.0f) {
             Vec playerDir = player.vel.Normalized();
             Vec ballDir = state.ball.vel.Normalized();
@@ -6682,7 +6564,25 @@ private:
             }
         }
 
+        // Criteria 3: Stationary together (both moving slowly, can still control)
+        // Supports static dribbles and low-speed possession
+        if (player.vel.Length() < 100.0f && state.ball.vel.Length() < 200.0f) {
+            return true;  // Close & both slow = possession
+        }
+
         return false;
+    }
+
+    // Calculate dynamic touch timeout based on ball distance traveled since last touch
+    // Base timeout of 2.0s, extended by distance ball has traveled
+    float GetDynamicTouchTimeout(const PossessionMemory& playerMem, const GameState& state) const {
+        float baseTouchTimeout = 2.0f;
+        float distBallTraveled = playerMem.lastTouchBallPos.Dist(state.ball.pos);
+
+        // Every 500 UU of distance adds 0.5s to timeout (up to 4.0s total)
+        // Encourages credit for ball traveling far
+        float distanceBonus = RS_MIN(distBallTraveled / 500.0f * 0.5f, 2.0f);
+        return baseTouchTimeout + distanceBonus;
     }
 
     // Find which team has possession
@@ -6705,74 +6605,113 @@ private:
         }
 
         outPlayerId = possessingPlayer;
-        return anyPossession ? possessingTeam : memory.lastPossessingTeam;
+        return anyPossession ? possessingTeam : globalMemory.lastPossessingTeam;
     }
 
 public:
     virtual void Reset(const GameState& initialState) override {
-        memory = PossessionMemory();
+        playerMemory.clear();
+        globalMemory = PossessionMemory();
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        // Update possession state BEFORE GetReward is called
+        // This ensures thread-safe state updates
+
+        // Determine current possession holder
+        uint32_t currentPossessor = 0;
+        Team currentPossessingTeam = GetPossessingTeam(state, currentPossessor);
+
+        // Update all players' time-since-touch counters
+        for (const auto& player : state.players) {
+            if (!playerMemory.count(player.carId)) {
+                playerMemory[player.carId] = PossessionMemory();
+            }
+
+            auto& mem = playerMemory[player.carId];
+
+            if (player.ballTouchedStep) {
+                mem.timeSinceLastTouch = 0.0f;
+                mem.lastTouchBallPos = state.ball.pos;  // Record ball position at touch for dynamic timeout
+            } else {
+                mem.timeSinceLastTouch += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+            }
+
+            // Track individual possession
+            bool playerHasPossession = HasPossession(player, state);
+            if (playerHasPossession) {
+                mem.possessionDuration += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+                mem.hadPossession = true;
+            } else {
+                mem.possessionDuration = 0.0f;
+            }
+        }
+
+        // Update global (team-level) possession state
+        if (currentPossessingTeam == globalMemory.lastPossessingTeam) {
+            globalMemory.teamPossessionDuration += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+        } else {
+            globalMemory.teamPossessionDuration = 0.0f;
+        }
+
+        // Store current possession info for next frame's transition detection
+        globalMemory.lastPossessingTeam = currentPossessingTeam;
+        globalMemory.lastPossessingPlayer = currentPossessor;
+        globalMemory.lastBallVel = state.ball.vel;
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
         float reward = 0.0f;
 
+        // Read state from PreStep (thread-safe, immutable)
         uint32_t currentPossessor = 0;
         Team currentPossessingTeam = GetPossessingTeam(state, currentPossessor);
         bool playerHasPossession = HasPossession(player, state);
 
-        // Update time since last touch
-        if (player.ballTouchedStep) {
-            memory.timeSinceLastTouch = 0.0f;
-        } else {
-            memory.timeSinceLastTouch += dt;
+        // P1-7: Ball speed modulation - reduce possession rewards for high-speed balls
+        // High-speed balls (6000+ UU/s = 300+ kph) are harder to control
+        // Low-speed balls (< 1000 UU/s = 50 kph) are most controllable
+        float ballSpeed = state.ball.vel.Length();
+        float speedModulation = RS_MAX(0.3f, 1.0f - (ballSpeed / 8000.0f));  // 1.0 at 0 kph → 0.3 at 300+ kph
+
+        // Get this player's memory (populated in PreStep)
+        auto playerMemIt = playerMemory.find(player.carId);
+        if (playerMemIt == playerMemory.end()) {
+            return 0.0f;  // No state yet, return neutral
+        }
+        const auto& mem = playerMemIt->second;
+        float timeSinceLastTouch = mem.timeSinceLastTouch;
+        float possessionDuration = mem.possessionDuration;
+        float teamPossessionDuration = globalMemory.teamPossessionDuration;
+
+        // ====================================================================
+        // 1. POSSESSION DURATION REWARDS (read-only from PreStep state)
+        // ====================================================================
+
+        // Team possession tracking (computed in PreStep)
+        if (currentPossessingTeam == player.team && teamPossessionDuration > 0.5f) {
+            // Continuous reward for maintaining team possession (modulated by ball speed)
+            float durationBonus = RS_CLAMP(teamPossessionDuration / 5.0f, 0.0f, 1.0f);
+            reward += 0.05f * durationBonus * speedModulation;
+        }
+
+        // Individual possession tracking (computed in PreStep)
+        if (playerHasPossession && possessionDuration > 0.3f) {
+            // Continuous reward for maintaining individual possession (modulated by ball speed)
+            float durationBonus = RS_CLAMP(possessionDuration / 3.0f, 0.0f, 1.0f);
+            reward += 0.08f * durationBonus * speedModulation;
         }
 
         // ====================================================================
-        // 1. POSSESSION DURATION REWARDS
+        // 2. POSSESSION CHANGE DETECTION (GIVEAWAYS) - Read-only
         // ====================================================================
 
-        // Team possession tracking
-        if (currentPossessingTeam == player.team) {
-            memory.teamPossessionDuration += dt;
-
-            // Continuous reward for maintaining team possession
-            if (memory.teamPossessionDuration > 0.5f) {
-                // Reward scales with duration (diminishing returns)
-                float durationBonus = RS_CLAMP(memory.teamPossessionDuration / 5.0f, 0.0f, 1.0f);
-                reward += 0.05f * durationBonus;
-            }
-        } else {
-            memory.teamPossessionDuration = 0.0f;
-        }
-
-        // Individual possession tracking
-        if (playerHasPossession) {
-            memory.possessionDuration += dt;
-            memory.hadPossession = true;
-
-            // Continuous reward for maintaining individual possession
-            if (memory.possessionDuration > 0.3f) {
-                float durationBonus = RS_CLAMP(memory.possessionDuration / 3.0f, 0.0f, 1.0f);
-                reward += 0.08f * durationBonus;
-            }
-        } else {
-            memory.possessionDuration = 0.0f;
-        }
-
-        // ====================================================================
-        // 2. POSSESSION CHANGE DETECTION (GIVEAWAYS)
-        // ====================================================================
-
-        // Detect possession change to opponent team
-        if (memory.lastPossessingTeam != currentPossessingTeam) {
+        // Detect possession change to opponent team (from PreStep state)
+        if (globalMemory.lastPossessingTeam != currentPossessingTeam) {
             // Check if this player gave away possession
-            if (memory.lastPossessingPlayer == player.carId &&
-                memory.timeSinceLastTouch < TOUCH_TIMEOUT) {
-
-                // Analyze HOW possession was lost
-                Vec ballVelChange = state.ball.vel - memory.lastBallVel;
-                float ballSpeedChange = ballVelChange.Length();
+            float dynamicTimeout = GetDynamicTouchTimeout(mem, state);  // Scale timeout by ball distance traveled
+            if (globalMemory.lastPossessingPlayer == player.carId &&
+                timeSinceLastTouch < dynamicTimeout) {
 
                 // Opponent goal direction
                 Vec oppGoal = (player.team == Team::BLUE)
@@ -6801,10 +6740,10 @@ public:
         }
 
         // ====================================================================
-        // 3. SMART POSSESSION PLAY BONUSES
+        // 3. SMART POSSESSION PLAY BONUSES (read-only from PreStep state)
         // ====================================================================
 
-        if (playerHasPossession && memory.possessionDuration > 0.5f) {
+        if (playerHasPossession && possessionDuration > 0.5f) {
             // Bonus for maintaining possession while moving toward opponent goal
             Vec oppGoal = (player.team == Team::BLUE)
                 ? CommonValues::ORANGE_GOAL_CENTER
@@ -6813,26 +6752,29 @@ public:
 
             float forwardProgress = player.vel.Dot(toOppGoal);
             if (forwardProgress > 500.0f) {
-                reward += 0.1f;  // Bonus for possession + forward movement
+                reward += 0.1f * speedModulation;  // Bonus for possession + forward movement (modulated by ball speed)
             }
 
             // Bonus for keeping ball close (tight dribble control)
             float distToBall = player.pos.Dist(state.ball.pos);
             if (distToBall < 150.0f) {
-                reward += 0.05f;  // Tight control bonus
+                reward += 0.05f * speedModulation;  // Tight control bonus (modulated by ball speed)
             }
         }
 
         // ====================================================================
-        // 4. TEAM POSSESSION SUPPORT
+        // 4. TEAM POSSESSION SUPPORT (read-only from PreStep state)
         // ====================================================================
 
-        // Reward for being in support position when teammate has possession
+        // Reward for being in support position when teammate has possession (P1-6: scaled by quality)
         if (!playerHasPossession && currentPossessingTeam == player.team) {
             // Check if we're in a good support position (not too close, not too far)
             float distToBall = player.pos.Dist(state.ball.pos);
             if (distToBall > 800.0f && distToBall < 2000.0f) {
-                // Good support distance
+                // Ideal support distance range (1500 UU is optimal)
+                float optimalDist = 1500.0f;
+                float distFromOptimal = fabsf(distToBall - optimalDist);
+                float distanceQuality = RS_MAX(0.0f, 1.0f - (distFromOptimal / 700.0f));  // Peak at 1500 UU
 
                 // Check if we're ahead of the ball (offensive support)
                 Vec oppGoal = (player.team == Team::BLUE)
@@ -6842,15 +6784,13 @@ public:
                 float ballToGoalDist = state.ball.pos.Dist(oppGoal);
 
                 if (playerToGoalDist < ballToGoalDist) {
-                    reward += 0.03f;  // Small bonus for offensive support position
+                    // Strong bonus: base 0.15f scaled by distance quality and goal direction alignment
+                    Vec toGoal = (oppGoal - player.pos).Normalized();
+                    float goalAlignment = RS_MAX(0.0f, player.vel.Dot(toGoal) / RS_MAX(player.vel.Length(), 1.0f));
+                    reward += 0.15f * distanceQuality * (0.5f + 0.5f * goalAlignment);
                 }
             }
         }
-
-        // Update memory
-        memory.lastPossessingTeam = currentPossessingTeam;
-        memory.lastPossessingPlayer = currentPossessor;
-        memory.lastBallVel = state.ball.vel;
 
         return reward;
     }

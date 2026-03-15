@@ -405,42 +405,91 @@ namespace RLGC {
     // Use case: earlier curriculum phases, baseline comparison, or any context
     // where the full gated FlipResetReward (Rev 2.1) is too restrictive.
     // ============================================================================
+    // ============================================================================
+    // SimpleFlipResetReward - IMPROVED VERSION
+    //
+    // Detects flip reset acquisitions with ball position validation to avoid
+    // rewarding "pancake" shots (ball rebounding off walls).
+    //
+    // Conditions for reward:
+    //   1. Transition from no flip to flip while airborne
+    //   2. Ball is 400+ UU off ground (not on court)
+    //   3. Ball is 400+ UU away from walls/backboards (not bouncing off walls)
+    //
+    // This prevents farming flip resets from low-quality ball positions like:
+    // - Wall bounces (pancake shots)
+    // - Ground bounces
+    // - Rebounds near corners
+    //
+    // Only awards once at the moment all conditions are met simultaneously.
+    // ============================================================================
     class SimpleFlipResetReward : public Reward {
-    private:
-        static constexpr float RESET_REWARD = 1.0f;  // flat reward per acquisition
-
-        std::unordered_map<uint32_t, float> _pendingReward;
-
     public:
-        virtual void Reset(const GameState&) override {
-            _pendingReward.clear();
+        struct Config {
+            float flip_reset_reward = 1.0f;        // Reward for getting flip reset with good ball positioning
+
+            // Thresholds
+            float min_ball_height = 400.0f;        // Ball must be this high (uu above ground)
+            float min_distance_from_walls = 400.0f; // Distance from nearest wall/backboard (uu)
+        };
+    private:
+        Config config;
+        std::map<uint32_t, bool> previouslyHadFlipReset;
+    public:
+        explicit SimpleFlipResetReward(const Config& cfg = Config{}) : config(cfg) {}
+
+        /**
+         * Calculate minimum distance from ball to any wall or backboard.
+         * Field bounds:
+         *   - Side walls: x = ±4096
+         *   - Back walls: y = ±5120
+         *   - Ceiling: z = 2044
+         */
+        static float DistanceToNearestWall(const Vec& ballPos) {
+            const float SIDE_WALL_X = 4096.0f;
+            const float BACK_WALL_Y = 5120.0f;
+
+            // Distance to side walls (x = ±4096)
+            float distToSideWall = std::abs(SIDE_WALL_X - std::abs(ballPos.x));
+
+            // Distance to back walls (y = ±5120)
+            float distToBackWall = std::abs(BACK_WALL_Y - std::abs(ballPos.y));
+
+            // Return minimum of the two
+            return std::min(distToSideWall, distToBackWall);
         }
 
-        virtual void PreStep(const GameState& state) override {
-            for (const auto& player : state.players) {
-                uint32_t id = player.carId;
-                _pendingReward[id] = 0.0f;
+        virtual void Reset(const GameState& initialState) override {
+            previouslyHadFlipReset.clear();
+        }
 
-                if (player.prev == nullptr) continue;
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            uint32_t id = player.carId;
+            float totalReward = 0.0f;
 
-                // Detect !HasFlipReset() → HasFlipReset() while airborne
-                bool prevHad = player.prev->HasFlipReset();
-                bool nowHas  = player.HasFlipReset();
+            // Track flip reset state change
+            bool prevHadFlipReset = previouslyHadFlipReset[id];
+            bool nowHasFlipReset = player.HasFlipReset();
 
-                if (!prevHad && nowHas && !player.isOnGround) {
-                    _pendingReward[id] = RESET_REWARD;
+            // Detect flip reset acquisition (transition from no flip to flip)
+            if (!prevHadFlipReset && nowHasFlipReset) {
+                // Check condition 1: Ball is 400+ uu off the ground
+                bool ballHighEnough = state.ball.pos.z >= config.min_ball_height;
+
+                // Check condition 2: Ball is 400+ uu away from walls
+                float distToWall = DistanceToNearestWall(state.ball.pos);
+                bool ballAwayFromWalls = distToWall >= config.min_distance_from_walls;
+
+                // Award only if BOTH conditions are met
+                if (ballHighEnough && ballAwayFromWalls) {
+                    totalReward = config.flip_reset_reward;
                 }
             }
-        }
 
-        virtual float GetReward(const Player& player, const GameState&, bool) override {
-            auto it = _pendingReward.find(player.carId);
-            if (it != _pendingReward.end() && it->second != 0.0f) {
-                float r = it->second;
-                it->second = 0.0f;
-                return r;
-            }
-            return 0.0f;
+            // Update state for next frame
+            previouslyHadFlipReset[id] = nowHasFlipReset;
+
+            return totalReward;
         }
     };
 

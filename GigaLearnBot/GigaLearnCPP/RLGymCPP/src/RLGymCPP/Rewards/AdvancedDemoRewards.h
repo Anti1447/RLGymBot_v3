@@ -51,109 +51,70 @@ namespace RLGC {
 
     // ============================================================================
     // CONTEXTUAL DEMO REWARD
-    // Main reward that evaluates tactical correctness of demos.
-    // Analyzes opponent role, game situation, and own positioning.
-    // Rewards: +12 to +25 for good demos
-    // Penalties: -3 to -15 for bad demos
-    // UPDATED 2/16/2026 with Claude Rev 1.0
-    // Drastically simplified to focus on proximity-based demo detection rather than complex role classification. 
-    // Detects demos when player is close to opponent (< 150 units) and moving fast (> 800 u/s), then awards context-based bonuses for goalie removal, goal prevention, etc.
+    // Rewards demos based on tactical context:
+    //   +2 base for any demo
+    //   +3 goalie removal bonus (target was defending their own goal)
+    //   +4 prevent-goal bonus  (target near ball, ball threatening our goal)
+    //   -2 bad-demo penalty    (player far out of own rotation)
+    // Uses engine-provided eventState.demo / eventState.demoed flags — no heuristic.
+    // 2026-03-02 | NJH — full rewrite: fixed team-relative goal refs, removed
+    //   RS_CLAMP squash, replaced proximity heuristic, removed dead DemoState tracking.
     // ============================================================================
     class ContextualDemoReward : public Reward {
     private:
-        struct DemoState {
-            bool lastWasDemo = false;
-            float lastDemoTime = 0.0f;
-            uint32_t lastTargetId = 0;
-        };
-
-        mutable std::map<uint32_t, DemoState> playerStates;
-        float currentTime = 0.0f;
-
-        // Reward tuning (simplified for activation)
-        static constexpr float REMOVE_GOALIE_REWARD = 6.0f;
-        static constexpr float PREVENT_GOAL_REWARD = 5.0f;
-        static constexpr float GENERAL_DEMO_REWARD = 3.0f;
-        static constexpr float BAD_DEMO_PENALTY = -1.0f;
+        // Base reward + contextual adjustments (no clamp — weight scales these)
+        static constexpr float GENERAL_DEMO_REWARD  = 2.0f;
+        static constexpr float REMOVE_GOALIE_BONUS  = 3.0f;  // target was defending their own goal
+        static constexpr float PREVENT_GOAL_BONUS   = 4.0f;  // target near ball threatening our goal
+        static constexpr float BAD_DEMO_PENALTY     = -2.0f; // player is far out of rotation
 
         // Distance thresholds
-        static constexpr float GOALIE_ZONE = 2000.0f;
-        static constexpr float BALL_PROXIMITY = 1500.0f;
-        static constexpr float ATTACK_THREAT_DISTANCE = 1000.0f;
+        static constexpr float GOALIE_ZONE          = 2000.0f; // target within this of their own goal
+        static constexpr float BALL_PROXIMITY       = 1500.0f; // target within this of ball
+        static constexpr float THREAT_BALL_TO_GOAL  = 2000.0f; // ball within this of our goal = danger
+        static constexpr float OUT_OF_POSITION_DIST = 3000.0f; // player this far from own goal = bad
 
     public:
-        virtual void Reset(const GameState& initialState) override {
-            playerStates.clear();
-            currentTime = 0.0f;
-        }
-
-        virtual void PreStep(const GameState& state) override {
-            currentTime += state.deltaTime;
-        }
+        virtual void Reset(const GameState& initialState) override {}
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            uint32_t id = player.carId;
+            // Use engine demo event flag — set by RocketSim exactly when a demo occurs.
+            if (!player.eventState.demo) return 0.0f;
 
-            if (playerStates.find(id) == playerStates.end()) {
-                playerStates[id] = DemoState();
-            }
-
-            auto& pState = playerStates[id];
-
-            // Detect demo/bump event - find closest opponent
-            bool isDemoThisFrame = false;
-            const Player* targetPlayer = nullptr;
-
-            float closestDist = FLT_MAX;
+            // Find the opponent who was demoed this frame.
+            const Player* target = nullptr;
             for (const auto& opp : state.players) {
                 if (opp.team == player.team) continue;
+                if (opp.eventState.demoed) { target = &opp; break; }
+            }
+            if (!target) return 0.0f;
 
-                float dist = (player.pos - opp.pos).Length();
-                if (dist < closestDist && dist < 500.0f) {
-                    closestDist = dist;
-                    targetPlayer = &opp;
-                }
+            float reward = GENERAL_DEMO_REWARD;
+
+            // Goalie removal: target was defending their own goal
+            Vec targetOwnGoal = (target->team == Team::BLUE)
+                                 ? CommonValues::BLUE_GOAL_BACK
+                                 : CommonValues::ORANGE_GOAL_BACK;
+            if ((target->pos - targetOwnGoal).Length() < GOALIE_ZONE)
+                reward += REMOVE_GOALIE_BONUS;
+
+            // Prevent goal: target was near ball AND ball was threatening our goal
+            if ((target->pos - state.ball.pos).Length() < BALL_PROXIMITY) {
+                Vec ourGoal = (player.team == Team::BLUE)
+                               ? CommonValues::BLUE_GOAL_BACK
+                               : CommonValues::ORANGE_GOAL_BACK;
+                if ((state.ball.pos - ourGoal).Length() < THREAT_BALL_TO_GOAL)
+                    reward += PREVENT_GOAL_BONUS;
             }
 
-            // Check if demo occurred this frame (very close proximity + fast movement)
-            if (targetPlayer != nullptr && closestDist < 150.0f) {
-                float playerSpeed = player.vel.Length();
-                if (playerSpeed > 800.0f) {
-                    isDemoThisFrame = true;
-                    pState.lastTargetId = targetPlayer->carId;
-                    pState.lastDemoTime = currentTime;
-                }
-            }
+            // Bad demo: player is far from their own goal (broke rotation for the demo)
+            Vec ownGoal = (player.team == Team::BLUE)
+                           ? CommonValues::BLUE_GOAL_BACK
+                           : CommonValues::ORANGE_GOAL_BACK;
+            if ((player.pos - ownGoal).Length() > OUT_OF_POSITION_DIST)
+                reward += BAD_DEMO_PENALTY;
 
-            // Return reward if demo occurred
-            if (isDemoThisFrame && targetPlayer != nullptr) {
-                float reward = GENERAL_DEMO_REWARD;
-
-                // Bonus for removing goalie (near goal)
-                float targetDistToGoal = (targetPlayer->pos - CommonValues::BLUE_GOAL_BACK).Length();
-                if (targetDistToGoal < GOALIE_ZONE) {
-                    reward += REMOVE_GOALIE_REWARD;
-                }
-
-                // Bonus for preventing goal (opponent near ball)
-                float distToBall = (targetPlayer->pos - state.ball.pos).Length();
-                if (distToBall < BALL_PROXIMITY) {
-                    float ballToGoal = (state.ball.pos - CommonValues::ORANGE_GOAL_BACK).Length();
-                    if (ballToGoal < 2000.0f) {
-                        reward += PREVENT_GOAL_REWARD;
-                    }
-                }
-
-                // Penalty for bad positioning (breaking own rotation)
-                float playerDistToGoal = (player.pos - CommonValues::BLUE_GOAL_BACK).Length();
-                if (playerDistToGoal > 3000.0f && closestDist < ATTACK_THREAT_DISTANCE) {
-                    reward += BAD_DEMO_PENALTY;
-                }
-
-                return RS_CLAMP(reward, -1.0f, 1.0f);
-            }
-
-            return 0.0f;
+            return reward;
         }
     };
 
@@ -498,6 +459,140 @@ namespace RLGC {
             }
 
             return 0.0f;
+        }
+    };
+
+    // ============================================================================
+    // SECOND MAN OFFENSIVE DEMO REWARD
+    // Role-gated demo reward for the 2nd man (MIDDLE role) creating scoring
+    // opportunities through demo aggression while the team has possession.
+    //
+    // Two components:
+    //   A. Per-frame approach reward — fires while approaching a tactically
+    //      valuable opponent at speed (>= MIN_APPROACH_COMPONENT UU/s toward target).
+    //      Target priority: last-defender (2pts) > near ball (1pt) > in attacking half (1pt).
+    //      Gates: MIDDLE role + team possession + target in attacking half or near ball.
+    //
+    //   B. Event reward — fires on player.eventState.demo while in MIDDLE role.
+    //      +BASE_DEMO_REWARD base, +LAST_DEFENDER_BONUS if target was last defender,
+    //      +NEAR_BALL_BONUS if target was near ball in attacking half.
+    //
+    // Does NOT fire in 1v1 (no MIDDLE role exists). Pairs naturally with
+    // ContextualDemoReward (role-agnostic) and FailedDemoAttemptPenalty.
+    // ============================================================================
+    class SecondManOffensiveDemoReward : public Reward {
+    private:
+        static constexpr float APPROACH_PER_SEC       = 0.8f;   // approach reward/s at full speed
+        static constexpr float MAX_APPROACH_SPEED     = 2300.0f; // UU/s (supersonic)
+        static constexpr float MIN_APPROACH_COMPONENT = 1000.0f; // UU/s toward target to qualify
+        static constexpr float BALL_PROX_THRESHOLD    = 1500.0f; // target "near ball"
+        static constexpr float LAST_DEF_GOAL_DIST     = 1800.0f; // last-defender range from opp goal
+        static constexpr float POSSESSION_RADIUS      = 1500.0f; // team possession check
+        static constexpr float BASE_DEMO_REWARD       = 3.0f;
+        static constexpr float LAST_DEFENDER_BONUS    = 2.5f;
+        static constexpr float NEAR_BALL_BONUS        = 1.5f;
+
+        enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
+
+        SimpleRole DetermineRole(const Player& player, const GameState& state) const {
+            float myDist = (player.pos - state.ball.pos).Length();
+            std::vector<float> dists;
+            for (const auto& p : state.players) {
+                if (p.team == player.team && p.carId != player.carId)
+                    dists.push_back((p.pos - state.ball.pos).Length());
+            }
+            if (dists.empty()) return SimpleRole::CLOSEST;
+            std::sort(dists.begin(), dists.end());
+            if (myDist < dists[0]) return SimpleRole::CLOSEST;
+            if (dists.size() >= 2 && myDist > dists[1]) return SimpleRole::FURTHEST;
+            return SimpleRole::MIDDLE;
+        }
+
+        bool TeamHasPossession(const Player& player, const GameState& state) const {
+            float closestDist = 1e10f;
+            Team  closestTeam = Team::BLUE;
+            for (const auto& p : state.players) {
+                float d = (p.pos - state.ball.pos).Length();
+                if (d < closestDist) { closestDist = d; closestTeam = p.team; }
+            }
+            return closestTeam == player.team && closestDist < POSSESSION_RADIUS;
+        }
+
+        // Score an opponent by tactical value as a demo target.
+        // Returns -1 if the opponent should be ignored (in our half, not near ball).
+        float TargetScore(const Player& opp, const Player& player,
+                          const GameState& state) const {
+            Vec oppGoal = (player.team == Team::BLUE)
+                           ? CommonValues::ORANGE_GOAL_BACK
+                           : CommonValues::BLUE_GOAL_BACK;
+
+            float score = 0.0f;
+            bool nearBall       = (opp.pos - state.ball.pos).Length() < BALL_PROX_THRESHOLD;
+            float attackY       = (player.team == Team::BLUE) ? opp.pos.y : -opp.pos.y;
+            bool inAttackHalf   = attackY > 0.0f;
+            bool isLastDefender = (opp.pos - oppGoal).Length() < LAST_DEF_GOAL_DIST;
+
+            // Ignore opponents who are irrelevant (defending half, not near ball)
+            if (!inAttackHalf && !nearBall) return -1.0f;
+
+            if (nearBall)       score += 1.0f;
+            if (inAttackHalf)   score += 1.0f;
+            if (isLastDefender) score += 2.0f;
+            return score;
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {}
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Skip 1v1 — no MIDDLE role exists
+            if (state.players.size() < 4) return 0.0f;
+
+            // Must be 2nd man
+            if (DetermineRole(player, state) != SimpleRole::MIDDLE) return 0.0f;
+
+            // Team must have possession
+            if (!TeamHasPossession(player, state)) return 0.0f;
+
+            // Find the highest-value demo target
+            const Player* target   = nullptr;
+            float         bestScore = -1.0f;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team || opp.isDemoed) continue;
+                float s = TargetScore(opp, player, state);
+                if (s > bestScore) { bestScore = s; target = &opp; }
+            }
+            if (!target) return 0.0f;
+
+            float reward = 0.0f;
+
+            // — Component B: event reward on successful demo —
+            if (player.eventState.demo) {
+                reward += BASE_DEMO_REWARD;
+                Vec oppGoal = (player.team == Team::BLUE)
+                               ? CommonValues::ORANGE_GOAL_BACK
+                               : CommonValues::BLUE_GOAL_BACK;
+                if ((target->pos - oppGoal).Length() < LAST_DEF_GOAL_DIST)
+                    reward += LAST_DEFENDER_BONUS;
+                bool nearBall     = (target->pos - state.ball.pos).Length() < BALL_PROX_THRESHOLD;
+                float attackY     = (player.team == Team::BLUE) ? target->pos.y : -target->pos.y;
+                if (nearBall && attackY > 0.0f)
+                    reward += NEAR_BALL_BONUS;
+                return reward;
+            }
+
+            // — Component A: per-frame approach reward —
+            Vec toTarget     = target->pos - player.pos;
+            float dist       = toTarget.Length();
+            if (dist < 1.0f) return 0.0f;
+            float velComp    = player.vel.Dot(toTarget / dist); // speed toward target
+            if (velComp < MIN_APPROACH_COMPONENT) return 0.0f;
+
+            float approachFrac = RS_CLAMP(velComp / MAX_APPROACH_SPEED, 0.0f, 1.0f);
+            float dt           = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            reward             = APPROACH_PER_SEC * approachFrac * dt;
+
+            return reward;
         }
     };
 

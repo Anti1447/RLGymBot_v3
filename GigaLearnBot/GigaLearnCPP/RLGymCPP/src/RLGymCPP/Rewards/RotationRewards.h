@@ -229,8 +229,12 @@ private:
 	bool IsRetreating(const Player& player, const Vec& touchPos) const {
 		// Are we moving away from where we touched?
 		Vec awayFromTouch = (player.pos - touchPos).Normalized();
-		Vec velocity = player.vel.Normalized();
+		Vec velocity = player.vel;
 
+		// Safety: Check if player is moving at all before normalizing
+		if (velocity.Length() < 50.0f) return false;  // Stationary players aren't retreating
+
+		velocity = velocity.Normalized();
 		return velocity.Dot(awayFromTouch) > 0.3f;  // Moving away at reasonable angle
 	}
 
@@ -279,14 +283,26 @@ public:
 
 			mem.isRetreating = retreating;
 
-			// SHAPING REWARD: Continuous reward for being near back-post
+			// SHAPING REWARD: Continuous reward for being near back-post (when ball is in defensive half)
 			if (retreating) {
-				Vec backPost = GetBackPost(player.team, state.ball.pos);
-				float distToBackPost = (player.pos - backPost).Length();
+				// Back-post logic only applies when ball is in own defensive half
+				float ballGoalY = (player.team == Team::BLUE) ?
+					state.ball.pos.y : -state.ball.pos.y;  // Flip for ORANGE perspective
 
-				// Proximity reward (immediate feedback)
-				float proximityRatio = 1.0f - RS_CLAMP(distToBackPost / config.backPostProximity, 0.0f, 1.0f);
-				reward += proximityRatio * config.rotationShapingWeight;
+				if (ballGoalY < 0) {
+					// Ball is in own defensive half - reward positioning near back-post
+					Vec backPost = GetBackPost(player.team, state.ball.pos);
+					float distToBackPost = (player.pos - backPost).Length();
+
+					// Proximity reward (immediate feedback)
+					float proximityRatio = 1.0f - RS_CLAMP(distToBackPost / config.backPostProximity, 0.0f, 1.0f);
+					reward += proximityRatio * config.rotationShapingWeight;
+				} else {
+					// Ball in offensive half - reward general retreat away from ball
+					float distFromBall = (player.pos - state.ball.pos).Length();
+					float retreatRatio = RS_CLAMP(distFromBall / (config.backPostProximity * 1.5f), 0.0f, 1.0f);
+					reward += (0.5f * retreatRatio) * config.rotationShapingWeight;
+				}
 			}
 		}
 
@@ -303,9 +319,26 @@ public:
 // =========================================================================
 // Used by Phase C second-man support rewards to identify roles and relationships
 
-inline bool IsSecondManRole(const Player& player, const GameState& state) {
-	// Identify if player is in MIDDLE role (second-man)
-	// Uses distance-based role detection similar to RoleAwarenessReward
+// Named constants for Phase C spacing and positioning logic
+namespace PhaseC {
+	// Distance thresholds for second-man support
+	static constexpr float FIRST_MAN_PRESSURED_DIST = 1500.0f;   // When first-man is "committed"
+	static constexpr float SECOND_MAN_SUPPORT_RANGE_MIN = 1500.0f; // Minimum distance for support
+	static constexpr float SECOND_MAN_SUPPORT_RANGE_MAX = 3500.0f; // Maximum distance for support
+	static constexpr float GOAL_POST_BACK_DISTANCE = 2500.0f;    // "Back post" optimal position
+	static constexpr float OPPONENT_CHALLENGE_DIST = 2000.0f;   // When opponent is challenging
+}
+
+// Role type enum - single source of truth for role determination
+enum class RoleType {
+	CLOSEST,      // Closest to ball
+	MIDDLE,       // Middle distance
+	FURTHEST      // Furthest from ball
+};
+
+// Unified role detection function - eliminates code duplication
+// Computes velocity-adjusted distances and determines player's role relative to teammates
+inline RoleType DetermineRoleCommon(const Player& player, const GameState& state) {
 	float distToBall = (player.pos - state.ball.pos).Length();
 	Vec ballVel = state.ball.vel;
 	Vec toPlayer = (player.pos - state.ball.pos).Normalized();
@@ -314,6 +347,11 @@ inline bool IsSecondManRole(const Player& player, const GameState& state) {
 	if (ballVel.Length() > 100.0f) {
 		velocityAlignment = ballVel.Normalized().Dot(toPlayer);
 	}
+
+	// Adjust distance based on velocity alignment
+	// Players ahead of the ball's trajectory get lower adjusted distance (better positioned)
+	// Players behind the ball's trajectory get higher adjusted distance (worse positioned)
+	// Scalar 0.25 limits adjustment to 6% per role change, preventing overcorrection
 	float adjustedDist = distToBall * (1.0f - velocityAlignment * 0.25f);
 
 	// Collect adjusted teammate distances
@@ -332,21 +370,27 @@ inline bool IsSecondManRole(const Player& player, const GameState& state) {
 	}
 
 	if (adjustedTeammateDists.empty()) {
-		return false;  // Only player on team
+		return RoleType::CLOSEST;
 	}
 
 	std::sort(adjustedTeammateDists.begin(), adjustedTeammateDists.end());
 
-	// Return true if player is in MIDDLE role (not closest, not furthest)
+	// Determine role based on adjusted distances (velocity-aware)
 	if (adjustedDist < adjustedTeammateDists[0]) {
-		return false;  // CLOSEST role
+		return RoleType::CLOSEST;
 	}
 	else if (adjustedTeammateDists.size() >= 2 && adjustedDist > adjustedTeammateDists[1]) {
-		return false;  // FURTHEST role
+		return RoleType::FURTHEST;
 	}
 	else {
-		return true;  // MIDDLE role (second-man)
+		return RoleType::MIDDLE;
 	}
+}
+
+inline bool IsSecondManRole(const Player& player, const GameState& state) {
+	// Identify if player is in MIDDLE role (second-man)
+	// Uses unified DetermineRoleCommon to ensure consistency with RoleAwarenessReward
+	return DetermineRoleCommon(player, state) == RoleType::MIDDLE;
 }
 
 inline Player* GetFirstManTeammate(const Player& player, const GameState& state) {
@@ -399,7 +443,7 @@ private:
 
 		// NEW: Event tracking for hybrid (time + event) role transitions
 		bool lastFrameHadPossession = false;  // Did player possess ball last frame?
-		Vec lastFrameVel = Vec(0, 0, 0);     // Velocity from last frame for demo detection
+		// TODO: lastFrameVel was used for demo detection, disabled for now (too noisy)
 	};
 
 	std::unordered_map<uint32_t, RoleMemory> memory;
@@ -414,67 +458,19 @@ private:
 			return true;
 		}
 
-		// Event 2: Got demoed/flipped (detect velocity spike)
-		if (player.prev && player.vel.Length() > 1000.0f && mem.lastFrameVel.Length() < 500.0f) {
-			// Large velocity spike could indicate demo/flip - being controlled
-			// Actually, on second thought, this is too noisy. Skip this event.
-		}
+		// TODO: Event 2 (demo detection via velocity spike) was too noisy, disabled
 
 		return false;  // No events triggered
 	}
 
 	SimpleRole DetermineRole(const Player& player, const GameState& state) const {
-		float distToBall = (player.pos - state.ball.pos).Length();
+		// Use unified role detection helper to ensure consistency across all rewards
+		RoleType roleType = DetermineRoleCommon(player, state);
 
-		// NEW: Velocity-based role detection
-		// Consider where the ball is going, not just where it is
-		Vec ballVel = state.ball.vel;
-		Vec toPlayer = (player.pos - state.ball.pos).Normalized();
-
-		float velocityAlignment = 0.0f;
-		if (ballVel.Length() > 100.0f) {  // Only apply if ball is moving significantly
-			velocityAlignment = ballVel.Normalized().Dot(toPlayer);
-		}
-
-		// Adjust distance based on velocity alignment
-		// Players ahead of the ball's trajectory get lower adjusted distance (better positioned)
-		// Players behind the ball's trajectory get higher adjusted distance (worse positioned)
-		float adjustedDist = distToBall * (1.0f - velocityAlignment * 0.25f);
-
-		std::vector<float> teammateDists;
-		std::vector<float> adjustedTeammateDists;
-		for (const auto& p : state.players) {
-			if (p.team == player.team && p.carId != player.carId) {
-				float dist = (p.pos - state.ball.pos).Length();
-				teammateDists.push_back(dist);
-
-				// Apply same velocity adjustment to teammates
-				Vec toTeammate = (p.pos - state.ball.pos).Normalized();
-				float tmateAlignment = 0.0f;
-				if (ballVel.Length() > 100.0f) {
-					tmateAlignment = ballVel.Normalized().Dot(toTeammate);
-				}
-				float adjustedTmateDist = dist * (1.0f - tmateAlignment * 0.25f);
-				adjustedTeammateDists.push_back(adjustedTmateDist);
-			}
-		}
-
-		if (adjustedTeammateDists.empty()) {
-			return SimpleRole::CLOSEST;
-		}
-
-		std::sort(adjustedTeammateDists.begin(), adjustedTeammateDists.end());
-
-		// Determine role based on adjusted distances (velocity-aware)
-		if (adjustedDist < adjustedTeammateDists[0]) {
-			return SimpleRole::CLOSEST;
-		}
-		else if (adjustedTeammateDists.size() >= 2 && adjustedDist > adjustedTeammateDists[1]) {
-			return SimpleRole::FURTHEST;
-		}
-		else {
-			return SimpleRole::MIDDLE;
-		}
+		// Convert RoleType to SimpleRole enum (same role, different type names)
+		if (roleType == RoleType::CLOSEST) return SimpleRole::CLOSEST;
+		if (roleType == RoleType::FURTHEST) return SimpleRole::FURTHEST;
+		return SimpleRole::MIDDLE;
 	}
 
 public:
@@ -525,9 +521,8 @@ public:
 			reward -= 0.05f;  // Small per-step penalty
 		}
 
-		// NEW: Track possession and velocity for next frame's event detection
+		// Track possession for next frame's event detection
 		mem.lastFrameHadPossession = player.ballTouchedStep;
-		mem.lastFrameVel = player.vel;
 
 		return reward;
 	}
@@ -564,12 +559,12 @@ public:
 
 		// Zone 1: First-man is pressured (opponent nearby)
 		float closestOpponentDist = PositionAnalysis::ClosestOpponentDistance(player, ballPos, state.players);
-		bool firstManPressured = (firstManDistToBall < 1500.0f);
+		bool firstManPressured = (firstManDistToBall < PhaseC::FIRST_MAN_PRESSURED_DIST);
 
 		// Reward advance positioning when first-man is under pressure
-		if (firstManPressured && closestOpponentDist < 2000.0f) {
-			// Reward being closer than 2500 UU from ball (positioned to support)
-			if (secondManDistToBall < 2500.0f) {
+		if (firstManPressured && closestOpponentDist < PhaseC::OPPONENT_CHALLENGE_DIST) {
+			// Reward being closer than GOAL_POST_BACK_DISTANCE from ball (positioned to support)
+			if (secondManDistToBall < PhaseC::GOAL_POST_BACK_DISTANCE) {
 				// Progressive reward: scaling by how close (but not too close)
 				float baseReward = 0.3f;
 				float proximityBonus = RS_MAX(0.0f, (3000.0f - secondManDistToBall) / 3000.0f) * 0.2f;
@@ -627,14 +622,15 @@ public:
 			return 0;  // Too far in front, not a passable position
 		}
 
-		// Distance validation: 1500-3500 UU from first-man
+		// Distance validation: SECOND_MAN_SUPPORT_RANGE from first-man
 		float distToFirstMan = (secondManPos - firstManPos).Length();
-		if (distToFirstMan < 1500.0f || distToFirstMan > 3500.0f) {
+		if (distToFirstMan < PhaseC::SECOND_MAN_SUPPORT_RANGE_MIN || distToFirstMan > PhaseC::SECOND_MAN_SUPPORT_RANGE_MAX) {
 			return 0;  // Out of passing range
 		}
 
 		// Reward for maintaining passable distance and angle
-		float distanceFactor = 1.0f - (fabs(distToFirstMan - 2500.0f) / 2500.0f);  // Peak at 2500 UU
+		// Peak reward when at GOAL_POST_BACK_DISTANCE (optimal passing distance)
+		float distanceFactor = 1.0f - (fabs(distToFirstMan - PhaseC::GOAL_POST_BACK_DISTANCE) / PhaseC::GOAL_POST_BACK_DISTANCE);
 		float angleFactor = 1.0f - angleAlignment;  // Higher when more sideways/behind
 
 		return RS_CLAMP(0.2f * distanceFactor * angleFactor, 0.0f, 0.4f);
@@ -679,16 +675,16 @@ public:
 		// Reward second-man for staying close
 		float distToFirstMan = (player.pos - firstMan->pos).Length();
 
-		if (distToFirstMan < 1500.0f) {
+		if (distToFirstMan < PhaseC::SECOND_MAN_SUPPORT_RANGE_MIN) {
 			return 0;  // Too close, crowding the play
 		}
 
-		if (distToFirstMan > 3500.0f) {
+		if (distToFirstMan > PhaseC::SECOND_MAN_SUPPORT_RANGE_MAX) {
 			return 0;  // Too far, not providing support
 		}
 
-		// Optimal support distance: 2200-2800 UU
-		float distanceFactor = 1.0f - (fabs(distToFirstMan - 2500.0f) / 1500.0f);
+		// Optimal support distance centers at GOAL_POST_BACK_DISTANCE
+		float distanceFactor = 1.0f - (fabs(distToFirstMan - PhaseC::GOAL_POST_BACK_DISTANCE) / 1500.0f);
 
 		// Velocity bonus: reward matching first-man's speed commitment
 		float secondManVelocity = player.vel.Length();

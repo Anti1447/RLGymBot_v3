@@ -311,8 +311,13 @@ namespace RLGC {
 			// Position tracking
 			float lastProximityToball = 999999.0f;
 
-			// NEW: Boost tracking
+			// Boost tracking
 			float setupStartBoost = 0.0f;  // Boost level when setup started
+
+			// Velocity tracking (NEW - distance-dependent velocity requirements)
+			float setupStartBallVelocity = 0.0f;   // Ball speed when setup initiated
+			float distanceToOpponentGoal = 0.0f;   // Distance from setup position to opponent goal
+			bool velocityBonusApplied = false;     // Track if velocity bonus already applied
 		};
 
 		mutable std::map<uint32_t, SetupMemory> trackers;
@@ -334,6 +339,39 @@ namespace RLGC {
 			trackers.clear();
 		}
 
+		// ====================================================================
+		// Helper: Calculate distance to opponent goal
+		// ====================================================================
+		float GetDistanceToOpponentGoal(const Player& player, const GameState& state) const {
+			Vec oppGoal = (player.team == Team::BLUE) ?
+				CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+			return (player.pos - oppGoal).Length();
+		}
+
+		// ====================================================================
+		// Helper: Get minimum required velocity for starting distance
+		// ====================================================================
+		float GetMinVelocityForDistance(float distanceToGoal) const {
+			// Distance-based minimum velocity requirements (scaled for 10240 UU field)
+			if (distanceToGoal >= 9000.0f) return 1800.0f;      // Very far (own corner ~9000+ UU)
+			if (distanceToGoal >= 7000.0f) return 1700.0f;      // Far
+			if (distanceToGoal >= 5000.0f) return 1500.0f;      // Medium
+			if (distanceToGoal >= 3000.0f) return 1200.0f;      // Close
+			return 0.0f;                                         // Very close - no minimum
+		}
+
+		// ====================================================================
+		// Helper: Get optimal velocity upper bound for bonuses
+		// ====================================================================
+		float GetMaxBonusVelocity(float distanceToGoal) const {
+			// Optimal velocity ranges for bonuses (scaled for 10240 UU field)
+			if (distanceToGoal >= 9000.0f) return 2300.0f;
+			if (distanceToGoal >= 7000.0f) return 2200.0f;
+			if (distanceToGoal >= 5000.0f) return 2000.0f;
+			if (distanceToGoal >= 3000.0f) return 1800.0f;
+			return 1500.0f;
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			auto& mem = trackers[player.carId];
 			float reward = 0.0f;
@@ -351,7 +389,12 @@ namespace RLGC {
 				mem.accumulatedSoftness = 0.0f;
 				mem.softTouchCount = 0;
 				mem.maxHeightInSetup = player.pos.z;
-				mem.setupStartBoost = player.boost;  // NEW: Capture boost at setup start
+				mem.setupStartBoost = player.boost;  // Capture boost at setup start
+
+				// NEW: Track initial ball velocity and distance to opponent goal
+				mem.setupStartBallVelocity = state.ball.vel.Length();
+				mem.distanceToOpponentGoal = GetDistanceToOpponentGoal(player, state);
+				mem.velocityBonusApplied = false;
 			}
 
 			// === PHASE 2: SETUP MAINTENANCE ===
@@ -403,6 +446,31 @@ namespace RLGC {
 				if (mem.setupStepsCount % PERSISTENCE_STEP_INTERVAL == 0 && mem.setupStepsCount > 0) {
 					reward += PERSISTENCE_BONUS;
 				}
+
+				// === PHASE 7: VELOCITY QUALITY BONUS (NEW - Distance-dependent) ===
+				if (!mem.velocityBonusApplied && mem.setupStepsCount <= 5) {
+					// Only check velocity in first 5 frames of setup
+					float currBallSpeed = state.ball.vel.Length();
+					float minVelocity = GetMinVelocityForDistance(mem.distanceToOpponentGoal);
+					float maxVelocity = GetMaxBonusVelocity(mem.distanceToOpponentGoal);
+
+					if (currBallSpeed >= minVelocity && minVelocity > 0.0f) {
+						// Ball is moving fast enough for this distance
+						mem.velocityBonusApplied = true;
+
+						// Bonus scales from 0 (at minVelocity) to 1.0 (at maxVelocity)
+						float velocityBonus = 0.0f;
+						if (currBallSpeed <= maxVelocity) {
+							velocityBonus = (currBallSpeed - minVelocity) / (maxVelocity - minVelocity);
+						} else {
+							velocityBonus = 1.0f;  // Full bonus at or above max velocity
+						}
+
+						// Reward scales with how far you are (farther = higher reward for good velocity)
+						float distanceMultiplier = RS_CLAMP(mem.distanceToOpponentGoal / 9000.0f, 0.5f, 1.5f);
+						reward += 0.5f * velocityBonus * distanceMultiplier;
+					}
+				}
 			}
 
 			// NEW: Apply boost multiplier to all setup phase rewards
@@ -422,6 +490,8 @@ namespace RLGC {
 	// ============================================================================
 	// InvertedAerialReward — Rewards flying upside-down (wheels toward ceiling)
 	// 2026-02-25 | Rev 1.0 | NJH
+	// 2026-03-08 | Rev 1.1 | NJH — apply inverted-aerial mechanic definition:
+	//   forward vector unchanged (same as normal aerial), up+right rotated 180°
 	//
 	// Detects and rewards the car for maintaining an inverted aerial orientation
 	// while airborne. This is the "wheels-up" / upside-down flying mechanic used
@@ -432,12 +502,15 @@ namespace RLGC {
 	//   - airTime >= 0.2s (ignore brief inverted flips/rolls off the ground)
 	//   - pos.z >= 300 UU (no low-altitude inversions)
 	//   - rotMat.up.z <= -0.7 (clearly inverted; threshold for "wheels mostly up")
+	//   - vel toward ball > 0 OR pos.z >= 600 (car must be approaching ball or committed)
 	//
 	// Reward structure:
-	//   1. Per-frame inversion quality (framerate-independent via deltaTime):
+	//   1. Per-frame quality score (framerate-independent via deltaTime):
 	//        invertQuality = clamp((-upZ - 0.7) / 0.3, 0, 1)
-	//        reward = REWARD_PER_SEC * invertQuality * dt
-	//      up.z = -0.7 → quality 0, up.z = -1.0 → quality 1 (perfect upside-down)
+	//        forwardAlign  = clamp(forward.Dot(toBallNorm), 0, 1)   (nose toward ball)
+	//        quality       = invertQuality * (0.6 + 0.4 * forwardAlign)
+	//        reward        = REWARD_PER_SEC * quality * dt
+	//      Captures both: how upside-down the car is AND how well it is aimed at the ball.
 	//
 	//   2. Ball proximity multiplier (keeps inversion purposeful, not random):
 	//      If distToBall < BALL_PROX_MAX (1500 UU):
@@ -450,8 +523,8 @@ namespace RLGC {
 	// Stateless — no PreStep, no stored state. All logic in GetReward.
 	//
 	// Typical exposure (Phase 6, 8-tick skip at 120Hz -> 15 steps/s):
-	//   Max per step: ~0.067 * invertQuality * proxMultiplier (before weight)
-	//   Near ball, perfectly inverted: ~0.133/step -> ~2 units/s at weight 20
+	//   Max per step (perfect inversion, nose on ball, near ball):
+	//     quality=1.0 * proxMult=2.0 * dt=0.067 -> ~0.133/step -> ~2 units/s at weight 20
 	// ============================================================================
 	class InvertedAerialReward : public Reward {
 	private:
@@ -478,8 +551,14 @@ namespace RLGC {
 			float upZ = player.rotMat.up.z;
 			if (upZ > INVERT_THRESHOLD) return 0.0f;
 
-			// Gate 5: only reward when climbing (+Z velocity) or already high up (Z >= 600)
-			if (player.vel.z <= 0.0f && player.pos.z < 600.0f) return 0.0f;
+			// Gate 5: must be moving toward ball, or already high enough to be committed.
+			// In a proper inverted aerial the car flies toward the ball (which may be falling),
+			// so vel.z > 0 is too narrow — check velocity component toward ball instead.
+			Vec toBallVec = state.ball.pos - player.pos;
+			float distToBall = toBallVec.Length();
+			Vec toBallNorm = (distToBall > 1.0f) ? (toBallVec / distToBall) : Vec(0, 0, 1);
+			float velTowardBall = player.vel.Dot(toBallNorm);
+			if (velTowardBall <= 0.0f && player.pos.z < 600.0f) return 0.0f;
 
 			// Inversion quality: 0 at threshold (-0.7), 1 at perfect upside-down (-1.0)
 			float invertQuality = RS_CLAMP(
@@ -487,14 +566,21 @@ namespace RLGC {
 				0.0f, 1.0f
 			);
 
+			// Forward-to-ball alignment: the defining property of an inverted aerial is that
+			// the forward vector stays the same as a normal aerial — nose pointed at the ball.
+			// 0 = perpendicular/away from ball, 1 = directly aimed at ball.
+			float forwardAlign = RS_CLAMP(player.rotMat.forward.Dot(toBallNorm), 0.0f, 1.0f);
+
+			// Combined quality: inversion depth * (base + forward alignment bonus).
+			// 0.6 base ensures partial credit even when not perfectly aimed.
+			float quality = invertQuality * (0.6f + 0.4f * forwardAlign);
+
 			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
 
-			// Per-frame sustained reward, scaled by how upside-down the car is
-			float reward = REWARD_PER_SEC * invertQuality * dt;
+			// Per-frame sustained reward, scaled by combined inversion+alignment quality
+			float reward = REWARD_PER_SEC * quality * dt;
 
 			// Ball proximity multiplier: up to 2x when very close to ball.
-			// Encourages purposeful inversion toward the ball, not aimless spinning.
-			float distToBall = (player.pos - state.ball.pos).Length();
 			if (distToBall < BALL_PROX_MAX) {
 				float proxFactor = 1.0f - RS_CLAMP(distToBall / BALL_PROX_MAX, 0.0f, 1.0f);
 				reward *= (1.0f + proxFactor);

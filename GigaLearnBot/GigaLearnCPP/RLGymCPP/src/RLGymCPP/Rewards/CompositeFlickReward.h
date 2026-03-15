@@ -406,8 +406,10 @@ namespace RLGC {
 			float pitchDegrees = asin(RS_CLAMP(-player.rotMat.up.z, -1.0f, 1.0f)) * 57.2958f;
 			if (pitchDegrees > MIN_PITCH_DEGREES) return 0.0f;
 
-			// SUCCESS!
-			return BACKFLIP_BASE_REWARD;
+			// SUCCESS! Scale with ball speed — same pattern as musty flick.
+			// Range: 3.0 (slow/weak) → 6.0 (2000+ UU/s). Max unchanged.
+			float speedScale = RS_CLAMP(state.ball.vel.Length() / 2000.0f, 0.0f, 1.0f);
+			return BACKFLIP_BASE_REWARD * (0.5f + 0.5f * speedScale);
 		}
 
 		// ====================================================================
@@ -466,9 +468,10 @@ namespace RLGC {
 				reward = 20.0f * (ballSpeed / 2000.0f);
 			}
 
-			// Bonus for high-speed flicks
+			// High-speed bonus scaled by how far above 2200 UU/s (not a flat cliff)
 			if (ballSpeed > 2200.0f && !isFrontFlip && !isDiagonalFlip) {
-				reward += 10.0f;
+				float speedOver = (ballSpeed - 2200.0f) / 800.0f;  // 0.0 at 2200, 1.0 at 3000+
+				reward += 8.0f * RS_CLAMP(speedOver, 0.0f, 1.0f);
 			}
 
 			return reward;
@@ -484,7 +487,10 @@ namespace RLGC {
 			Vec prevBallVel = state.prev->ball.vel;
 			float prevBallSpeed = prevBallVel.Length();
 
-			float velocityChange = ballSpeed - prevBallSpeed;
+			// Use vector delta magnitude — captures redirects (90° side flick at same speed)
+			// not just speed increases. Old scalar (ballSpeed - prevBallSpeed) was 0 for redirects.
+			Vec dv_adv = state.ball.vel - state.prev->ball.vel;
+			float velocityChange = dv_adv.Length();
 
 			if (velocityChange < 200.0f) {
 				return 0.0f;
@@ -595,28 +601,42 @@ namespace RLGC {
 
 			float sauceMultiplier = 1.0f;
 
-			if (forwardAccel > 50000.0f) {
-				float forwardBonus = RS_CLAMP((forwardAccel - 50000.0f) / 80000.0f, 0.0f, 0.4f);
+			// Forward / upward sauce (lowered thresholds so they fire on more flicks)
+			if (forwardAccel > 30000.0f) {
+				float forwardBonus = RS_CLAMP((forwardAccel - 30000.0f) / 80000.0f, 0.0f, 0.4f);
 				sauceMultiplier += forwardBonus;
 			}
 
-			if (upwardAccel > 40000.0f) {
-				float upwardBonus = RS_CLAMP((upwardAccel - 40000.0f) / 60000.0f, 0.0f, 0.35f);
+			if (upwardAccel > 25000.0f) {
+				float upwardBonus = RS_CLAMP((upwardAccel - 25000.0f) / 60000.0f, 0.0f, 0.35f);
 				sauceMultiplier += upwardBonus;
 			}
 
-			if (forwardAccel > 40000.0f && upwardAccel > 30000.0f) {
+			if (forwardAccel > 30000.0f && upwardAccel > 20000.0f) {
 				sauceMultiplier += 0.3f;
+			}
+
+			// Perpendicular sauce: component of dv perpendicular to the ball’s previous trajectory.
+			// Maximum (0.5 bonus) for a pure 90-degree side-flick redirect; 0 for a straight push.
+			// This is the core "saucy" metric — how dramatically the flick redirects the ball.
+			Vec prevBallVel = state.prev->ball.vel;
+			float prevBallSpeed = prevBallVel.Length();
+			if (prevBallSpeed > 1.0f) {
+				Vec prevBallVelNorm = prevBallVel / prevBallSpeed;
+				Vec dvParallel      = prevBallVelNorm * dv.Dot(prevBallVelNorm);
+				Vec dvPerp          = dv - dvParallel;
+				float perpAccel     = dvPerp.Length() / RS_MAX(dt, 1e-3f);
+				float saucePerpBonus = RS_CLAMP(perpAccel / INSANE_ACCEL, 0.0f, 0.5f);
+				sauceMultiplier += saucePerpBonus;
 			}
 
 			float reward = accelReward * sauceMultiplier;
 
-			float prevSpeed = state.prev->ball.vel.Length();
-			float curSpeed = state.ball.vel.Length();
-			float dSpeed = curSpeed - prevSpeed;
-			float speedGate = RS_CLAMP(dSpeed / 600.0f, 0.0f, 1.0f);
-
-			reward *= (0.25f + 0.75f * speedGate);
+			// Vector delta gate: opens for any large velocity change including pure redirects.
+			// Replaces old scalar speedGate (dSpeed = curSpeed - prevSpeed) which crushed
+			// side flicks (pure redirects with ~0 speed delta) to 25% of deserved reward.
+			float dvGate = RS_CLAMP(dv.Length() / 400.0f, 0.0f, 1.0f);
+			reward *= (0.3f + 0.7f * dvGate);
 
 			return reward;
 		}

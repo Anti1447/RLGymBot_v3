@@ -296,3 +296,274 @@ public:
         return 0.0f;
     }
 };
+
+// ============================================================================
+// InfieldPassReward — Champion+ lateral "switch" pass to teammate at similar Y
+// 2026-03-08 | Rev 1.0 | NJH
+//
+// An infield pass moves the ball primarily in X (lateral) to a teammate at
+// roughly the same field-depth (Y) as the passer. The pass should place the
+// ball ahead of the receiver — between the receiver and the opponent goal,
+// closer to the receiver than to the goal.
+//
+// Gate conditions (all must pass):
+//   - ballTouchedStep
+//   - 2v2+ (players.size() >= 4)
+//   - abs(ball.vel.x) > abs(ball.vel.y)   — X-dominant direction
+//   - ball speed >= MIN_BALL_SPEED (400 UU/s)
+//
+// Per receiver (best score wins):
+//   - Teammate Y within Y_MATCH_THRESHOLD (1500 UU) of passer
+//   - Ball velocity (XY) aimed toward receiver: dot >= DIR_THRESHOLD (0.25)
+//   - vel.x sign matches (receiver.x - ball.x) — ball heading toward receiver's X
+//   - t = (receiver.x - ball.x) / vel.x in (0, MAX_T=5s]
+//   - projY = ball.y + vel.y * t must be between receiver.y and goal.y
+//     (ball lands ahead of receiver, not behind or in the goal)
+//
+// Score = dotToReceiver * yMatchQuality * placementQuality
+//   placementQuality: triangle peak at attackProgress=0.2 (just in front of receiver)
+// Reward = MAX_REWARD (5.0) * score
+// ============================================================================
+class InfieldPassReward : public Reward {
+private:
+    static constexpr float Y_MATCH_THRESHOLD = 1500.0f; // passer-receiver Y gap max
+    static constexpr float DIR_THRESHOLD     = 0.25f;   // min XY dot toward receiver
+    static constexpr float MIN_BALL_SPEED    = 400.0f;  // UU/s
+    static constexpr float MAX_T             = 5.0f;    // max time-of-flight to project
+    static constexpr float MAX_REWARD        = 5.0f;
+
+public:
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep) return 0.0f;
+        if ((int)state.players.size() < 4) return 0.0f;
+
+        // X must dominate Y in ball direction
+        float absVx = std::abs(state.ball.vel.x);
+        float absVy = std::abs(state.ball.vel.y);
+        if (absVx <= absVy) return 0.0f;
+
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < MIN_BALL_SPEED) return 0.0f;
+
+        // Goal Y for "ahead of receiver" check
+        float goalY = (player.team == Team::BLUE)
+            ?  CommonValues::GOAL_LINE_Y   // +5120
+            : -CommonValues::GOAL_LINE_Y;  // -5120
+
+        // Ball velocity in XY plane (normalised)
+        Vec ballVel2D = Vec(state.ball.vel.x, state.ball.vel.y, 0.0f);
+        float bv2DLen = ballVel2D.Length();
+        if (bv2DLen < 1.0f) return 0.0f;
+        Vec ballVelNorm2D = Vec(ballVel2D.x / bv2DLen, ballVel2D.y / bv2DLen, 0.0f);
+
+        const Player* bestReceiver = nullptr;
+        float bestScore = -1.0f;
+
+        for (const auto& other : state.players) {
+            if (other.carId == player.carId) continue;
+            if (other.team != player.team)   continue;
+            if (other.isDemoed)              continue;
+
+            // Y-match: receiver must be at similar field depth as passer
+            float yDelta = std::abs(other.pos.y - player.pos.y);
+            if (yDelta > Y_MATCH_THRESHOLD) continue;
+            float yMatchQuality = 1.0f - (yDelta / Y_MATCH_THRESHOLD);
+
+            // Direction: ball XY velocity aimed toward receiver
+            Vec toReceiver2D = Vec(other.pos.x - state.ball.pos.x,
+                                   other.pos.y - state.ball.pos.y, 0.0f);
+            float recDist2D = toReceiver2D.Length();
+            if (recDist2D < 50.0f) continue;
+            Vec recNorm2D = Vec(toReceiver2D.x / recDist2D, toReceiver2D.y / recDist2D, 0.0f);
+            float dotToReceiver = ballVelNorm2D.x * recNorm2D.x + ballVelNorm2D.y * recNorm2D.y;
+            if (dotToReceiver < DIR_THRESHOLD) continue;
+
+            // Time-of-flight to receiver's X (ball must be heading toward that X)
+            float xDiff = other.pos.x - state.ball.pos.x;
+            if (state.ball.vel.x == 0.0f) continue;
+            if ((xDiff > 0.0f) != (state.ball.vel.x > 0.0f)) continue; // wrong direction
+            float t = xDiff / state.ball.vel.x;
+            if (t <= 0.0f || t > MAX_T) continue;
+
+            // Where does the ball land in Y at that time?
+            float projY = state.ball.pos.y + state.ball.vel.y * t;
+
+            // "Between receiver and goal, closer to receiver"
+            float span = goalY - other.pos.y; // distance receiver→goal along Y
+            if (std::abs(span) < 50.0f) continue;
+            bool landedAhead, landedShortOfGoal;
+            if (player.team == Team::BLUE) {
+                landedAhead     = projY > other.pos.y;
+                landedShortOfGoal = projY < CommonValues::GOAL_LINE_Y;
+            } else {
+                landedAhead     = projY < other.pos.y;
+                landedShortOfGoal = projY > -CommonValues::GOAL_LINE_Y;
+            }
+            if (!landedAhead || !landedShortOfGoal) continue;
+
+            float attackProgress = RS_CLAMP(
+                (player.team == Team::BLUE)
+                    ? (projY - other.pos.y) / span
+                    : (other.pos.y - projY) / std::abs(span),
+                0.0f, 1.0f
+            );
+
+            // Triangle quality: peaks at 0.2 (just ahead of receiver), falls off toward 0 and 1
+            float placementQuality;
+            if (attackProgress <= 0.2f) {
+                placementQuality = attackProgress / 0.2f;
+            } else {
+                placementQuality = 1.0f - (attackProgress - 0.2f) / 0.8f;
+            }
+            placementQuality = RS_CLAMP(placementQuality, 0.0f, 1.0f);
+
+            float score = dotToReceiver * yMatchQuality * placementQuality;
+            if (score > bestScore) {
+                bestScore    = score;
+                bestReceiver = &other;
+            }
+        }
+
+        if (bestScore <= 0.0f || !bestReceiver) return 0.0f;
+        return MAX_REWARD * bestScore;
+    }
+};
+
+// ============================================================================
+// DownfieldPassReward — Champion+ long clearance from own half to attacking
+// teammate 2000–6000 Y units downfield.
+// 2026-03-08 | Rev 1.0 | NJH
+//
+// A downfield pass is a kick from the defensive half to a receiver already
+// in the attacking half, with the ball landing near the receiver on its way
+// to the opponent goal (ball "between receiver and goal, closer to receiver").
+//
+// Gate conditions (all must pass):
+//   - ballTouchedStep
+//   - 2v2+ (players.size() >= 4)
+//   - ball speed >= MIN_BALL_SPEED (500 UU/s)
+//   - Passer in own half (Blue: player.pos.y < 0, Orange: player.pos.y > 0)
+//   - Ball forward component >= FORWARD_THRESHOLD (0.4 × ballSpeed)
+//
+// Per receiver (best score wins):
+//   - Receiver in attacking half
+//   - Y-separation (receiver attackY − passer attackY) in [2000, 6000]
+//   - Ball velocity aimed toward receiver: dot >= DIR_THRESHOLD (0.2)
+//   - t = (receiver.y − ball.y) / ball.vel.y in (0, MAX_T=6s]
+//   - X deviation at landing (ball.x + vel.x*t vs receiver.x) < X_PROX_RANGE (1500)
+//
+// Score = forwardComponent * distQuality * dirDot * xProxScore
+//   distQuality: triangle peak at IDEAL_Y_SEP=4000 UU
+// Reward = MAX_REWARD (7.0) * score
+// ============================================================================
+class DownfieldPassReward : public Reward {
+private:
+    static constexpr float MIN_Y_SEP         = 2000.0f;
+    static constexpr float IDEAL_Y_SEP       = 4000.0f;
+    static constexpr float MAX_Y_SEP         = 6000.0f;
+    static constexpr float FORWARD_THRESHOLD = 0.4f;   // fraction of ballSpeed
+    static constexpr float DIR_THRESHOLD     = 0.2f;   // min dot toward receiver
+    static constexpr float X_PROX_RANGE      = 1500.0f; // max X deviation at landing
+    static constexpr float MIN_BALL_SPEED    = 500.0f;
+    static constexpr float MAX_T             = 6.0f;
+    static constexpr float MAX_REWARD        = 7.0f;
+
+public:
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep) return 0.0f;
+        if ((int)state.players.size() < 4) return 0.0f;
+
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < MIN_BALL_SPEED) return 0.0f;
+
+        // Passer must be in own half
+        bool inOwnHalf = (player.team == Team::BLUE)
+            ? (player.pos.y < 0.0f)
+            : (player.pos.y > 0.0f);
+        if (!inOwnHalf) return 0.0f;
+
+        // Ball must have significant forward (attacking) velocity component
+        float forwardBallVel = (player.team == Team::BLUE)
+            ?  state.ball.vel.y
+            : -state.ball.vel.y;
+        float forwardComponent = forwardBallVel / ballSpeed; // [-1, 1]
+        if (forwardComponent < FORWARD_THRESHOLD) return 0.0f;
+
+        // Ball velocity in XY (for direction dot)
+        Vec ballVel2D = Vec(state.ball.vel.x, state.ball.vel.y, 0.0f);
+        float bv2DLen = ballVel2D.Length();
+        if (bv2DLen < 1.0f) return 0.0f;
+        Vec ballVelNorm2D = Vec(ballVel2D.x / bv2DLen, ballVel2D.y / bv2DLen, 0.0f);
+
+        // Passer attack-axis Y (negative for Blue in own half, positive for Orange in own half)
+        float passerAttackY = (player.team == Team::BLUE)
+            ?  player.pos.y
+            : -player.pos.y;
+
+        const Player* bestReceiver = nullptr;
+        float bestScore = -1.0f;
+
+        for (const auto& other : state.players) {
+            if (other.carId == player.carId) continue;
+            if (other.team != player.team)   continue;
+            if (other.isDemoed)              continue;
+
+            // Receiver must be in attacking half
+            bool recInAttack = (player.team == Team::BLUE)
+                ? (other.pos.y > 0.0f)
+                : (other.pos.y < 0.0f);
+            if (!recInAttack) continue;
+
+            // Y-separation in attack axis
+            float receiverAttackY = (player.team == Team::BLUE)
+                ?  other.pos.y
+                : -other.pos.y;
+            float ySep = receiverAttackY - passerAttackY; // always positive (receiver ahead)
+            if (ySep < MIN_Y_SEP || ySep > MAX_Y_SEP) continue;
+
+            // Direction dot toward receiver
+            Vec toReceiver2D = Vec(other.pos.x - state.ball.pos.x,
+                                   other.pos.y - state.ball.pos.y, 0.0f);
+            float recDist2D = toReceiver2D.Length();
+            if (recDist2D < 50.0f) continue;
+            Vec recNorm2D = Vec(toReceiver2D.x / recDist2D, toReceiver2D.y / recDist2D, 0.0f);
+            float dirDot = ballVelNorm2D.x * recNorm2D.x + ballVelNorm2D.y * recNorm2D.y;
+            if (dirDot < DIR_THRESHOLD) continue;
+
+            // Time for ball to cross receiver's Y
+            float yDiffToCross = other.pos.y - state.ball.pos.y;
+            if (std::abs(state.ball.vel.y) < 1.0f) continue;
+            if ((yDiffToCross > 0.0f) != (state.ball.vel.y > 0.0f)) continue; // wrong direction
+            float t = yDiffToCross / state.ball.vel.y;
+            if (t <= 0.0f || t > MAX_T) continue;
+
+            // X-proximity when ball crosses receiver's Y
+            float ballXAtT = state.ball.pos.x + state.ball.vel.x * t;
+            float xDeviation = std::abs(ballXAtT - other.pos.x);
+            if (xDeviation > X_PROX_RANGE) continue;
+            float xProxScore = 1.0f - RS_CLAMP(xDeviation / X_PROX_RANGE, 0.0f, 1.0f);
+
+            // Distance quality: triangle peaking at IDEAL_Y_SEP
+            float distQuality;
+            if (ySep <= IDEAL_Y_SEP) {
+                distQuality = (ySep - MIN_Y_SEP) / (IDEAL_Y_SEP - MIN_Y_SEP);
+            } else {
+                distQuality = 1.0f - (ySep - IDEAL_Y_SEP) / (MAX_Y_SEP - IDEAL_Y_SEP);
+            }
+            distQuality = RS_CLAMP(distQuality, 0.0f, 1.0f);
+
+            float score = forwardComponent * distQuality * dirDot * xProxScore;
+            if (score > bestScore) {
+                bestScore    = score;
+                bestReceiver = &other;
+            }
+        }
+
+        if (bestScore <= 0.0f || !bestReceiver) return 0.0f;
+        return MAX_REWARD * bestScore;
+    }
+};

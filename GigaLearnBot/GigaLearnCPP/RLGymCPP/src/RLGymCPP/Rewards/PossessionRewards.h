@@ -68,9 +68,10 @@ PROBLEMS WITH ChatGPT'S IMPLEMENTATION:
 
 class TimeToBalPossessionReward : public Reward {
 private:
-    mutable std::map<uint32_t, float> possessionScoreHistory;
-    mutable std::map<uint32_t, float> possessionDuration;
-    
+    // Per-player state tracking (immutable in GetReward, updated in PreStep)
+    std::map<uint32_t, float> possessionScoreHistory;
+    std::map<uint32_t, float> possessionDuration;
+
     // Calculate actual time-to-ball considering physics
     float CalculateTimeToReach(const Player& player, const Vec& ballPos, const Vec& ballVel) const {
         Vec toBall = ballPos - player.pos;
@@ -94,9 +95,13 @@ private:
         // If not moving toward ball, account for turning time
         float forwardAlignment = player.rotMat.forward.Dot(dirToBall);
         float turnPenalty = 1.0f;
-        if (forwardAlignment < 0.7f) {
-            // Need to turn - add penalty
-            turnPenalty = 1.5f + (1.0f - forwardAlignment) * 0.5f;
+        if (forwardAlignment < 0.9f) {
+            // Calculate actual turning angle (in radians, then scale to penalty)
+            // Clamp to avoid acos domain errors
+            float alignmentClamped = RS_CLAMP(forwardAlignment, -1.0f, 1.0f);
+            float turningAngle = acosf(alignmentClamped); // Radians: 0 = aligned, π/2 = perpendicular
+            // Convert angle to penalty: 0 rad = 1.0x, π/2 rad = 2.0x, π rad = 3.0x
+            turnPenalty = 1.0f + (turningAngle / 3.14159265359f) * 2.0f;
         }
         
         // Estimate time with boost acceleration or without
@@ -134,8 +139,22 @@ private:
         return RS_MAX(0.0f, 1.0f - (distToBall / 2000.0f) - (ballSpeed / 3000.0f));
     }
     
+    // Detect air dribble possession (P3-1: Air dribble bonus)
+    // Ball must be 200-600 UU above car for air dribble credit
+    bool IsAirDribble(const Player& player, const GameState& state) const {
+        Vec relBallPos = state.ball.pos - player.pos;
+        float heightAboveCar = relBallPos.z;
+        float horizDist = Vec(relBallPos.x, relBallPos.y, 0).Length();
+
+        // Ball above car (200-600 UU) and within horizontal range (300 UU)
+        if (heightAboveCar > 200.0f && heightAboveCar < 600.0f && horizDist < 300.0f) {
+            return true;
+        }
+        return false;
+    }
+
     // Calculate opponent pressure intensity
-    float CalculateOpponentPressure(const Player& player, const GameState& state, 
+    float CalculateOpponentPressure(const Player& player, const GameState& state,
                                     const Vec& ballPos) const {
         float maxPressure = 0.0f;
         
@@ -173,63 +192,95 @@ public:
         possessionDuration.clear();
     }
 
+    virtual void PreStep(const GameState& state) override {
+        // Update possession state BEFORE GetReward is called
+        // This ensures thread-safe state updates (all calls to PreStep complete before GetReward calls)
+        for (const auto& player : state.players) {
+            // Calculate time-to-ball for this player
+            float myTimeToReach = CalculateTimeToReach(player, state.ball.pos, state.ball.vel);
+
+            float oppMinTimeToReach = 10.0f;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team) continue;
+                if (opp.isDemoed) continue;
+
+                float oppTime = CalculateTimeToReach(opp, state.ball.pos, state.ball.vel);
+                oppMinTimeToReach = RS_MIN(oppMinTimeToReach, oppTime);
+            }
+
+            // Possession score: positive if player will reach first
+            float timeDiff = oppMinTimeToReach - myTimeToReach;
+            float possessionScore = RS_CLAMP(timeDiff / 2.0f, -1.0f, 1.0f);
+
+            // Modify by ball controllability
+            float controllability = CalculateBallControllability(player, state);
+            possessionScore *= (0.7f + 0.3f * controllability); // Time-based dominates, but control quality still matters
+
+            // Reduce score if under heavy pressure
+            float pressure = CalculateOpponentPressure(player, state, state.ball.pos);
+            possessionScore *= (1.0f - pressure * pressure); // Quadratic penalty: small pressure = minimal impact, high pressure = severe impact
+
+            // Update possession state for next GetReward call
+            possessionScoreHistory[player.carId] = possessionScore;
+
+            // Update duration tracking
+            if (possessionScore > 0.3f) {
+                possessionDuration[player.carId] += state.deltaTime;
+            } else {
+                possessionDuration[player.carId] = 0.0f;
+            }
+        }
+    }
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float reward = 0.0f;
-        
-        // Calculate time-to-ball for me and closest opponent
+
+        // Read-only access to state computed in PreStep
+        float prevScore = possessionScoreHistory.count(player.carId) ? possessionScoreHistory[player.carId] : 0.0f;
+        float duration = possessionDuration.count(player.carId) ? possessionDuration[player.carId] : 0.0f;
+
+        // Recalculate current score (from PreStep, it should match)
         float myTimeToReach = CalculateTimeToReach(player, state.ball.pos, state.ball.vel);
-        
         float oppMinTimeToReach = 10.0f;
         for (const auto& opp : state.players) {
             if (opp.team == player.team) continue;
             if (opp.isDemoed) continue;
-            
             float oppTime = CalculateTimeToReach(opp, state.ball.pos, state.ball.vel);
             oppMinTimeToReach = RS_MIN(oppMinTimeToReach, oppTime);
         }
-        
-        // Possession score: positive if I'll reach first
+
         float timeDiff = oppMinTimeToReach - myTimeToReach;
         float possessionScore = RS_CLAMP(timeDiff / 2.0f, -1.0f, 1.0f);
-        
-        // Modify by ball controllability
         float controllability = CalculateBallControllability(player, state);
-        possessionScore *= (0.5f + 0.5f * controllability); // Scale by control quality
-        
-        // Reduce score if under heavy pressure
+        possessionScore *= (0.5f + 0.5f * controllability);
         float pressure = CalculateOpponentPressure(player, state, state.ball.pos);
-        possessionScore *= (1.0f - 0.3f * pressure);
-        
-        // Track possession duration
-        float prevScore = possessionScoreHistory[player.carId];
-        possessionScoreHistory[player.carId] = possessionScore;
-        
+        possessionScore *= (1.0f - pressure * pressure); // Quadratic penalty: matches PreStep calculation
+
         if (possessionScore > 0.3f) {
-            // In possession
-            possessionDuration[player.carId] += state.deltaTime;
-            float duration = possessionDuration[player.carId];
-            
-            // Reward maintaining possession
+            // In possession - reward maintaining it
             reward += possessionScore * 0.5f;
-            
-            // Bonus for extended possession (diminishing returns)
+
+            // Bonus for extended possession (diminishing returns, caps at 30s)
             if (duration > 1.0f) {
-                reward += RS_MIN(duration / 10.0f, 1.0f) * 0.3f;
+                reward += RS_MIN(duration / 30.0f, 1.0f) * 0.5f;
             }
-        } else {
-            possessionDuration[player.carId] = 0.0f;
+
+            // P3-1: Bonus for air dribble possession (more challenging variant)
+            if (IsAirDribble(player, state)) {
+                reward += 0.3f; // Bonus for maintaining air dribble
+            }
         }
-        
-        // Reward gaining possession
+
+        // Reward gaining possession (transition from not having to having)
         if (prevScore < 0.0f && possessionScore > 0.3f) {
             reward += 2.0f; // Won possession
         }
-        
-        // Penalize losing possession
+
+        // Penalize losing possession (transition from having to not having)
         if (prevScore > 0.3f && possessionScore < 0.0f) {
             reward -= 1.0f; // Lost possession
         }
-        
+
         return reward;
     }
 };
