@@ -96,7 +96,8 @@
       "Bash(powershell.exe -Command \"Get-ChildItem C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\GigaLearnCPP\\\\RLGymCPP\\\\src\\\\RLGymCPP\\\\Rewards\\\\PositioningRewards.h | Select-Object Name, Length\")",
       "Bash(powershell.exe -NoProfile -Command \":*)",
       "Bash(powershell.exe -NoProfile:*)",
-      "Bash(grep -l \"state\\\\.players\\\\.size\\(\\)\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)"
+      "Bash(grep -l \"state\\\\.players\\\\.size\\(\\)\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
+      "Bash(pwsh -Command ':*)"
     ]
   }
 }

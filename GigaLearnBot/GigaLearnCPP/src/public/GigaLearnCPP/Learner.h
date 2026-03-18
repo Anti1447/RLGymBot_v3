@@ -4,6 +4,7 @@
 #include <RLGymCPP/EnvSet/EnvSet.h>
 #include <RLGymCPP/Rewards/RewardMetricsCollector.h>
 #include <RLGymCPP/Rewards/RewardDiagnostician.h>
+#include <RLGymCPP/Rewards/FlipResetMetricsCollector.h>
 #include "RLGymCPP/Utils/KickoffController.h"
 #include "Util/MetricSender.h"
 #include "Util/RenderSender.h"
@@ -57,6 +58,9 @@ namespace GGL {
 
 		// Reward metrics collection for automated diagnostics
 		RewardMetricsCollector metricsCollector;
+
+		// Flip reset metrics collection
+		FlipResetMetricsCollector flipResetMetricsCollector;
 
 		// MuZero reanalysis components
 		ReanalysisBuffer* reanalysisBuffer = nullptr;

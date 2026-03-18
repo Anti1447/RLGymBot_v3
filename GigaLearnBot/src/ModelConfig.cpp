@@ -64,12 +64,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_6_CHAMPION:
-        cfg.entropyScale = 0.022f;
-        cfg.policyLR = 1.10e-4f;
-        cfg.criticLR = 1.10e-4f;
+        cfg.entropyScale = 0.0215f;
+        cfg.policyLR = 1.09e-4f;
+        cfg.criticLR = 1.09e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.75f;
+        cfg.randomStateChance = 0.65f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;

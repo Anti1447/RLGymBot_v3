@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cmath>
 #include "RewardMath.h"
+#include "../Math.h"
 #include <algorithm>
 
 

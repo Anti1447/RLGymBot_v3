@@ -5,6 +5,8 @@
 
 #include <torch/cuda.h>
 #include <nlohmann/json.hpp>
+#include <fstream>
+#include <ctime>
 #include <pybind11/embed.h>
 
 #ifdef RG_CUDA_SUPPORT
@@ -176,6 +178,9 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 		RG_LOG("\tReward metrics collector initialized with " << metricsCollector.trackers.size() << " rewards");
 	}
 
+	// Initialize flip reset metrics collector
+	flipResetMetricsCollector.Initialize(envSet->arenas.size() * 3); // Max 3 players per team per arena
+
 	RG_LOG(RG_DIVIDER);
 }
 
@@ -288,6 +293,19 @@ void GGL::Learner::Save() {
 			totalTimesteps,
 			(int)metricsCollector.trackers.size()
 		);
+
+		// Write flip reset metrics
+		{
+			nlohmann::json flipResetJson;
+			flipResetJson["timestamp_utc"] = std::time(nullptr);
+			flipResetJson["total_timesteps"] = totalTimesteps;
+			flipResetJson["metrics"] = flipResetMetricsCollector.GetMetricsJSON();
+
+			std::ofstream fOut(saveFolder / "FLIP_RESET_METRICS.json");
+			if (fOut.is_open()) {
+				fOut << flipResetJson.dump(4);
+			}
+		}
 
 		// Snapshot ratings for next interval's delta tracking
 		if (versionMgr)
@@ -597,6 +615,9 @@ void GGL::Learner::Start() {
 		while (true) {
 			Report report = {};
 
+			// Reset flip reset metrics for this iteration
+			flipResetMetricsCollector.Reset();
+
 			bool isFirstIteration = (totalTimesteps == 0);
 
 			// TODO: Old version switching messes up the gameplay potentially
@@ -672,7 +693,7 @@ void GGL::Learner::Start() {
 							// TODO: This samples from old versions too
 							int numSamples = RS_MAX(envSet->state.numPlayers, config.maxObsSamples);
 							for (int i = 0; i < numSamples; i++) {
-								int idx = Math::RandInt(0, envSet->state.numPlayers);
+								int idx = RocketSim::Math::RandInt(0, envSet->state.numPlayers);
 								obsStat->IncrementRow(&envSet->state.obs.At(idx, 0));
 							}
 
@@ -758,11 +779,11 @@ void GGL::Learner::Start() {
 						}
 
 						// Calc average rewards
-						if (config.addRewardsToMetrics && (Math::RandInt(0, config.rewardSampleRandInterval) == 0)) {
+						if (config.addRewardsToMetrics && (RocketSim::Math::RandInt(0, config.rewardSampleRandInterval) == 0)) {
 							int numSamples = RS_MIN(envSet->arenas.size(), config.maxRewardSamples);
 							std::unordered_map<std::string, AvgTracker> avgRewards = {};
 							for (int i = 0; i < numSamples; i++) {
-								int arenaIdx = Math::RandInt(0, envSet->arenas.size());
+								int arenaIdx = RocketSim::Math::RandInt(0, envSet->arenas.size());
 								auto& prevRewards = envSet->state.lastRewards[i];
 
 								for (int j = 0; j < envSet->rewards[arenaIdx].size(); j++) {
@@ -777,6 +798,12 @@ void GGL::Learner::Start() {
 							// Feed into metrics collector for diagnostics
 							if (metricsCollector.initialized)
 								metricsCollector.RecordRewards(avgRewards);
+						}
+
+						// Update flip reset metrics for all game states
+						float deltaTime = (float)config.tickSkip / 120.0f;
+						for (const auto& gameState : envSet->state.gameStates) {
+							flipResetMetricsCollector.Step(gameState, deltaTime);
 						}
 
 						// Now that we've inferred and stepped the env, we can add that stuff to the trajectories
@@ -1078,6 +1105,23 @@ void GGL::Learner::Start() {
 						Save();
 					}
 				}
+
+				// Finalize and report flip reset metrics
+				flipResetMetricsCollector.Finalize();
+				const auto& flipResetStats = flipResetMetricsCollector.GetStats();
+				report.AddAvg("FlipReset/ResetCount", (float)flipResetStats.resetCount);
+				report.AddAvg("FlipReset/AttemptCount", (float)flipResetStats.attemptCount);
+				report.AddAvg("FlipReset/SuccessRate", flipResetStats.GetSuccessRate());
+				report.AddAvg("FlipReset/AvgHeight", flipResetStats.GetHeightMean());
+				report.AddAvg("FlipReset/HeightMin", flipResetStats.heightMin);
+				report.AddAvg("FlipReset/HeightMax", flipResetStats.heightMax);
+				report.AddAvg("FlipReset/HeightStd", flipResetStats.GetHeightStd());
+				report.AddAvg("FlipReset/AvgTimeBetweenResets", flipResetStats.GetAvgTimeBetweenResets());
+				report.AddAvg("FlipReset/HandbrakeBonus%", flipResetStats.GetHandbraakeBonusRate());
+				report.AddAvg("FlipReset/BoostOffBonus%", flipResetStats.GetBoostOffBonusRate());
+				report.AddAvg("FlipReset/PostReset/Shot%", flipResetStats.GetPostResetShotRate());
+				report.AddAvg("FlipReset/PostReset/Clear%", flipResetStats.GetPostResetClearRate());
+				report.AddAvg("FlipReset/PostReset/Neutral%", flipResetStats.GetPostResetNeutralRate());
 
 				report.Finish();
 

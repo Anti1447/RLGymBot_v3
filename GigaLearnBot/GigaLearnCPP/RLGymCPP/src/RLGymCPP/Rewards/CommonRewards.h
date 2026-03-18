@@ -198,20 +198,84 @@ namespace RLGC {
 	class EnhancedVelocityBallToGoalReward : public Reward {
 	private:
 		static constexpr float TOUCH_BONUS = 0.25f;             // +25% for active touches
-		static constexpr float OPTIMAL_SHOT_DISTANCE = 2000.0f; // Peak reward distance
-		static constexpr float MAX_REWARD_DISTANCE = 5000.0f;   // Decay cutoff
 		static constexpr float MIN_ALIGNMENT = 0.15f;           // ~82° angle min
+
+		// NEW: Proximity-based alignment weighting (direction-prioritizing near goal)
+		static constexpr float CLOSE_RANGE = 1500.0f;           // < 1500 UU: boost zone
+		static constexpr float MID_RANGE = 3500.0f;             // 1500-3500 UU: balanced zone
+		static constexpr float FAR_RANGE = 5000.0f;             // 3500-5000 UU: decay zone
+		static constexpr float CLOSE_BOOST = 1.5f;              // Max boost at close range
+		static constexpr float DEFENSIVE_ZONE = 2500.0f;        // Defensive reward triggers within this distance
 
 	public:
 		bool ownGoal = false;
 		EnhancedVelocityBallToGoalReward(bool ownGoal = false) : ownGoal(ownGoal) {}
 
+		// NEW: Proximity-based alignment weight function
+		// Returns weight multiplier based on distance to goal
+		// Close shots (< 1500 UU): 1.5x boost, prioritizes direction over speed
+		// Mid shots (1500-3500 UU): 1.2x to 0.8x, balanced
+		// Far shots (3500+ UU): 0.8x to 0.4x, requires precision
+		static inline float GetAlignmentWeightByDistance(float distToGoal) {
+			if (distToGoal < CLOSE_RANGE) {
+				// Close-range boost: linear from 1.5x at 0 to 1.2x at 1500
+				return CLOSE_BOOST - (0.3f * distToGoal / CLOSE_RANGE);
+			} else if (distToGoal < MID_RANGE) {
+				// Mid-range balanced: linear from 1.2x at 1500 to 0.8x at 3500
+				float progress = (distToGoal - CLOSE_RANGE) / (MID_RANGE - CLOSE_RANGE);
+				return 1.2f - (0.4f * progress);
+			} else if (distToGoal < FAR_RANGE) {
+				// Far-range decay: linear from 0.8x at 3500 to 0.4x at 5000
+				float progress = (distToGoal - MID_RANGE) / (FAR_RANGE - MID_RANGE);
+				return 0.8f - (0.4f * progress);
+			} else {
+				return 0.0f;  // No reward beyond 5000 UU
+			}
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// NEW: Defensive component (check own goal threat first)
+			Vec ownGoalPos;
+			if (player.team == Team::BLUE) {
+				ownGoalPos = CommonValues::BLUE_GOAL_BACK;
+			} else {
+				ownGoalPos = CommonValues::ORANGE_GOAL_BACK;
+			}
+
+			float distToOwnGoal = (state.ball.pos - ownGoalPos).Length();
+
+			if (distToOwnGoal < DEFENSIVE_ZONE) {  // Ball threatening own goal
+				Vec ballDirAwayFromOwn = (state.ball.pos - ownGoalPos).Normalized();
+				float defensiveAlignment = RS_CLAMP(
+					ballDirAwayFromOwn.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED),
+					0.0f,
+					1.0f
+				);
+
+				if (defensiveAlignment > MIN_ALIGNMENT) {
+					// Reward pushing ball away from own goal (0.5x priority vs. offense)
+					float defensiveWeight = GetAlignmentWeightByDistance(distToOwnGoal) * 0.5f;
+					float defensiveReward = defensiveAlignment * defensiveWeight;
+
+					// Apply touch bonus to defense too
+					if (player.ballTouchedStep) {
+						defensiveReward = RS_CLAMP(defensiveReward + TOUCH_BONUS, 0.0f, 1.5f);
+					}
+					return defensiveReward;
+				}
+			}
+
+			// Standard offensive reward calculation
 			bool targetOrangeGoal = player.team == Team::BLUE;
 			if (ownGoal)
 				targetOrangeGoal = !targetOrangeGoal;
 
-			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+			Vec targetPos;
+			if (targetOrangeGoal) {
+				targetPos = CommonValues::ORANGE_GOAL_BACK;
+			} else {
+				targetPos = CommonValues::BLUE_GOAL_BACK;
+			}
 
 			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
 			float goalAlignment = ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
@@ -222,26 +286,19 @@ namespace RLGC {
 			// Clamp to [0, 1] for conservative reward
 			float baseAlignment = RS_CLAMP(goalAlignment, 0.0f, 1.0f);
 
-			// Distance weighting: favor shots closer to goal
+			// NEW: Proximity-based alignment weighting (direction-prioritizing, not speed-limiting)
 			float distToGoal = (state.ball.pos - targetPos).Length();
-			float distanceWeight = 1.0f;
+			float alignmentWeight = GetAlignmentWeightByDistance(distToGoal);
 
-			if (distToGoal < OPTIMAL_SHOT_DISTANCE) {
-				// In optimal range: full reward
-				distanceWeight = 1.0f;
-			} else if (distToGoal < MAX_REWARD_DISTANCE) {
-				// Decay beyond optimal
-				float decay = (distToGoal - OPTIMAL_SHOT_DISTANCE) / (MAX_REWARD_DISTANCE - OPTIMAL_SHOT_DISTANCE);
-				distanceWeight = 1.0f - 0.6f * decay;  // 1.0x at optimal, 0.4x at max
-			} else {
+			if (alignmentWeight <= 0.0f) {
 				return 0.0f;  // Too far, no reward
 			}
 
-			float reward = baseAlignment * distanceWeight;
+			float reward = baseAlignment * alignmentWeight;
 
-			// Intent bonus: reward active touches more heavily
+			// Intent bonus: reward active touches more heavily (increased cap to 1.5)
 			if (player.ballTouchedStep) {
-				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.3f);
+				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.5f);
 			}
 
 			return reward;

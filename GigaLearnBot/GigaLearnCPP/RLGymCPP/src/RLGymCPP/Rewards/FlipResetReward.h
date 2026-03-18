@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
+#include "OutplayRewards.h"
 
 namespace RLGC {
 

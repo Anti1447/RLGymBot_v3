@@ -30,6 +30,7 @@
 #include <RLGymCPP/Rewards/DefensiveClearingRewards.h>
 #include <RLGymCPP/Rewards/SpecializedFlickRewards.h>
 #include <RLGymCPP/Rewards/AerialRewards.h>
+#include <RLGymCPP/Rewards/AerialOutplayReward.h>
 #include <RLGymCPP/Rewards/IntelligentWavedashReward.h>
 #include <RLGymCPP/Rewards/KickoffStrategyReward.h>
 #include <RLGymCPP/Rewards/KickoffRandomizationReward.h>

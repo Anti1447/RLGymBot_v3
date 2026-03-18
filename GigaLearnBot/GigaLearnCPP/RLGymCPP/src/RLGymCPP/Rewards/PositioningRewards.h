@@ -368,8 +368,8 @@ class ActiveSupportingPositionReward : public Reward {
 private:
     // Distance thresholds for supporting positioning
     const float MIN_SUPPORT_DIST = 1000.0f;      // Too close = 1st man territory
-    const float OPTIMAL_SUPPORT_DIST = 3000.0f;  // Sweet spot for support
-    const float MAX_SUPPORT_DIST = 5000.0f;      // Too far = passive
+    const float OPTIMAL_SUPPORT_DIST = 2300.0f;  // Sweet spot for support
+    const float MAX_SUPPORT_DIST = 3600.0f;      // Too far = passive
 
     // Possession and role detection
     const float MIN_GAME_SIZE = 4;  // Minimum players for team play (2v2)
@@ -515,17 +515,38 @@ public:
         float attackY = (player.team == Team::BLUE) ? player.pos.y : -player.pos.y;
         if (attackY > 0.0f) {
             float centralityBonus = RS_CLAMP(1.0f - fabsf(player.pos.x) / 2500.0f, 0.0f, 1.0f);
-            reward += 0.2f * centralityBonus;
+            reward += 0.3f * centralityBonus;
+
+            // X-side opposition bonus: spread horizontally if first man is already on a wing.
+            // Better passing lanes when support is on opposite side of field from first man.
+            const Player* firstManX = nullptr;
+            float fmClosestDistX = 1e10f;
+            for (const auto& p : state.players) {
+                if (p.team == player.team && p.carId != player.carId) {
+                    float d = (p.pos - state.ball.pos).Length();
+                    if (d < fmClosestDistX) { fmClosestDistX = d; firstManX = &p; }
+                }
+            }
+            if (firstManX) {
+                float xAlignment = player.pos.x * firstManX->pos.x;  // Negative = opposite sides
+                if (xAlignment < 0.0f) {  // On opposite sides
+                    float oppositeSideBonus = RS_CLAMP(fabsf(player.pos.x) / 2500.0f, 0.0f, 1.0f);
+                    reward += 0.1f * oppositeSideBonus;  // Light bonus, scales with distance from center
+                }
+            }
         }
 
         // Corner play bonus: when first man is in the opponent's corner, pull the second
         // man toward the goal mouth — ready to tap in any centering pass or deflection.
+        // Optimal distance is around 750 units from goal (close enough to finish, far enough to react).
         if (IsBallInAttackingCorner(player, state)) {
             Vec oppGoal = (player.team == Team::BLUE)
                            ? CommonValues::ORANGE_GOAL_CENTER
                            : CommonValues::BLUE_GOAL_CENTER;
             float distToGoalMouth = (player.pos - oppGoal).Length();
-            float cornerBonus = 0.4f * RS_CLAMP(1.0f - distToGoalMouth / 2500.0f, 0.0f, 1.0f);
+            float optimalDist = 750.0f;  // Ideal distance from goal
+            float distanceError = fabsf(distToGoalMouth - optimalDist);
+            float cornerBonus = 0.4f * RS_CLAMP(1.0f - distanceError / 750.0f, 0.0f, 1.0f);
             reward += cornerBonus;
         }
 
@@ -543,7 +564,9 @@ public:
             float myAttackY = (player.team == Team::BLUE) ?  player.pos.y   : -player.pos.y;
             float fmAttackY = (player.team == Team::BLUE) ?  firstMan->pos.y : -firstMan->pos.y;
             float lead = myAttackY - fmAttackY;
-            if (lead > 0.0f) {
+            // Only apply lead bonus if NOT within 1000 units of opponent's goal
+            // (prevents overextension and getting caught out defensively)
+            if (lead > 0.0f && myAttackY < 1000.0f) {
                 reward += 0.55f * RS_CLAMP(lead / 2000.0f, 0.0f, 1.0f);
             }
         }
