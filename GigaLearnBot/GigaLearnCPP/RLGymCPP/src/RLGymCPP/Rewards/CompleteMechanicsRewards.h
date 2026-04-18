@@ -766,6 +766,25 @@ public:
             if (bounceSlice >= 0) {
                 float bounceTime = _ballCache.slices[bounceSlice].t;
                 if (bounceTime <= PRED_HORIZON) {
+                    Vec bouncePos = _ballCache.slices[bounceSlice].pos;
+
+                    // FILTER: Only reward backboard bounces ABOVE goal height
+                    if (bouncePos.z < CommonValues::GOAL_HEIGHT) {
+                        return positioningReward;  // Low bounce, skip
+                    }
+
+                    // FILTER: Check if rebound is heading TOWARD goal (not away)
+                    Vec reboundVel = _ballCache.slices[bounceSlice].vel;
+                    Vec oppGoal = (playerTeam == Team::BLUE)
+                        ? CommonValues::ORANGE_GOAL_BACK
+                        : CommonValues::BLUE_GOAL_BACK;
+                    Vec toGoal = (oppGoal - bouncePos).Normalized();
+                    float reboundAlignment = reboundVel.Normalized().Dot(toGoal);
+
+                    if (reboundAlignment < 0.4f) {
+                        return positioningReward;  // Rebound going away from goal, skip
+                    }
+
                     // Sample where ball will be 0.4s after the backboard impact
                     Vec reboundPos = _ballCache.AtTime(bounceTime + POST_BOUNCE_SEC).pos;
                     // Only reward if the rebound lands in the attacking half
@@ -773,7 +792,13 @@ public:
                                                                     : (reboundPos.y < 0.0f);
                     if (inAttackHalf) {
                         float dist = (player.pos - reboundPos).Length();
-                        positioningReward = PRED_PROX_REWARD * expf(-dist / PRED_DIST_SCALE) * dt;
+
+                        // BONUS: Height multiplier — higher backboard bounces are more valuable
+                        float heightBonus = (bouncePos.z - CommonValues::GOAL_HEIGHT) / 1500.0f;
+                        heightBonus = RS_CLAMP(heightBonus, 0.0f, 1.0f);
+                        float heightMult = 1.0f + 0.5f * heightBonus;  // 1.0x to 1.5x based on height
+
+                        positioningReward = PRED_PROX_REWARD * expf(-dist / PRED_DIST_SCALE) * dt * heightMult;
                     }
                 }
             }
@@ -6791,6 +6816,154 @@ public:
                 }
             }
         }
+
+        return reward;
+    }
+};
+
+// ============================================================================
+// HandbrakeAerialReward
+// Simple reward for using handbrake while touching the ball in the air (z > 300)
+// ============================================================================
+class HandbrakeAerialReward : public Reward {
+public:
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Check conditions:
+        // 1. Ball was touched this step
+        // 2. Player is in the air (z > 300)
+        // 3. Handbrake is being held (handbrakeVal > 0)
+
+        if (!player.ballTouchedStep) {
+            return 0.0f;
+        }
+
+        if (player.pos.z <= 300.0f) {
+            return 0.0f;
+        }
+
+        if (player.handbrakeVal <= 0.0f) {
+            return 0.0f;
+        }
+
+        // All conditions met: reward for handbrake aerial touch
+        // Scale reward by how hard handbrake is being held (0.0 to 1.0)
+        float handbrakeIntensity = RS_CLAMP(player.handbrakeVal, 0.0f, 1.0f);
+
+        // Scale by how high in the air (higher = more skillful)
+        float heightBonus = RS_CLAMP((player.pos.z - 300.0f) / 1000.0f, 0.0f, 1.0f);
+
+        // Base reward of 2.0 + modulation by height
+        float reward = 2.0f * handbrakeIntensity * (1.0f + 0.5f * heightBonus);
+
+        return reward;
+    }
+};
+
+// ============================================================================
+// AerialControlledBallCatchReward
+// Rewards catching and controlling airborne balls close to the car
+// - Triggers when ball velocity drops >500 UU/s (soft touch)
+// - Maintains control while ball stays <200 UU from car, relative velocity <300 UU/s
+// - Height bonus for higher catches (up to 1300 UU)
+// ============================================================================
+class AerialControlledBallCatchReward : public Reward {
+private:
+    struct CatchMemory {
+        float lastBallVelocity = 0.0f;       // Previous frame's ball speed
+        float velocityReductionTime = -1.0f; // When last velocity drop occurred
+        bool hasCaughtRecently = false;      // Within 0.5s window
+    };
+
+    mutable std::map<uint32_t, CatchMemory> catchMemory;
+
+    // Catch detection thresholds
+    static constexpr float MIN_CATCH_HEIGHT = 300.0f;           // Ball must be in air
+    static constexpr float MAX_CATCH_DISTANCE = 200.0f;         // Closeness to ball
+    static constexpr float MAX_RELATIVE_VELOCITY = 300.0f;      // Velocity sync
+    static constexpr float MIN_BALL_VELOCITY_REDUCTION = 500.0f; // Soft touch threshold
+    static constexpr float VELOCITY_REDUCTION_WINDOW = 0.5f;    // Window to confirm catch
+    static constexpr float BASE_REWARD = 2.0f;
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        catchMemory.clear();
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        // Track ball velocity for each player to detect velocity reduction
+        // This enables catch detection in GetReward()
+        float ballVelocity = state.ball.vel.Length();
+
+        for (const auto& player : state.players) {
+            if (!catchMemory.count(player.carId)) {
+                catchMemory[player.carId] = CatchMemory();
+            }
+
+            auto& mem = catchMemory[player.carId];
+
+            // Detect velocity reduction (soft touch / catch event)
+            if (mem.lastBallVelocity > 0.0f) {
+                float velocityDrop = mem.lastBallVelocity - ballVelocity;
+                if (velocityDrop >= MIN_BALL_VELOCITY_REDUCTION) {
+                    mem.velocityReductionTime = state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+                    mem.hasCaughtRecently = true;
+                }
+            }
+
+            // Decay catch window over time
+            if (mem.hasCaughtRecently && mem.velocityReductionTime >= 0.0f) {
+                mem.velocityReductionTime += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+                if (mem.velocityReductionTime > VELOCITY_REDUCTION_WINDOW) {
+                    mem.hasCaughtRecently = false;
+                    mem.velocityReductionTime = -1.0f;
+                }
+            }
+
+            mem.lastBallVelocity = ballVelocity;
+        }
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Condition 1: Ball must be in the air
+        if (state.ball.pos.z < MIN_CATCH_HEIGHT) {
+            return 0.0f;
+        }
+
+        auto& mem = catchMemory[player.carId];
+
+        // Condition 2: Must have caught recently (velocity drop detected)
+        if (!mem.hasCaughtRecently) {
+            return 0.0f;
+        }
+
+        // Condition 3: Ball must be close to car
+        float distToBall = (player.pos - state.ball.pos).Length();
+        if (distToBall > MAX_CATCH_DISTANCE * 2.0f) {  // Allow 400 UU max for early-stage control
+            return 0.0f;
+        }
+
+        // Condition 4: Relative velocity must be low (synchronized movement)
+        Vec relVel = state.ball.vel - player.vel;
+        float relVelMag = relVel.Length();
+        if (relVelMag > MAX_RELATIVE_VELOCITY * 1.5f) {  // Allow up to 450 UU/s
+            return 0.0f;
+        }
+
+        // All conditions met: calculate control quality score
+
+        // Proximity score: 1.0 at <200 UU, 0.0 at >400 UU
+        float proximityScore = RS_CLAMP(1.0f - (distToBall / MAX_CATCH_DISTANCE), 0.0f, 1.0f);
+
+        // Velocity sync score: 1.0 at <50 UU/s, 0.0 at >300 UU/s
+        float velScore = RS_CLAMP(1.0f - (relVelMag / MAX_RELATIVE_VELOCITY), 0.0f, 1.0f);
+
+        // Height bonus: higher catches are more difficult (up to 1300 UU)
+        float heightBonus = RS_CLAMP((state.ball.pos.z - MIN_CATCH_HEIGHT) / 1000.0f, 0.0f, 1.0f);
+        float heightMult = 1.0f + 0.5f * heightBonus;
+
+        // Combine all factors
+        float controlQuality = proximityScore * velScore;
+        float reward = BASE_REWARD * controlQuality * heightMult;
 
         return reward;
     }

@@ -39,6 +39,7 @@ private:
     static constexpr float SAFE_FLIP_DISTANCE = 1500.0f;
     static constexpr float FLIP_CONTEST_THRESHOLD = 600.0f;
     static constexpr float FLIP_PENALTY = 0.5f;            // Reduced from 10.0f
+    static constexpr float OPPONENT_CONTACT_TIME_THRESHOLD = 0.5f;  // Opponent about to hit ball (seconds)
 
     // Gate 2: Double Jump Depletion
     static constexpr float DOUBLE_JUMP_RECOVERY_BOOST = 25.0f;
@@ -107,11 +108,38 @@ public:
         // GATE 1: FLIP IN DANGER
         // ===================================================================
         // Penalty: Don't flip far from ball with low boost (can't recover)
+        // Also: Don't flip when an opponent is about to hit the ball
         if (player.isFlipping && player.boost < FLIP_MIN_BOOST_THRESHOLD) {
             float distToBall = (player.pos - state.ball.pos).Length();
 
-            if (distToBall > SAFE_FLIP_DISTANCE) {
-                // Flipped far from ball with low boost
+            // Check if an opponent is about to hit the ball
+            bool opponentAboutToHitBall = false;
+            for (const auto& opponent : state.players) {
+                // Skip teammates
+                if (opponent.team == player.team) continue;
+
+                auto ballToOpponent = opponent.pos - state.ball.pos;
+                float distToOpponentBall = ballToOpponent.Length();
+
+                // Check if opponent is moving toward ball
+                auto toBallDir = (state.ball.pos - opponent.pos).Normalized();
+                float dotProduct = opponent.vel.Dot(toBallDir);
+
+                if (dotProduct > 0.0f) {
+                    // Opponent is moving toward ball
+                    float opponentSpeed = opponent.vel.Length();
+                    if (opponentSpeed > 0.0f) {
+                        float timeToContact = distToOpponentBall / opponentSpeed;
+                        if (timeToContact < OPPONENT_CONTACT_TIME_THRESHOLD) {
+                            opponentAboutToHitBall = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (distToBall > SAFE_FLIP_DISTANCE || opponentAboutToHitBall) {
+                // Flipped far from ball with low boost, or opponent is about to hit ball
 
                 // Exception 1a: Dodging imminent demo/bump (survival exception only)
                 if (PositionAnalysis::IsDodgingImminentDemo(player, state.players)) {

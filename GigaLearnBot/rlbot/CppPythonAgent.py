@@ -2,6 +2,7 @@ import platform
 import os
 import socket
 import time
+import logging
 
 import psutil
 
@@ -11,30 +12,68 @@ from rlbot.utils.structures import game_interface
 from rlbot.agents.base_agent import BOT_CONFIG_AGENT_HEADER
 from rlbot.parsing.custom_config import ConfigHeader, ConfigObject
 
+# Import match monitor
+try:
+    from match_monitor import MatchMonitor
+    HAS_MATCH_MONITOR = True
+except ImportError:
+    HAS_MATCH_MONITOR = False
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("CppPythonAgent")
+
 class BaseCPPAgent(BaseIndependentAgent):
 
     def __init__(self, name, team, index):
-    
+
         print("Creating GigaLearnCPP python agent...")
-    
+
         super().__init__(name, team, index)
         self.port = self.read_port_from_file()
         self.is_retired = False
         self.cpp_executable_path = None
+        self.match_monitor = None
+
+        # Initialize match monitor if available
+        if HAS_MATCH_MONITOR:
+            try:
+                self.match_monitor = MatchMonitor()
+                logger.info(f"Match monitor initialized for {name}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize match monitor: {e}")
+                self.match_monitor = None
         
     def run_independently(self, terminate_request_event):
-        while not terminate_request_event.is_set():
-            message = f"add\n{self.name}\n{self.team}\n{self.index}\n{game_interface.get_dll_directory()}"
+        # Start match monitor if available
+        if self.match_monitor:
             try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect(("127.0.0.1", self.port))
-                s.send(bytes(message, "ASCII"))
-                s.close()
-            except ConnectionRefusedError:
-                self.logger.warn("Could not connect to server!")
+                self.match_monitor.start()
+            except Exception as e:
+                logger.warning(f"Failed to start match monitor: {e}")
 
-            time.sleep(1)
-        else:
+        try:
+            while not terminate_request_event.is_set():
+                message = f"add\n{self.name}\n{self.team}\n{self.index}\n{game_interface.get_dll_directory()}"
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect(("127.0.0.1", self.port))
+                    s.send(bytes(message, "ASCII"))
+                    s.close()
+                except ConnectionRefusedError:
+                    self.logger.warn("Could not connect to server!")
+
+                time.sleep(1)
+        finally:
+            # Stop match monitor before retiring
+            if self.match_monitor:
+                try:
+                    self.match_monitor.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping match monitor: {e}")
             self.retire()
 
     def get_helper_process_request(self):

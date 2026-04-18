@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include "../Math.h"
+#include "RewardMath.h"
 
 // ============================================================================
 // PASSING REWARDS - Progressive system from Bronze to SSL
@@ -22,24 +23,6 @@ class BackPassReward : public Reward {
 private:
     mutable std::map<uint32_t, Vec> lastTouchPos;
 
-    // Helper: Check if player is in opponent's half (attacking)
-    bool IsInOpponentHalf(const Player& player) const {
-        if (player.team == Team::BLUE) {
-            return player.pos.y > 0;  // BLUE attacks +Y (toward ORANGE goal)
-        } else {
-            return player.pos.y < 0;  // ORANGE attacks -Y (toward BLUE goal)
-        }
-    }
-
-    // Helper: Check if player is in own half (defending)
-    bool IsInOwnHalf(const Player& player) const {
-        if (player.team == Team::BLUE) {
-            return player.pos.y < 0;  // BLUE defends -Y
-        } else {
-            return player.pos.y > 0;  // ORANGE defends +Y
-        }
-    }
-
 public:
     virtual void Reset(const GameState& initialState) override {
         lastTouchPos.clear();
@@ -57,7 +40,7 @@ public:
         // NEW: Only reward if passer is in OPPONENT'S HALF
         // This ensures we're rewarding tactical retreat from attacking positions
         // ====================================================================
-        if (!IsInOpponentHalf(player)) {
+        if (!RewardMath::IsInOpponentHalf(player)) {
             return 0.0f;  // Passer is not in opponent's half - no reward
         }
 
@@ -91,7 +74,7 @@ public:
                     // NEW: Check if closest receiver is in OWN HALF
                     // Only consider teammates who are in defensive position
                     // ================================================================
-                    if (IsInOwnHalf(other)) {
+                    if (RewardMath::IsInOwnHalf(other)) {
                         receiverInOwnHalf = true;
                     }
                 }

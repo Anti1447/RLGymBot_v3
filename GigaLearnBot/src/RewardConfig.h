@@ -2,15 +2,19 @@
 
 #include <GigaLearnCPP/Learner.h>
 #include <RLGymCPP/Rewards/CommonRewards.h>
+#include "ConfigLoader.h"
+#include "RewardFactory.h"
 #include <RLGymCPP/Rewards/ZeroSumReward.h>
 #include <RLGymCPP/Rewards/AdvancedRewards.h>
 #include <RLGymCPP/Rewards/ConfidenceRewards.h>
 #include <RLGymCPP/Rewards/KickoffRewards.h>
 #include <RLGymCPP/Rewards/BoostManagementRewards.h>
+#include <RLGymCPP/Rewards/BoostCooperationRewards.h>
 #include <RLGymCPP/Rewards/MultiModalRewards.h>
 #include <RLGymCPP/Rewards/CompleteMechanicsRewards.h>
 #include <RLGymCPP/Rewards/OutplayRewards.h>
 #include <RLGymCPP/Rewards/FlipResetReward.h>
+#include <RLGymCPP/Rewards/FlipResetApproachReward.h>
 #include <RLGymCPP/Rewards/GodTierMovementRewards_Enhanced.h>
 #include <RLGymCPP/Rewards/PossessionRewards.h>
 #include <RLGymCPP/Rewards/MovementAndKickoffRewards_Enhanced.h>
@@ -62,3 +66,10 @@ constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_6_CHAMPION;
 /// Get the reward configuration for the current training phase
 /// </summary>
 std::vector<WeightedReward> GetPhasedRewards();
+
+/// <summary>
+/// Get the reward configuration from the JSON-based configuration file
+/// Loads from reward_phases.json for the current training phase
+/// This is the new data-driven approach that avoids the massive switch statement
+/// </summary>
+std::vector<WeightedReward> GeneratePhasedRewardsFromJSON();

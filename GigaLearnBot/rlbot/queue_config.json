@@ -1,0 +1,26 @@
+{
+  "auto_queue_enabled": false,
+  "matches_to_play": 10,
+  "gamemode_selection": "random",
+  "available_gamemodes": [
+    "1v1",
+    "2v2",
+    "3v3",
+    "soloq2v2",
+    "soloq3v3"
+  ],
+  "bot_pool": [
+    "Sekalf",
+    "BotA",
+    "BotB",
+    "BotC",
+    "BotD"
+  ],
+  "opponent_matching": {
+    "strategy": "closest_mmr",
+    "exclude_mirror_matches": true,
+    "enforce_mmr_transaction": false,
+    "mmr_tolerance": 100
+  },
+  "mmr_tracker_file": "GigaLearnBot/rlbot/mmr_tracker_matches.json"
+}

@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include "../Math.h"
+#include "RewardMath.h"
 // Note: BallPred::Cache (used by ShotPlacementReward at the bottom) is defined in
 // BallPrediction.h, which is pulled in via CompleteMechanicsRewards.h before this
 // file in RewardConfig.h. No direct include needed here.
@@ -333,16 +334,9 @@ private:
 			: CommonValues::BLUE_GOAL_CENTER;
 	}
 
-	bool IsInOpponentHalf(const Player& player) const {
-		if (player.team == Team::BLUE) {
-			return player.pos.y > 0;  // BLUE attacks toward +Y
-		} else {
-			return player.pos.y < 0;  // ORANGE attacks toward -Y
-		}
-	}
 
 	bool IsInAttackingZone(const Player& player) const {
-		if (!IsInOpponentHalf(player)) return false;
+		if (!RewardMath::IsInOpponentHalf(player)) return false;
 
 		Vec opponentGoal = GetOpponentGoalCenter(player.team);
 		float distToGoal = (player.pos - opponentGoal).Length();
@@ -369,7 +363,7 @@ private:
 		// Count opponent players defending
 		for (const auto& p : state.players) {
 			if (p.team != player.team) {
-				if (!IsInOpponentHalf(p) || (p.pos - opponentGoal).Length() < ATTACKING_ZONE_DIST) {
+				if (!RewardMath::IsInOpponentHalf(p) || (p.pos - opponentGoal).Length() < ATTACKING_ZONE_DIST) {
 					defendingCount++;
 				}
 			}
@@ -903,7 +897,8 @@ private:
 
     // Reward scaling
     static constexpr float MAX_REWARD    = 3.0f;
-    static constexpr float MAX_DIST      = 4000.0f;  // defender beyond this -> normalizedDist = 1.0
+    // 2026-04-16 | NJH | tightened from 4000 -> 2500 to sharpen "covered vs uncovered" signal
+    static constexpr float MAX_DIST      = 2500.0f;  // defender beyond this -> normalizedDist = 1.0
 
     // Aerial difficulty parameters
     static constexpr float AERIAL_Z      = 150.0f;   // shot Z above which boost matters
@@ -911,7 +906,8 @@ private:
     static constexpr float AERIAL_MULT   = 0.5f;     // extra multiplier headroom for aerial+low-boost
 
     // Behind-defender bonus
-    static constexpr float BEHIND_BONUS  = 0.5f;     // extra multiplier headroom for behind-shot
+    // 2026-04-16 | NJH | raised from 0.5 -> 0.75 to push placement away from defender coverage
+    static constexpr float BEHIND_BONUS  = 0.75f;    // extra multiplier headroom for behind-shot
 
     // Result of velocity-ray goal-crossing search
     struct GoalCrossing {

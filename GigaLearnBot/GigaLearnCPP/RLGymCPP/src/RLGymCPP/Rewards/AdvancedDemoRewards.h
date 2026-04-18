@@ -638,4 +638,161 @@ namespace RLGC {
         }
     };
 
+    // ============================================================================
+    // StrategicDemoReward
+    // Rewards demos during high-value tactical moments:
+    // 1. Opponent is landing (after aerial/flip/double-jump) - predictable, vulnerable
+    // 2. Opponent has low boost (<25) - can't evade or climb
+    // 3. Opponent is last man back - sole defender, ball advancing
+    // ALL THREE conditions must be met for reward to trigger (multi-gate system)
+    // ============================================================================
+    class StrategicDemoReward : public Reward {
+    private:
+        struct OppMemory {
+            float timeSinceGrounded = 0.0f;  // Tracks landing window
+        };
+
+        mutable std::map<uint32_t, OppMemory> oppMemory;  // Per-opponent tracking
+
+        // Thresholds
+        static constexpr float LOW_BOOST_THRESHOLD = 25.0f;
+        static constexpr float LANDING_WINDOW = 0.5f;
+        static constexpr float BALL_ADVANCE_SPEED = 400.0f;
+        static constexpr float BALL_CRITICAL_DISTANCE = 4000.0f;
+        static constexpr float BASE_DEMO_REWARD = 8.0f;
+        static constexpr float AERIAL_BONUS = 2.0f;
+        static constexpr float ULTRA_LOW_BOOST_BONUS = 1.0f;
+
+        bool IsLastManBack(const Player& opponent, const GameState& state, const Player& player) {
+            Team oppTeam = opponent.team;
+            Vec theirGoal = (oppTeam == Team::BLUE)
+                ? Vec(0, -5120, 0)  // Blue goal back
+                : Vec(0, 5120, 0);  // Orange goal back
+
+            // Check 1: Opponent in defensive half
+            bool inDefensive = (oppTeam == Team::BLUE) ? (opponent.pos.y < 0) : (opponent.pos.y > 0);
+            if (!inDefensive) return false;
+
+            // Check 2: Ball advancing toward their goal OR close to goal
+            Vec ballToGoal = state.ball.pos - theirGoal;
+            float distToGoal = ballToGoal.Length();
+
+            // Calculate if ball is moving toward goal
+            Vec goalDir = (theirGoal - state.ball.pos).Normalized();
+            float ballAdvanceVel = state.ball.vel.Dot(goalDir);
+
+            bool ballAdvancing = (ballAdvanceVel > BALL_ADVANCE_SPEED) || (distToGoal < BALL_CRITICAL_DISTANCE);
+            if (!ballAdvancing) return false;
+
+            // Check 3: No teammate is closer to ball + in defensive
+            float oppDistToBall = (opponent.pos - state.ball.pos).Length();
+            for (const auto& teammate : state.players) {
+                if (teammate.team != oppTeam || teammate.carId == opponent.carId) continue;
+
+                float tmDistToBall = (teammate.pos - state.ball.pos).Length();
+                bool tmInDefensive = (oppTeam == Team::BLUE)
+                    ? (teammate.pos.y < 0)
+                    : (teammate.pos.y > 0);
+
+                // If teammate is closer AND in defensive position, we have coverage
+                if (tmDistToBall < oppDistToBall && tmInDefensive) {
+                    return false;  // Not last man back
+                }
+            }
+
+            return true;  // Last man back!
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            oppMemory.clear();
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            // Update landing window timers for all opponents
+            for (const auto& player : state.players) {
+                if (!oppMemory.count(player.carId)) {
+                    oppMemory[player.carId] = OppMemory();
+                }
+
+                auto& mem = oppMemory[player.carId];
+
+                // Check for landing transitions (both flip end and airborne→grounded)
+                bool shouldResetLandingWindow = false;
+
+                // Check 1: Flip just ended
+                if (state.prev) {
+                    bool wasFlipping = state.prev->players[player.carId].isFlipping;
+                    bool isFlipping = player.isFlipping;
+                    if (wasFlipping && !isFlipping) {
+                        shouldResetLandingWindow = true;  // Flip ended, start landing window
+                    }
+                }
+
+                // Check 2: Airborne → grounded transition
+                if (state.prev) {
+                    bool wasAirborne = !state.prev->players[player.carId].isOnGround;
+                    bool isGrounded = player.isOnGround;
+                    if (wasAirborne && isGrounded) {
+                        shouldResetLandingWindow = true;  // Just landed
+                    }
+                }
+
+                // Update timer
+                if (shouldResetLandingWindow) {
+                    mem.timeSinceGrounded = 0.0f;
+                } else if (player.isOnGround) {
+                    mem.timeSinceGrounded += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+                } else {
+                    // Still airborne, keep timer at 0
+                    mem.timeSinceGrounded = 0.0f;
+                }
+            }
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // Only reward if this player successfully demoed someone
+            if (!player.eventState.demo) {
+                return 0.0f;
+            }
+
+            // Find the opponent who was demoed
+            for (const auto& opponent : state.players) {
+                // Look for opponent with demoed flag set
+                if (opponent.team == player.team || !opponent.eventState.demoed) continue;
+
+                auto& oppMem = oppMemory[opponent.carId];
+
+                // Condition 1: Opponent is in landing window (vulnerable state)
+                bool isLanding = (oppMem.timeSinceGrounded > 0.0f && oppMem.timeSinceGrounded < LANDING_WINDOW);
+                if (!isLanding) continue;
+
+                // Condition 2: Opponent has low boost
+                bool hasLowBoost = (opponent.boost < LOW_BOOST_THRESHOLD);
+                if (!hasLowBoost) continue;
+
+                // Condition 3: Opponent is last man back
+                bool isLastManBack = IsLastManBack(opponent, state, player);
+                if (!isLastManBack) continue;
+
+                // All three conditions met! Calculate reward
+                float reward = BASE_DEMO_REWARD;
+
+                // Aerial bonus: if opponent is high in the air, demo is more difficult
+                if (opponent.pos.z > 500.0f) {
+                    reward += AERIAL_BONUS;
+                }
+
+                // Ultra-low boost bonus: if opponent had almost no boost, reward more
+                if (opponent.boost < 10.0f) {
+                    reward += ULTRA_LOW_BOOST_BONUS;
+                }
+
+                return reward;
+            }
+
+            return 0.0f;
+        }
+    };
+
 } // namespace RLGC

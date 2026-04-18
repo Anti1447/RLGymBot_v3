@@ -1,0 +1,28 @@
+Extracting rewards from C:\Projects\RLGymBot_v3\GigaLearnBot\src\RewardConfig.cpp...
+Traceback (most recent call last):
+  File "C:\Projects\RLGymBot_v3\extract_rewards.py", line 100, in <module>
+    main()
+  File "C:\Projects\RLGymBot_v3\extract_rewards.py", line 76, in main
+    phases_config = extract_rewards_from_file(str(reward_config_path))
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Projects\RLGymBot_v3\extract_rewards.py", line 38, in extract_rewards_from_file
+    match = re.search(pattern, content, re.DOTALL)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\__init__.py", line 176, in search
+    return _compile(pattern, flags).search(string)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\__init__.py", line 294, in _compile
+    p = _compiler.compile(pattern, flags)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\_compiler.py", line 743, in compile
+    p = _parser.parse(p, flags)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\_parser.py", line 980, in parse
+    p = _parse_sub(source, state, flags & SRE_FLAG_VERBOSE, 0)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\_parser.py", line 455, in _parse_sub
+    itemsappend(_parse(source, state, verbose, nested + 1,
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nhafe\AppData\Local\Programs\Python\Python311\Lib\re\_parser.py", line 775, in _parse
+    raise source.error("missing ), unterminated subpattern",
+re.error: missing ), unterminated subpattern at position 42

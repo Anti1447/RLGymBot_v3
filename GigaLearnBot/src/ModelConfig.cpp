@@ -64,12 +64,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_6_CHAMPION:
-        cfg.entropyScale = 0.0215f;
-        cfg.policyLR = 1.09e-4f;
-        cfg.criticLR = 1.09e-4f;
+        cfg.entropyScale = 0.0214f;
+        cfg.policyLR = 9.3e-5f;
+        cfg.criticLR = 9.3e-5f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.65f;
+        cfg.randomStateChance = 0.8f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;
@@ -128,14 +128,14 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // Use absolute path to ensure it works regardless of working directory
     cfg.checkpointFolder = "C:\\Projects\\RLGymBot_v3\\GigaLearnBot\\build\\checkpoints";
     cfg.tsPerSave = 200'000'000ULL;      // Save every 100M steps
-    cfg.checkpointsToKeep = 128;
+    cfg.checkpointsToKeep = 256;
 
     // === POLICY VERSIONS ===
     cfg.tsPerVersion = 400'000'000ULL;   // New version every 200M steps
-    cfg.maxOldVersions = 64;
+    cfg.maxOldVersions = 128;
 
     cfg.trainAgainstOldVersions = true;
-    cfg.trainAgainstOldChance = 0.3f;
+    cfg.trainAgainstOldChance = 0.5f;
 
     // === SKILL TRACKER ===
     // Skill tracker evaluates the agent across mixed game modes (1v1, 2v2, 3v3)
@@ -167,20 +167,22 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // === TIMING ===
     cfg.tickSkip = 8;
     cfg.actionDelay = cfg.tickSkip - 1;
-    cfg.numGames = 310;
+    //cfg.numGames = 310; // best for Intel Ultra Core 5 225F. Gets 183 m steps/sec with new CPU
+    //cfg.numGames = 400; // best it can do is 190 m steps/sec, but not consistent
+	cfg.numGames = 360; // good balance for consistent 185-190 m steps/sec on Intel Ultra Core 5 225F
     cfg.randomSeed = 456;
 
     // === PPO CONFIG ===
     int tsPerItr = 400'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
-    cfg.ppo.miniBatchSize = 25'000;
+    cfg.ppo.miniBatchSize = 50'000;
     cfg.ppo.epochs = 1;
     cfg.ppo.maskEntropy = true; // Enable entropy masking to combine with action masking. very important
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9916;
+    cfg.ppo.gaeGamma = 0.995;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

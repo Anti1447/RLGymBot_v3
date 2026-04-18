@@ -2,6 +2,7 @@
 
 #include "Reward.h"
 #include "../CommonValues.h"
+#include "RewardMath.h"
 #include <map>
 #include <atomic>
 #include <cmath>
@@ -52,14 +53,6 @@ private:
         return RS_MIN(dist1, dist2);
     }
 
-    // Check if position is in opponent's half
-    bool IsInOpponentHalf(const Vec& pos, Team playerTeam) const {
-        if (playerTeam == Team::BLUE) {
-            return pos.y > 0.0f;  // Blue attacks positive Y
-        } else {
-            return pos.y < 0.0f;  // Orange attacks negative Y
-        }
-    }
 
 public:
     struct Metrics {
@@ -81,7 +74,7 @@ public:
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         // Only penalize in opponent's half
-        if (!IsInOpponentHalf(state.ball.pos, player.team)) {
+        if (!RewardMath::IsInOpponentHalf(state.ball.pos, player.team)) {
             return 0.0f;
         }
 

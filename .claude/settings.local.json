@@ -97,7 +97,9 @@
       "Bash(powershell.exe -NoProfile -Command \":*)",
       "Bash(powershell.exe -NoProfile:*)",
       "Bash(grep -l \"state\\\\.players\\\\.size\\(\\)\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
-      "Bash(pwsh -Command ':*)"
+      "Bash(pwsh -Command ':*)",
+      "Bash(grep -n \"#include.*RewardWrapper\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
+      "Bash(git checkout:*)"
     ]
   }
 }

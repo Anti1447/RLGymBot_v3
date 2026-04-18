@@ -26,7 +26,7 @@ using namespace RLGC;
 // ============================================================================
 // Phase configurations are in RewardConfig.h and ModelConfig.cpp
 // To change phase: Update CURRENT_PHASE in RewardConfig.h
-// To change rewards: Update GetPhasedRewards() in RewardConfig.cpp
+// To change rewards: Update reward_phases.json (data-driven) or GetPhasedRewards() (legacy)
 // To change model/training: Update ConfigureLearnerConfig() in ModelConfig.cpp
 // ============================================================================
 
@@ -38,7 +38,9 @@ bool g_renderMode = false;
 // ============================================================================
 
 EnvCreateResult EnvCreateFunc(int index) {
-    std::vector<WeightedReward> rewards = GetPhasedRewards();
+    // Use the new data-driven reward configuration from JSON
+    // Falls back to hardcoded GetPhasedRewards if JSON loading fails
+    std::vector<WeightedReward> rewards = GeneratePhasedRewardsFromJSON();
     PhaseConfig phaseCfg = GetPhaseConfig();
 
     std::vector<TerminalCondition*> terminalConditions = {

@@ -13,8 +13,8 @@ namespace GGL {
 		// Distribution weights: 1v1:2v2:3v3 = 1:2:3
 		// Total weight = 6
 		static constexpr float WEIGHT_1V1 = 2.0f;
-		static constexpr float WEIGHT_2V2 = 1.0f;
-		static constexpr float WEIGHT_3V3 = 1.0f;
+		static constexpr float WEIGHT_2V2 = 4.0f;
+		static constexpr float WEIGHT_3V3 = 8.0f;
 		static constexpr float TOTAL_WEIGHT = WEIGHT_1V1 + WEIGHT_2V2 + WEIGHT_3V3;  // 6.0
 
 		// Cycling mode state (for render mode: cycles through 1v1 -> 2v2 -> 3v3)

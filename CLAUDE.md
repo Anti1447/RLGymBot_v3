@@ -46,6 +46,26 @@ Training resumes from the latest checkpoint in `build/checkpoints/`. Render mode
 
 **Reward authoring pattern.** Every reward is a header-only class in `Rewards/` inheriting `Reward`. Override `GetReward(player, state, isFinal)` → return float. Wrap competitive rewards in `ZeroSumReward`. Add to `GetPhasedRewards()` as `WeightedReward(new MyReward(), weight)`.
 
+**Before adding a new reward — fill out the Mechanic Spec first:**
+Answer these before writing any code. Misalignment caught here costs 5 minutes;
+misalignment caught in training costs days.
+1. Trigger condition: exact observable state that fires the reward
+2. Anti-farming defense: what prevents cheaply looping the trigger
+3. Expected activation rate: % of steps this should fire (ballpark)
+4. W&B metric name: what you'll watch to confirm it's working
+5. "Working" signal at 500M steps: what does success look like in W&B?
+6. Overlapping rewards: check RewardCatalog.md before writing anything
+
+**Shadow mode before going live:**
+New rewards should be wrapped in `ShadowReward` on Machine 2 for one training run
+before being added to the live signal. Shadow mode logs activation stats but returns
+0.0f to the optimizer — zero policy impact, full visibility. Remove the wrapper once
+activation rate and value distribution look correct.
+
+**Log every change:**
+After any reward add/edit/weight change, add a one-line entry to
+`Rewards/Reward_Change_Log.md`. Format: date | what changed | hypothesis | result.
+
 **Observation:** `AdvancedObsPadded` with max 3 players per team. Padded so the network handles all game modes with one model.
 
 **Action delay:** Training uses 8-tick skip. Live deployment uses 1-tick. This mismatch matters — see `ClaudeFiles/docs/action-delay.md` if it exists, otherwise ask Nathan.
@@ -59,6 +79,14 @@ Training resumes from the latest checkpoint in `build/checkpoints/`. Render mode
 - **Reward weights span 0.1 to 250.** `GoalReward` is 250, movement rewards are < 1. This is intentional — the scale encodes priority.
 - **No unit tests.** Validation is done by compiling, running training, and watching W&B metrics. The `reward_llm_generator.py` has a `--validate-code` mode that does cl.exe syntax checks.
 - **`.vs/` and `build/` are gitignored but present.** Don't touch them.
+- **RewardCatalog.md is the source of truth for what exists.** Before writing a new
+  reward class, read it. It lists every reward, its trigger, current weight, and status
+  (active / shadow / retired). Update it whenever a reward ships or is retired.
+  C:\Projects\RLGymBot_v3\GigaLearnBot\GigaLearnCPP\RLGymCPP\src\RLGymCPP\Rewards\RewardCatalog.md
+- **One variable per iteration.** When something isn't working, change either the reward
+  design OR the weight OR the state setter — not all three at once. Before each
+  adjustment, write one sentence: "I think the problem is X and I expect changing Y
+  to produce Z in W&B." This is how you build intuition instead of noise.
 
 ## 5. How do we work?
 
@@ -131,3 +159,353 @@ Claude: "rm -rf build" (deletes entire directory without approval)
 - Deleting `build/` removes training progress
 - Accidental deletions can waste weeks of training
 - Human oversight prevents catastrophic losses
+
+## 7. Learning Loop Protocol
+
+The full loop is:
+Spec → Read RewardCatalog → Code → Shadow Mode on M2 →
+Validate activation → Set live weight → Train → W&B alerts → Behavior check → Log result
+
+**One variable per iteration.** Before each adjustment write one sentence:
+"I think the problem is X and I expect changing Y to produce Z in W&B."
+Change only that one thing. This is how you build intuition instead of noise.
+
+**W&B — stop training and investigate if:**
+- `kl_divergence` > 0.05
+- `entropy` < 0.02
+- `mean_reward` drops > 20% over 5 consecutive iterations
+- Any single reward dominates > 40% of total reward signal
+
+**Weight estimation heuristic:**
+Activation rate × desired contribution to total = starting weight guess.
+Never jump more than ±50% of current weight in one change.
+
+**Shadow mode before going live:**
+Wrap new rewards in `ShadowReward` on Machine 2 for one training run.
+Returns 0.0f to optimizer. Validates activation rate and value distribution
+before any policy impact. Remove wrapper once signal looks correct.
+
+**Log every change:**
+After any reward add/edit/weight change, add one line to Reward_Change_Log.md.
+Format: date | what changed | hypothesis | result (filled after observation).
+
+### Reward Health vs. Behavior Confirmation
+
+These are two different questions. Never conflate them.
+
+**Reward Health (W&B) — "Is the reward functioning as designed?"**
+Answers: Is it firing? Is it being farmed? Is the activation rate in the expected range?
+This tells you the reward is working mechanically. It does NOT tell you the bot
+is learning the intended behavior.
+
+Signs of a healthy reward signal:
+- Activation rate is in the expected ballpark (not zero, not suspiciously high)
+- Value distribution looks reasonable (no extreme outliers suggesting farming)
+- Co-occurring rewards that should correlate are actually correlating
+  (e.g. underside_contact_reward and flip_reset_trigger_reward rising together)
+
+**Behavior Confirmation (RocketSimVis / Live RL) — "Is the bot actually doing the thing?"**
+This is the real answer. W&B cannot confirm this. Only visual observation can.
+A reward can be firing at a healthy rate while the bot has found a degenerate
+strategy to trigger it that looks nothing like the intended mechanic.
+
+Schedule a RocketSimVis review after every 500M–1B steps when a new reward
+is active. This is not optional — it's the only way to confirm behavior.
+
+**In the Mechanic Spec, define both separately:**
+- Reward health check: what metric, what range, what would look suspicious
+- Behavior confirmation: what you'll look for in RocketSimVis specifically
+  (e.g. "bot approaches ball from below at ~45°" not "flip_reset_rate > 0.1%")
+
+---
+
+## 7A. Work Type Reference
+
+Different categories of bot improvement have different reward patterns,
+different signals, and different failure modes. Match your approach to the
+work type before writing any code.
+
+---
+
+### MECHANICS
+*Flip resets, aerials, dribbles, flicks, wavedashes, wall plays*
+
+**Reward pattern:**
+- Event-based trigger (fires once on success, not continuously)
+- All conditions must be met simultaneously — no partial credit
+- Anti-farming: require meaningful context (height, speed, ball proximity)
+- Follow with productive use validation window (≤2s for PPO credit assignment)
+
+**State setter:** Almost always required. Mechanics need curated initial states
+to explore — they will never appear organically at natural frequency.
+
+**"Working" signal:** Activation rate climbs from near-zero to a stable plateau.
+Behavior visible in RocketSimVis within 500M–1B steps of activation.
+
+**Common failure modes:**
+- Reward never fires → bad state setter geometry or trigger condition too strict
+- Reward farms → condition not requiring game-useful context
+- Mechanic learned but wrong approach → check state setter spawn geometry
+
+---
+
+### POSITIONING
+*Rotation, support position, spacing, goalpost coverage, shadow defense*
+
+**Reward pattern:**
+- Continuous shaping (fires every step, small value)
+- Distance/angle to ideal position as a smooth curve, not a threshold
+- Phase-gate: positioning rewards should tighten as phase advances
+  (Bronze: loose, Champion+: strict geometric precision)
+- ZeroSum wrapper usually appropriate — good positioning by one team
+  is bad for the other
+
+**State setter:** Random state is usually sufficient. Positioning behaviors
+are general enough that natural game states provide adequate coverage.
+
+**"Working" signal:** Hard to see in W&B directly. Look for:
+- ELO improvement without a corresponding goal-count increase (smarter, not luckier)
+- Reduction in "out of position" demo deaths in RocketSimVis
+
+**Common failure modes:**
+- Reward too continuous → drowns event-based rewards via gradient dilution
+  (keep weights low: 1–20f range)
+- Position defined in world-space instead of relative-to-ball/goal space →
+  breaks under game flow, especially in 3v3
+- Conflicts with retreat/rotation rewards → bot freezes trying to satisfy both
+
+---
+
+### TEAMWORK
+*Passing, receiving, spacing, numerical advantage, role awareness*
+
+**Reward pattern:**
+- Coupled across agents: passing reward requires both passer and receiver
+  to behave correctly. Design sender-side and receiver-side as separate rewards
+  that fire on the same event from different perspectives
+- ZeroSum always: teamwork rewards are inherently competitive
+- Gating: don't reward passes that weren't set up (use OptionGatingWrappers)
+
+**State setter:** Multi-agent aware. Need states where a pass is actually
+a viable action — ball moving laterally, teammate in position. Pure random
+state rarely produces this.
+
+**"Working" signal:**
+- Assists per episode trending up in W&B
+- 2v2/3v3 ELO diverging upward from 1v1 ELO (teamwork is mode-specific)
+
+**Common failure modes:**
+- Sender rewarded without receiver → bot learns to throw the ball, not pass it
+- Passing reward fires when ball hits opponent → use team filtering
+- Teamwork rewards active before bot can reliably aerial → reward is unreachable,
+  wastes gradient budget. Gate to Phase 5+.
+
+---
+
+### DEFENSE
+*Saves, clears, backboard reads, shadow defense, goal line coverage*
+
+**Reward pattern:**
+- Mix of event-based (save fires once) and continuous shaping (shadow positioning)
+- Defensive rewards almost always need ZeroSum — a save is a direct opponent loss
+- Anti-overcommit pairing: every defensive reward should have a corresponding
+  overcommitment penalty. A save that causes positional collapse is net negative.
+- Directional: clears must verify ball is moving away from own goal, not just touched
+
+**State setter:** Defensive scenario states — ball near own goal, opponent in
+possession. RandomState covers some of this but dedicated defensive states
+improve sample efficiency significantly for save-specific rewards.
+
+**"Working" signal:**
+- Goals-against per episode trending down (lagging indicator, slow)
+- `SaveReward` + `BigClearReward` activation rates as leading indicators
+- `DoubleCommitPenalty` staying low (bot not abandoning position to chase)
+- In RocketSimVis: bot doesn't ball-chase off its own goal line
+
+**Common failure modes:**
+- Save reward fires on clears that land in corner → opponent immediately recovers.
+  Require minimum clear distance/speed.
+- Defensive bot never challenges → overcommit penalty too high relative to save reward
+- Shadow defense reward conflicts with `EmergencySaveCommitReward` → bot hesitates
+  on last-ditch saves. Tune penalty scaling so emergency saves are never suppressed.
+
+---
+
+### PREDICTING NEXT PLAYS / OPPONENT READS
+*Preemptive saves, challenge timing, interception, overcommit exploitation*
+
+**Reward pattern:**
+- Hardest category to reward directly — the bot must be in the right position
+  BEFORE the event occurs, which is a long-horizon credit assignment problem
+- Use leading indicator rewards: reward getting to the correct position early,
+  not just succeeding at the outcome
+- Pair preemptive rewards with outcome rewards: `EarlyDangerDetectionReward`
+  (leading) + `SaveReward` (outcome). If only the outcome fires, the bot
+  learns to react, not predict.
+- Window-based: define a time window (e.g. 1–2s before ball arrives) in which
+  the positioning reward fires. Outside the window, no reward.
+
+**State setter:** Scenario states are critical here. "Opponent has ball in
+corner, your bot is in net" is the seed state for preemptive read training.
+
+**"Working" signal:**
+- In RocketSimVis: bot moves to cover before the opponent commits to a shot
+
+**Common failure modes:**
+- Leading indicator reward too sparse → credit assignment fails, bot never
+  connects early positioning to eventual save outcome
+- Prediction reward conflicts with rotation → bot camps in net instead of rotating
+- Overtrained on preemptive reads → bot freezes waiting for shots that don't come.
+  Balance with active pressure rewards.
+
+---
+
+### BOOST MANAGEMENT
+*Collection routing, conservation, boost denial, efficiency under pressure*
+
+**Reward pattern:**
+- Almost entirely continuous shaping — boost management is a persistent behavior,
+  not an event
+- Avoid rewarding boost amount directly → bot sits on boost pads and avoids the ball
+- Reward boost-efficient plays: reaching the ball with less boost used, or
+  maintaining boost above threshold while still contesting
+- Denial (stealing opponent boost) is a separate reward from conservation —
+  design and validate them independently
+
+**State setter:** Default random state is fine. Boost management is general
+enough that natural game distributions cover adequate scenarios.
+
+**"Working" signal:**
+- Average boost at ball contact trending upward (bot conserves before committing)
+- Boost pickup frequency staying high (bot routes through pads efficiently)
+- In RocketSimVis: bot doesn't arrive at ball on 0 boost in critical moments
+- ELO improvement in sustained pressure scenarios (boost management pays off late)
+
+**Common failure modes:**
+- Boost conservation reward too high → passive play, bot won't commit aerials
+- Pickup reward alone → bot ignores ball to collect pads
+- No pressure qualifier → bot conserves boost even when it should be attacking.
+  Require ball proximity or game context for conservation rewards.
+
+---
+
+### CAR CONTROL / RECOVERY / MOBILITY / SPEED
+*Landing recovery, wavedash, flip cancel, speed preservation, wall exits*
+
+**Reward pattern:**
+- Technique rewards: fire on correct execution of a specific movement pattern
+  (wavedash detected by handbrake + landing + no flip)
+- Recovery rewards: multi-wheel landing bonus, penalty for nose-first crashes
+- Speed preservation: reward maintaining velocity through a maneuver vs. before
+- These are low-weight, high-frequency rewards — they should shape baseline
+  movement without competing with game-state rewards
+
+**State setter:** Dedicated recovery states are high value — spawn car mid-fall
+at various angles and heights to force recovery practice. Without this,
+recovery rewards only fire on organic bad landings (rare at Phase 5+).
+
+**"Working" signal:**
+- Average landing wheel count trending upward (smoother recoveries)
+- In RocketSimVis: bot doesn't bounce or spin out on wall exits
+- Speed at ball contact trending upward (better approach efficiency)
+
+**Common failure modes:**
+- Recovery reward fires on any 4-wheel landing → bot takes unnecessary bounces
+  to farm the reward. Require landing after airborne minimum height/time.
+- Speed preservation reward too high → bot never dodges or commits aerials
+  (dodging kills speed momentarily)
+- Wavedash reward fires on ground-level dodges → require minimum height before
+  the landing that triggers it
+
+---
+
+### GENERAL / OTHER
+*Experimental rewards, composite behaviors, cross-category work*
+
+**Reward pattern:**
+- If it doesn't fit a category above, define its category before coding it.
+  "General" is not a design pattern — it's a flag that the trigger condition
+  needs more thought.
+- Composite rewards (combining multiple signals into one class) should be
+  documented with each component's individual contribution so they can be
+  debugged independently via W&B sub-metrics.
+
+**State setter:** Depends on what the reward targets. Default to random state
+and reassess if activation rate is too low after shadow mode.
+
+**"Working" signal:** Define this explicitly before writing code.
+If you can't state what "working" looks like in W&B, the reward isn't
+specified enough to implement yet.
+
+**Common failure modes:**
+- "General" rewards that are actually poorly-specified mechanic rewards →
+  activation rate near zero, no learnable signal
+- Composite rewards that mask individual component failure → add per-component
+  W&B logging so you can see which sub-signal is dead
+
+**W&B tells you about the reward. RocketSimVis tells you about the bot.**
+These are not the same thing. A reward can be healthy while the bot has learned
+a degenerate shortcut. Always confirm behavior visually before concluding a
+mechanic has been learned. Treat W&B metrics as health indicators and
+leading signals, never as proof of success.
+
+---
+
+## 7B. Mechanic Spec Template
+
+Fill this out before any code is written. The category determines which
+patterns and failure modes to watch for (see 7A).
+```
+## Mechanic Spec: [Name]
+Date: YYYY-MM-DD
+Category: MECHANIC | POSITIONING | TEAMWORK | DEFENSE | PREDICTION | BOOST | CAR CONTROL | GENERAL
+Target Phase: PHASE_X_NAME
+Machine: M1 (live) | M2 (experiment)
+
+### What is it?
+[One sentence plain English description]
+
+### Trigger Condition
+[Exact observable state(s) that fire the reward. Be specific — height thresholds,
+velocity requirements, player state flags, etc.]
+
+### Anti-Farming Defense
+[What prevents the bot from looping this trigger cheaply without game value?]
+
+### State Setter Required?
+[ ] No — random state provides enough coverage
+[ ] Yes — describe spawn geometry:
+    Ball: [position, velocity, height]
+    Car: [orientation, velocity, distance to ball]
+    Frequency: [% of episodes]
+
+### Reward Structure
+[ ] Event-based (fires once on success)
+[ ] Continuous shaping (fires every step)
+[ ] Hybrid (continuous approach + event bonus)
+ZeroSum: [ ] Yes  [ ] No
+Productive use window: [N/A | Xs]
+
+### Expected Activation Rate
+[% of steps this should fire in shadow mode — your estimate before running it]
+
+### W&B Metric Name
+[Name of the custom metric you'll log, e.g. "flip_reset_acquisition_rate"]
+
+### Reward Health Check (W&B)
+[What metric, and what range looks healthy vs. suspicious?
+Be specific about what farming would look like here so you know to watch for it.]
+
+### Behavior Confirmation (RocketSimVis)
+[What does the bot's movement/decision actually look like when this is working?
+Describe it in plain English as if you're watching a replay.
+This is the real success criterion — W&B alone cannot confirm this.]
+
+### Rewards This Overlaps With
+[Check RewardCatalog.md. List any that share trigger conditions or target behavior]
+
+### Starting Weight
+[Estimate based on: activation_rate × desired_contribution_to_total_signal]
+
+### Notes
+[Anything else Claude Code needs to know to implement this correctly]

@@ -100,14 +100,21 @@ namespace RLGC {
 		return 0.5f + 0.5f * t;
 	}
 
-	// Power shot scale: two-segment linear ramp.
+	// Power shot scale: three-segment linear ramp.
+	// 2026-04-16 | NJH | Rev 1.3 — extended upper cap (140 kph -> 180 kph, 1.5x -> 2.0x)
+	// to keep rewarding faster shots up to RL's realistic max.
 	// <= 50 kph  => 0.1x  (tap shots get almost nothing)
 	// >= 100 kph => 1.0x  (baseline full reward)
-	// >= 140 kph => 1.5x  (bonus for hard shots/saves)
+	// >= 140 kph => 1.5x  (hard shot bonus)
+	// >= 180 kph => 2.0x  (max bonus for power shots)
 	inline float SpeedScale_PowerShot(const GameState& state) {
 		float kph = BallSpeedKph(state);
 		if (kph <= 50.0f)  return 0.1f;
-		if (kph >= 140.0f) return 1.5f;
+		if (kph >= 180.0f) return 2.0f;
+		if (kph >= 140.0f) {
+			float t = (kph - 140.0f) / (180.0f - 140.0f); // 0..1
+			return 1.5f + 0.5f * t;                        // 1.5 -> 2.0
+		}
 		if (kph >= 100.0f) {
 			float t = (kph - 100.0f) / (140.0f - 100.0f); // 0..1
 			return 1.0f + 0.5f * t;                        // 1.0 -> 1.5
@@ -1093,6 +1100,310 @@ namespace RLGC {
 			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
 			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
 			return dirToBall.Dot(normVel);
+		}
+	};
+
+	// ============================================================================
+	// ClosestPlayerKickoffSideReward
+	// Same as ClosestPlayerKickoffSpeedReward, but with team-aware side preference:
+	// - Blue team: Favor +X side (right side from their goal perspective)
+	// - Orange team: Favor -X side (left side from their goal perspective)
+	// When equidistant, this ensures the "correct" starting side player gets credit
+	// ============================================================================
+	class ClosestPlayerKickoffSideReward : public Reward {
+	private:
+		// Ball within this radius of center = kickoff active (matches KickoffNoChaseTeamPenalty.h)
+		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Gate: only active during kickoff
+			if (state.ball.pos.Length() >= KICKOFF_BALL_RADIUS)
+				return 0.0f;
+
+			// Determine which X side to favor based on team
+			// Blue team (defending -Y): favor +X side (right side)
+			// Orange team (defending +Y): favor -X side (left side)
+			float favoredXSide = (player.team == Team::BLUE) ? 1.0f : -1.0f;
+
+			// Find the closest teammate to the ball, with side preference
+			float closestDist = std::numeric_limits<float>::max();
+			int closestIdx = -1;
+			bool closestIsOnFavored = false;
+
+			for (size_t i = 0; i < state.players.size(); i++) {
+				const Player& teammate = state.players[i];
+
+				// Only consider teammates
+				if (teammate.team != player.team)
+					continue;
+
+				float dist = (teammate.pos - state.ball.pos).Length();
+				bool isOnFavored = (teammate.pos.x * favoredXSide > 0.0f);
+
+				// Update if:
+				// 1. Closer distance, OR
+				// 2. Same distance AND on favored side (while old one wasn't), OR
+				// 3. Same distance AND both on favored side AND further toward favored X direction
+				if (dist < closestDist ||
+					(dist == closestDist && isOnFavored && !closestIsOnFavored) ||
+					(dist == closestDist && isOnFavored && closestIsOnFavored &&
+					 teammate.pos.x * favoredXSide > state.players[closestIdx].pos.x * favoredXSide)) {
+					closestDist = dist;
+					closestIdx = (int)i;
+					closestIsOnFavored = isOnFavored;
+				}
+			}
+
+			// No teammates found (shouldn't happen) or not the closest player
+			if (closestIdx == -1 || state.players[closestIdx].carId != player.carId)
+				return 0.0f;
+
+			// Reward this player's velocity toward ball (same as ClosestPlayerKickoffSpeedReward)
+			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
+			return dirToBall.Dot(normVel);
+		}
+	};
+
+	// ============================================================================
+	// SpeedflipKickoffReward
+	// Simple reward: Only rewards speedflip usage during kickoff, BEFORE ball hit
+	// Tracks if player used a flip/speedflip before touching the ball
+	// ============================================================================
+	class SpeedflipKickoffReward : public Reward {
+	private:
+		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
+		static constexpr float BASE_REWARD = 1.0f;
+
+		struct FlipMemory {
+			bool usedFlipInKickoff = false;  // Did player flip during this kickoff?
+			bool ballWasHit = false;         // Did player hit ball yet?
+		};
+
+		mutable std::map<uint32_t, FlipMemory> flipMemory;
+
+	public:
+		virtual void Reset(const GameState& initialState) override {
+			flipMemory.clear();
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Gate: only active during kickoff (ball near center)
+			bool inKickoff = state.ball.pos.Length() < KICKOFF_BALL_RADIUS;
+
+			// Initialize memory for this player if not present
+			if (!flipMemory.count(player.carId)) {
+				flipMemory[player.carId] = FlipMemory();
+			}
+
+			auto& mem = flipMemory[player.carId];
+
+			// Reset tracking when exiting kickoff
+			if (!inKickoff) {
+				mem.usedFlipInKickoff = false;
+				mem.ballWasHit = false;
+				return 0.0f;
+			}
+
+			// Track if player used flip (double jump) during kickoff
+			if (player.isFlipping || (state.prev && state.prev->players[player.carId].isFlipping)) {
+				mem.usedFlipInKickoff = true;
+			}
+
+			// Check if player just hit the ball
+			if (player.ballTouchedStep) {
+				mem.ballWasHit = true;
+
+				// Only reward if speedflip was used BEFORE the ball hit
+				if (mem.usedFlipInKickoff) {
+					return BASE_REWARD;
+				}
+			}
+
+			return 0.0f;
+		}
+	};
+
+	// ============================================================================
+	// KickoffDoubleCommitPenalty
+	// Penalizes multiple teammates touching the ball at the same time during kickoff
+	// Double commits are bad - one player should commit, not two simultaneous touches
+	// ============================================================================
+	class KickoffDoubleCommitPenalty : public Reward {
+	private:
+		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
+		static constexpr float PENALTY_PER_COMMIT = -2.0f;  // Penalty for each extra simultaneous touch
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			// Gate: only active during kickoff (ball near center)
+			if (state.ball.pos.Length() >= KICKOFF_BALL_RADIUS)
+				return 0.0f;
+
+			// If this player didn't touch the ball, no penalty
+			if (!player.ballTouchedStep)
+				return 0.0f;
+
+			// Count how many teammates also touched the ball this frame
+			int committedCount = 0;
+			for (const auto& teammate : state.players) {
+				// Only count teammates (same team as player)
+				if (teammate.team == player.team && teammate.ballTouchedStep) {
+					committedCount++;
+				}
+			}
+
+			// No penalty if only this player committed (or no one)
+			if (committedCount <= 1)
+				return 0.0f;
+
+			// Penalty scales with how many extra commits there are
+			// committedCount = 2 → 1 extra (penalty -2.0)
+			// committedCount = 3 → 2 extra (penalty -4.0)
+			// committedCount = 4 → 3 extra (penalty -6.0)
+			return PENALTY_PER_COMMIT * (committedCount - 1);
+		}
+	};
+
+	// ============================================================================
+	// KickoffCounterReward
+	// Rewards winning the kickoff and converting possession into a goal
+	// Specifically designed to reward:
+	// 1. Getting possession off kickoff (first touch by our team)
+	// 2. Scoring directly from that kickoff possession
+	// 3. Countering against fast-moving opponents (higher opponent speed = harder counter)
+	// ============================================================================
+	class KickoffCounterReward : public Reward {
+	private:
+		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
+		static constexpr float BASE_POSSESSION_REWARD = 6.0f;     // Base reward for winning kickoff
+		static constexpr float GOAL_BONUS = 8.0f;                 // Bonus for scoring from kickoff counter
+		static constexpr float POSSESSION_LOST_PENALTY = -1.0f;   // Penalty if we lost kickoff
+		static constexpr float GOAL_CONCEDED_PENALTY = -8.0f;     // Penalty if they scored from our loss
+		static constexpr float OPPONENT_SPEED_SCALAR = 0.02f;     // Velocity bonus multiplier (harder counters = more reward)
+		static constexpr float MAX_SPEED_BONUS = 3.0f;            // Cap on velocity bonus
+
+		struct CounterMemory {
+			bool wasInKickoff = false;
+			bool ourTeamGotFirstTouch = false;      // Did our team get first touch in this kickoff?
+			int framesWithOurPossession = 0;        // How many frames have we had possession?
+			float maxOpponentVelAtCounter = 0.0f;   // Max opponent speed during this counter
+			bool hasScored = false;                 // Did we score from this possession?
+			bool hasConceded = false;               // Did they score from our loss?
+		};
+
+		mutable std::map<uint32_t, CounterMemory> counterMemory;
+
+	public:
+		virtual void Reset(const GameState& initialState) override {
+			counterMemory.clear();
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			bool inKickoff = state.ball.pos.Length() < KICKOFF_BALL_RADIUS;
+
+			// Initialize memory for this player if not present
+			if (!counterMemory.count(player.carId)) {
+				counterMemory[player.carId] = CounterMemory();
+			}
+
+			auto& mem = counterMemory[player.carId];
+
+			// PHASE 1: Entering kickoff
+			if (inKickoff && !mem.wasInKickoff) {
+				// Kickoff just started - reset tracking
+				mem.wasInKickoff = true;
+				mem.ourTeamGotFirstTouch = false;
+				mem.framesWithOurPossession = 0;
+				mem.maxOpponentVelAtCounter = 0.0f;
+				mem.hasScored = false;
+				mem.hasConceded = false;
+				return 0.0f;
+			}
+
+			// PHASE 2: During kickoff - track first touch
+			if (inKickoff) {
+				// Only track first touch once per kickoff
+				if (!mem.ourTeamGotFirstTouch) {
+					// Check if anyone touched the ball this frame
+					for (const auto& p : state.players) {
+						if (p.ballTouchedStep) {
+							// First touch in this kickoff
+							if (p.team == player.team) {
+								mem.ourTeamGotFirstTouch = true;
+
+								// Track max opponent velocity at time of counter
+								for (const auto& opp : state.players) {
+									if (opp.team != player.team) {
+										float oppSpeed = opp.vel.Length();
+										mem.maxOpponentVelAtCounter = std::max(mem.maxOpponentVelAtCounter, oppSpeed);
+									}
+								}
+							}
+							break;
+						}
+					}
+				}
+
+				// If we have possession, track frames and check for opponent velocities
+				if (mem.ourTeamGotFirstTouch && !mem.hasScored) {
+					mem.framesWithOurPossession++;
+
+					// Continue tracking opponent speed for velocity bonus calculation
+					for (const auto& opp : state.players) {
+						if (opp.team != player.team) {
+							float oppSpeed = opp.vel.Length();
+							mem.maxOpponentVelAtCounter = std::max(mem.maxOpponentVelAtCounter, oppSpeed);
+						}
+					}
+				}
+
+				return 0.0f;
+			}
+
+			// PHASE 3: Exiting kickoff - evaluate outcome
+			if (mem.wasInKickoff && !inKickoff) {
+				mem.wasInKickoff = false;
+
+				float reward = 0.0f;
+
+				// Check if goal was scored on the current or previous step
+				if (state.goalScored) {
+					// Determine which team scored
+					Team scoringTeam = RS_TEAM_FROM_Y(state.ball.pos.y);
+
+					if (mem.ourTeamGotFirstTouch) {
+						// We won the kickoff and scored -> big reward!
+						mem.hasScored = true;
+						float speedBonus = std::min(mem.maxOpponentVelAtCounter * OPPONENT_SPEED_SCALAR, MAX_SPEED_BONUS);
+						reward = BASE_POSSESSION_REWARD + GOAL_BONUS + speedBonus;
+					} else if (scoringTeam != player.team) {
+						// We lost the kickoff and they scored -> penalty
+						mem.hasConceded = true;
+						reward = GOAL_CONCEDED_PENALTY;
+					}
+				} else {
+					// No goal yet, just possession outcome
+					if (mem.ourTeamGotFirstTouch) {
+						// We won the kickoff - give possession reward + opponent speed bonus
+						float speedBonus = std::min(mem.maxOpponentVelAtCounter * OPPONENT_SPEED_SCALAR, MAX_SPEED_BONUS);
+						reward = BASE_POSSESSION_REWARD + speedBonus;
+					} else {
+						// We lost the kickoff - small penalty
+						reward = POSSESSION_LOST_PENALTY;
+					}
+				}
+
+				// Reset for next kickoff
+				mem.ourTeamGotFirstTouch = false;
+				mem.framesWithOurPossession = 0;
+				mem.maxOpponentVelAtCounter = 0.0f;
+
+				return reward;
+			}
+
+			return 0.0f;
 		}
 	};
 }

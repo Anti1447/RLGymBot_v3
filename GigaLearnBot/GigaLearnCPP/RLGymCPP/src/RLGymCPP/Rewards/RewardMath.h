@@ -263,6 +263,28 @@ namespace RLGC {
             return true;
         }
 
+        // Check if player is in opponent's half of the field
+        // Blue (team 0) attacks toward +Y (Orange goal), so opponent half is Y > 0
+        // Orange (team 1) attacks toward -Y (Blue goal), so opponent half is Y < 0
+        inline bool IsInOpponentHalf(const Player& player) {
+            return (player.team == Team::BLUE) ? (player.pos.y > 0.0f) : (player.pos.y < 0.0f);
+        }
+
+        // Check if position is in opponent's half for a given team
+        inline bool IsInOpponentHalf(const Vec& pos, Team team) {
+            return (team == Team::BLUE) ? (pos.y > 0.0f) : (pos.y < 0.0f);
+        }
+
+        // Check if player is in own half of the field
+        // Blue (team 0) defends at negative Y, Orange (team 1) defends at positive Y
+        inline bool IsInOwnHalf(const Player& player) {
+            return (player.team == Team::BLUE) ? (player.pos.y < 0.0f) : (player.pos.y > 0.0f);
+        }
+
+        // Check if position is in own half for a given team
+        inline bool IsInOwnHalf(const Vec& pos, Team team) {
+            return (team == Team::BLUE) ? (pos.y < 0.0f) : (pos.y > 0.0f);
+        }
 
     } // namespace RewardMath
 

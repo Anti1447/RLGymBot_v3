@@ -432,6 +432,8 @@ namespace RLGC {
             // Thresholds
             float min_ball_height = 400.0f;        // Ball must be this high (uu above ground)
             float min_distance_from_walls = 400.0f; // Distance from nearest wall/backboard (uu)
+            float max_car_ball_distance = 250.0f;   // Car must be within this distance of ball (uu)
+            bool require_ball_touch = true;         // Only reward if player touched ball
         };
     private:
         Config config;
@@ -481,8 +483,15 @@ namespace RLGC {
                 float distToWall = DistanceToNearestWall(state.ball.pos);
                 bool ballAwayFromWalls = distToWall >= config.min_distance_from_walls;
 
-                // Award only if BOTH conditions are met
-                if (ballHighEnough && ballAwayFromWalls) {
+                // Check condition 3: Car must be close to ball (within 250 uu)
+                float distToCarBall = (player.pos - state.ball.pos).Length();
+                bool carCloseToBall = distToCarBall <= config.max_car_ball_distance;
+
+                // Check condition 4: (Optional) Player must have touched ball this frame
+                bool playerTouchedBall = !config.require_ball_touch || player.ballTouchedStep;
+
+                // Award only if ALL conditions are met
+                if (ballHighEnough && ballAwayFromWalls && carCloseToBall && playerTouchedBall) {
                     totalReward = config.flip_reset_reward;
                 }
             }
