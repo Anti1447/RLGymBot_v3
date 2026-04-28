@@ -966,15 +966,22 @@ namespace RLGC {
 			if (!state.prev)
 				return 0;
 
-			if (player.ballTouchedStep) {
-				float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
-				if (hitForce < minRewardedVel)
-					return 0;
-
-				return RS_MIN(1, hitForce / maxRewardedVel);
-			} else {
+			if (!player.ballTouchedStep)
 				return 0;
-			}
+
+			float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
+			if (hitForce < minRewardedVel)
+				return 0;
+
+			// Direction multiplier: dot of post-touch ball velocity with to-opponent-goal direction.
+			// Clamp to [0,1] so own-goal touches yield 0, on-target touches yield full reward.
+			const Vec& oppGoal = (player.team == Team::BLUE)
+				? RLGC::CommonValues::ORANGE_GOAL_CENTER
+				: RLGC::CommonValues::BLUE_GOAL_CENTER;
+			Vec toGoal = (oppGoal - state.ball.pos).Normalized();
+			float dirMult = RS_CLAMP(state.ball.vel.Normalized().Dot(toGoal), 0.0f, 1.0f);
+
+			return RS_MIN(1.0f, hitForce / maxRewardedVel) * dirMult;
 		}
 	};
 
@@ -1166,19 +1173,17 @@ namespace RLGC {
 		}
 	};
 
-	// ============================================================================
-	// SpeedflipKickoffReward
-	// Simple reward: Only rewards speedflip usage during kickoff, BEFORE ball hit
-	// Tracks if player used a flip/speedflip before touching the ball
-	// ============================================================================
+	// RETIRED 2026-04-26: Replaced by SpeedFlipKickoffReward in AdvancedKickoffRewards.h
+	// (Multi-phase: boost collect + flip quality + contact evaluation. Weight: 20.0f -> 2.0f)
+	/*
 	class SpeedflipKickoffReward : public Reward {
 	private:
 		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
 		static constexpr float BASE_REWARD = 1.0f;
 
 		struct FlipMemory {
-			bool usedFlipInKickoff = false;  // Did player flip during this kickoff?
-			bool ballWasHit = false;         // Did player hit ball yet?
+			bool usedFlipInKickoff = false;
+			bool ballWasHit = false;
 		};
 
 		mutable std::map<uint32_t, FlipMemory> flipMemory;
@@ -1189,41 +1194,29 @@ namespace RLGC {
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-			// Gate: only active during kickoff (ball near center)
 			bool inKickoff = state.ball.pos.Length() < KICKOFF_BALL_RADIUS;
-
-			// Initialize memory for this player if not present
 			if (!flipMemory.count(player.carId)) {
 				flipMemory[player.carId] = FlipMemory();
 			}
-
 			auto& mem = flipMemory[player.carId];
-
-			// Reset tracking when exiting kickoff
 			if (!inKickoff) {
 				mem.usedFlipInKickoff = false;
 				mem.ballWasHit = false;
 				return 0.0f;
 			}
-
-			// Track if player used flip (double jump) during kickoff
 			if (player.isFlipping || (state.prev && state.prev->players[player.carId].isFlipping)) {
 				mem.usedFlipInKickoff = true;
 			}
-
-			// Check if player just hit the ball
 			if (player.ballTouchedStep) {
 				mem.ballWasHit = true;
-
-				// Only reward if speedflip was used BEFORE the ball hit
 				if (mem.usedFlipInKickoff) {
 					return BASE_REWARD;
 				}
 			}
-
 			return 0.0f;
 		}
 	};
+	*/
 
 	// ============================================================================
 	// KickoffDoubleCommitPenalty

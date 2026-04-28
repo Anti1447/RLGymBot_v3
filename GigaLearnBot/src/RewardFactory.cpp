@@ -132,7 +132,7 @@ void RewardFactory::Initialize() {
     Register("PowerSlideControlReward", []() { return new PowerSlideControlReward(); });
     Register("SupersonicReward", []() { return new SupersonicReward(); });
     Register("EnhancedSpeedFlipReward", []() { return new EnhancedSpeedFlipReward(); });
-    Register("SpeedflipKickoffReward", []() { return new SpeedflipKickoffReward(); });
+    Register("SpeedFlipKickoffReward", []() { return new SpeedFlipKickoffReward(); });
     Register("EnhancedVelocityBallToGoalReward", []() { return new EnhancedVelocityBallToGoalReward(); });
     Register("PlayerVelocityToOpponentReward", []() { return new PlayerVelocityToOpponentReward(); });
     Register("ClosestPlayerSpeedReward", []() { return new ClosestPlayerSpeedReward(); });

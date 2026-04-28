@@ -178,15 +178,21 @@ namespace RLGC {
         float    firstTouchTime    = 0.0f;
         float    firstTouchHeight  = 0.0f;
         std::map<uint32_t, bool> paidThisAerial;
+        // 2026-04-19: track which players were close enough at aerial session start
+        // to be eligible for the first-touch reward. Players > maxAerialLaunchDist UU
+        // from the ball when the aerial begins are excluded — this removes the incentive
+        // to race from the wall/far positions just because the ball went high.
+        std::map<uint32_t, bool> eligibleThisAerial;
 
         // Tunables
-        float aerialZ          = 250.0f;  // ball must be above this to count as "aerial"
-        float kickoffPos       = 200.0f;
-        float kickoffVel       = 150.0f;
-        float maxAerialTrackSec = 5.0f;   // don't keep state forever
-        float timeScoreWindow  = 1.8f;    // earlier than this = full time score
-        float minReward        = 0.6f;
-        float maxReward        = 2.2f;
+        float aerialZ              = 250.0f;   // ball must be above this to count as "aerial"
+        float kickoffPos           = 200.0f;
+        float kickoffVel           = 150.0f;
+        float maxAerialTrackSec    = 5.0f;     // don't keep state forever
+        float timeScoreWindow      = 1.8f;     // earlier than this = full time score
+        float minReward            = 0.6f;
+        float maxReward            = 2.2f;
+        float maxAerialLaunchDist  = 3500.0f;  // UU — car must be within this at session start
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -197,6 +203,7 @@ namespace RLGC {
             firstTouchTime    = 0.0f;
             firstTouchHeight  = 0.0f;
             paidThisAerial.clear();
+            eligibleThisAerial.clear();
         }
 
         // All per-step state updates live here so they run once per step,
@@ -216,6 +223,13 @@ namespace RLGC {
                 firstTouchTime     = 0.0f;
                 firstTouchHeight   = 0.0f;
                 paidThisAerial.clear();
+                // Record eligibility at session start based on car-ball distance.
+                // Players beyond maxAerialLaunchDist will not be rewarded for this session.
+                eligibleThisAerial.clear();
+                for (const auto& p : state.players) {
+                    float dist = (p.pos - state.ball.pos).Length();
+                    eligibleThisAerial[p.carId] = (dist <= maxAerialLaunchDist);
+                }
             }
 
             if (aerialActive) {
@@ -246,6 +260,9 @@ namespace RLGC {
             if (aerialActive) return 0.0f;
             if (!firstTouchRecorded) return 0.0f;
             if (paidThisAerial[player.carId]) return 0.0f;
+            // Only reward players who were within maxAerialLaunchDist of the ball
+            // when the aerial session started. Skip players who committed from far away.
+            if (!eligibleThisAerial[player.carId]) return 0.0f;
 
             float r = 0.0f;
             if (player.carId == firstTouchCarId) {

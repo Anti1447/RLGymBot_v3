@@ -1104,8 +1104,12 @@ namespace RLGC {
             current_time = 0.0f;
         }
 
+        // current_time must advance in PreStep (once per step), not GetReward (once per player).
+        virtual void PreStep(const GameState& state) override {
+            current_time += (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+        }
+
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            current_time += state.deltaTime;
 
             if (playerStates.find(player.carId) == playerStates.end()) {
                 playerStates[player.carId] = BoostManagementState();

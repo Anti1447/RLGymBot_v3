@@ -56,11 +56,10 @@ misalignment caught in training costs days.
 5. "Working" signal at 500M steps: what does success look like in W&B?
 6. Overlapping rewards: check RewardCatalog.md before writing anything
 
-**Shadow mode before going live:**
-New rewards should be wrapped in `ShadowReward` on Machine 2 for one training run
-before being added to the live signal. Shadow mode logs activation stats but returns
-0.0f to the optimizer — zero policy impact, full visibility. Remove the wrapper once
-activation rate and value distribution look correct.
+**Direct implementation by default:**
+New rewards go live immediately — no shadow wrapper unless Nathan explicitly requests it.
+Shadow mode (`ShadowReward`) is available for high-risk rewards where zero policy impact
+during validation is needed, but it is opt-in, not the default workflow.
 
 **Log every change:**
 After any reward add/edit/weight change, add a one-line entry to
@@ -163,8 +162,12 @@ Claude: "rm -rf build" (deletes entire directory without approval)
 ## 7. Learning Loop Protocol
 
 The full loop is:
-Spec → Read RewardCatalog → Code → Shadow Mode on M2 →
-Validate activation → Set live weight → Train → W&B alerts → Behavior check → Log result
+Spec → Read RewardCatalog → Code → Deploy live →
+Train → W&B alerts → Behavior check → Log result
+
+Shadow mode is available but opt-in. Use it only when you need activation stats
+before any policy impact (e.g. replacing a high-weight reward, adding to a stable
+checkpoint that's expensive to retrain from).
 
 **One variable per iteration.** Before each adjustment write one sentence:
 "I think the problem is X and I expect changing Y to produce Z in W&B."
@@ -180,10 +183,10 @@ Change only that one thing. This is how you build intuition instead of noise.
 Activation rate × desired contribution to total = starting weight guess.
 Never jump more than ±50% of current weight in one change.
 
-**Shadow mode before going live:**
-Wrap new rewards in `ShadowReward` on Machine 2 for one training run.
-Returns 0.0f to optimizer. Validates activation rate and value distribution
-before any policy impact. Remove wrapper once signal looks correct.
+**Shadow mode (opt-in only):**
+Only use `ShadowReward` when explicitly requested. It returns 0.0f to the optimizer
+while still logging W&B metrics — useful for high-risk replacements where you need
+activation data before any policy impact. Default is direct implementation.
 
 **Log every change:**
 After any reward add/edit/weight change, add one line to Reward_Change_Log.md.
@@ -431,7 +434,7 @@ recovery rewards only fire on organic bad landings (rare at Phase 5+).
   debugged independently via W&B sub-metrics.
 
 **State setter:** Depends on what the reward targets. Default to random state
-and reassess if activation rate is too low after shadow mode.
+and reassess if activation rate is too low after initial training run.
 
 **"Working" signal:** Define this explicitly before writing code.
 If you can't state what "working" looks like in W&B, the reward isn't

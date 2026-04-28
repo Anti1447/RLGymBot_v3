@@ -64,12 +64,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_6_CHAMPION:
-        cfg.entropyScale = 0.0214f;
-        cfg.policyLR = 9.3e-5f;
-        cfg.criticLR = 9.3e-5f;
+        cfg.entropyScale = 0.02f;
+        cfg.policyLR = 8.5e-5f;
+        cfg.criticLR = 8.5e-5f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.8f;
+        cfg.randomStateChance = 0.6f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.995;
+    cfg.ppo.gaeGamma = 0.9955;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

@@ -183,6 +183,224 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         report.AddAvg("PossessionRedirect/HookShot/Avg Reward", hookShotMetrics.GetAverageReward());
     }
 
+    // ========================================================================
+    // AIR DRIBBLE BUMP CONVERSION METRICS (shadow mode — collected every step)
+    // ========================================================================
+    auto adBumpMetrics = AirDribbleBumpConversionReward::GetAndResetMetrics();
+    if (adBumpMetrics.airBumpContacts > 0) {
+        report.AddAvg("AirDribbleBumpConv/AirBumpContacts",   (float)adBumpMetrics.airBumpContacts);
+        report.AddAvg("AirDribbleBumpConv/Qualified",         (float)adBumpMetrics.qualified);
+        report.AddAvg("AirDribbleBumpConv/QualifyRate",       (float)adBumpMetrics.qualifyRate);
+        report.AddAvg("AirDribbleBumpConv/ConversionRate",    (float)adBumpMetrics.conversionRate);
+        report.AddAvg("AirDribbleBumpConv/BallClipRate",      (float)adBumpMetrics.ballClipRate);
+        report.AddAvg("AirDribbleBumpConv/AvgAirTouchAtQual", (float)adBumpMetrics.avgAirTouchAtQual);
+        report.AddAvg("AirDribbleBumpConv/DemoShare",         (float)adBumpMetrics.demoShare);
+        report.AddAvg("AirDribbleBumpConv/FrontBlockRate",
+            adBumpMetrics.postBumpGoalBound > 0
+                ? (float)adBumpMetrics.frontBlocks / adBumpMetrics.postBumpGoalBound : 0.0f);
+        report.AddAvg("AirDribbleBumpConv/LastDefenderRate",
+            adBumpMetrics.postBumpGoalBound > 0
+                ? (float)adBumpMetrics.lastDefenderHits / adBumpMetrics.postBumpGoalBound : 0.0f);
+        report.AddAvg("AirDribbleBumpConv/AvgRewardPerConv",  (float)adBumpMetrics.avgRewardPerConv);
+    }
+
+    // ========================================================================
+    // PREDICTIVE DEMO REWARDS — Shadow Mode Metrics
+    // ========================================================================
+    {
+        auto m = MomentumLeadDemoReward::GetAndResetMetrics();
+        if (m.trackingEntered > 0) {
+            report.AddAvg("PredictiveDemo/MomentumLead/TrackingEntered", (float)m.trackingEntered);
+            report.AddAvg("PredictiveDemo/MomentumLead/DemosLed",        (float)m.demosLed);
+            report.AddAvg("PredictiveDemo/MomentumLead/AvgLeadAlign",    (float)m.avgLeadAlign);
+            report.AddAvg("PredictiveDemo/MomentumLead/AvgSpeedFactor",  (float)m.avgSpeedFactor);
+            report.AddAvg("PredictiveDemo/MomentumLead/RewardSum",       (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = BallChaserAmbushReward::GetAndResetMetrics();
+        if (m.ambushSetups > 0) {
+            report.AddAvg("PredictiveDemo/BallChaserAmbush/Setups",          (float)m.ambushSetups);
+            report.AddAvg("PredictiveDemo/BallChaserAmbush/DemosConverted",  (float)m.demosConverted);
+            report.AddAvg("PredictiveDemo/BallChaserAmbush/AvgBonusQuality", (float)m.avgBonusQuality);
+            report.AddAvg("PredictiveDemo/BallChaserAmbush/RewardSum",       (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = PostTouchShadowDemoReward::GetAndResetMetrics();
+        if (m.touchesDetected > 0) {
+            report.AddAvg("PredictiveDemo/PostTouchShadow/TouchesDetected",   (float)m.touchesDetected);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/PreReadWindows",    (float)m.preReadWindows);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/WindowsExpired",    (float)m.windowsExpired);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/BaseRewardFired",   (float)m.baseRewardFired);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/PreReadBonusFired", (float)m.preReadBonusFired);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/AvgPredAccuracy",   (float)m.avgPredictionAccuracy);
+            report.AddAvg("PredictiveDemo/PostTouchShadow/RewardSum",         (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = AerialVulnerabilityDemoReward::GetAndResetMetrics();
+        if (m.demosInVulnWindow > 0) {
+            report.AddAvg("PredictiveDemo/AerialVuln/DemosInWindow",  (float)m.demosInVulnWindow);
+            report.AddAvg("PredictiveDemo/AerialVuln/FlipBonusCount", (float)m.flipBonusCount);
+            report.AddAvg("PredictiveDemo/AerialVuln/AvgHeightBonus", (float)m.avgHeightBonus);
+            report.AddAvg("PredictiveDemo/AerialVuln/RewardSum",      (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = RespawnHuntReward::GetAndResetMetrics();
+        if (m.huntsStarted > 0) {
+            report.AddAvg("PredictiveDemo/RespawnHunt/HuntsStarted",        (float)m.huntsStarted);
+            report.AddAvg("PredictiveDemo/RespawnHunt/RoutedToSpawn",       (float)m.routedToSpawn);
+            report.AddAvg("PredictiveDemo/RespawnHunt/AmbushPresenceCount", (float)m.ambushPresenceCount);
+            report.AddAvg("PredictiveDemo/RespawnHunt/DoubleDemoCount",     (float)m.doubleDemoCount);
+            report.AddAvg("PredictiveDemo/RespawnHunt/RewardSum",           (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = FunnelExitDemoReward::GetAndResetMetrics();
+        if (m.cornerEntries > 0) {
+            report.AddAvg("PredictiveDemo/FunnelExit/CornerEntries",  (float)m.cornerEntries);
+            report.AddAvg("PredictiveDemo/FunnelExit/AtExitPosition", (float)m.atExitPosition);
+            report.AddAvg("PredictiveDemo/FunnelExit/DemosInWindow",  (float)m.demosInWindow);
+            report.AddAvg("PredictiveDemo/FunnelExit/AvgTimeliness",  (float)m.avgTimeliness);
+            report.AddAvg("PredictiveDemo/FunnelExit/RewardSum",      (float)m.rewardSum);
+        }
+    }
+    {
+        auto m = DoubleCommitDemoReward::GetAndResetMetrics();
+        if (m.allCommittedFrames > 0) {
+            report.AddAvg("PredictiveDemo/DoubleCommit/CommittedFrames", (float)m.allCommittedFrames);
+            report.AddAvg("PredictiveDemo/DoubleCommit/DemosInCommit",   (float)m.demosInCommit);
+            report.AddAvg("PredictiveDemo/DoubleCommit/AvgCommitBonus",  (float)m.avgCommitBonus);
+            report.AddAvg("PredictiveDemo/DoubleCommit/RewardSum",       (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // DOUBLE COMMIT PENALTY METRICS
+    // ========================================================================
+    {
+        auto m = DoubleCommitPenalty::GetAndResetMetrics();
+        if (m.penaltyFrames > 0) {
+            report.AddAvg("Penalty/DoubleCommit/PenaltyFrames",  (float)m.penaltyFrames);
+            report.AddAvg("Penalty/DoubleCommit/AvgOverlapCount",
+                (float)m.commitCountSum / (float)m.penaltyFrames);
+            report.AddAvg("Penalty/DoubleCommit/PenaltySum",     (float)m.penaltySum);
+        }
+    }
+    {
+        auto m = AntiLayeringPenalty::GetAndResetMetrics();
+        if (m.penaltyFrames > 0) {
+            report.AddAvg("Penalty/AntiLayering/PenaltyFrames", (float)m.penaltyFrames);
+            report.AddAvg("Penalty/AntiLayering/AvgPairsPerFrame",
+                (float)m.pairsSum / (float)m.penaltyFrames);
+        }
+    }
+    {
+        auto m = DefensiveZoneOverlapPenalty::GetAndResetMetrics();
+        if (m.penaltyFrames > 0) {
+            report.AddAvg("Penalty/DefZoneOverlap/PenaltyFrames",   (float)m.penaltyFrames);
+            report.AddAvg("Penalty/DefZoneOverlap/AvgPairsPerFrame",
+                (float)m.pairsSum / (float)m.penaltyFrames);
+        }
+    }
+    {
+        auto m = OverflipPenalty::GetAndResetMetrics();
+        if (m.flipCount > 0) {
+            report.AddAvg("Penalty/Overflip/Count",        (float)m.flipCount);
+            report.AddAvg("Penalty/Overflip/AvgDistToBall",(float)m.avgDistToBall);
+        }
+    }
+    {
+        auto m = DiagonalZoneCoverageReward::GetAndResetMetrics();
+        if (m.totalFrames > 0) {
+            report.AddAvg("Positioning/DiagonalZone/CorrectFrames", (float)m.correctFrames);
+            report.AddAvg("Positioning/DiagonalZone/TotalEligible", (float)m.totalFrames);
+        }
+    }
+    {
+        auto m = NoMansLandPenalty::GetAndResetMetrics();
+        if (m.penaltyFrames > 0)
+            report.AddAvg("Penalty/NoMansLand/PenaltyFrames", (float)m.penaltyFrames);
+    }
+    {
+        auto m = SoloPlayComboReward::GetAndResetMetrics();
+        if (m.qualified > 0) {
+            report.AddAvg("SoloPlay/Combo/Qualified2Touch",     (float)m.qualified);
+            report.AddAvg("SoloPlay/Combo/Converted2Touch",     (float)m.converted2);
+            report.AddAvg("SoloPlay/Combo/Converted3PlusTouch", (float)m.converted3p);
+            report.AddAvg("SoloPlay/Combo/ConversionRate",
+                (float)(m.converted2 + m.converted3p) / (float)m.qualified);
+            int total = m.converted2 + m.converted3p;
+            if (total > 0) {
+                report.AddAvg("SoloPlay/Combo/AvgTouchCount",
+                    (float)m.touchCountSum / (float)total);
+                report.AddAvg("SoloPlay/Combo/AvgBallSpeedAtThreat",
+                    (float)m.ballSpeedSum / (float)total);
+            }
+        }
+    }
+    {
+        auto m = DualThreatReward::GetAndResetMetrics();
+        if (m.eligFrames > 0) {
+            report.AddAvg("SoloPlay/DualThreat/Frames",        (float)m.dualFrames);
+            report.AddAvg("SoloPlay/DualThreat/EligibleFrames",(float)m.eligFrames);
+            report.AddAvg("SoloPlay/DualThreat/ActivationRate",
+                (float)m.dualFrames / (float)m.eligFrames);
+        }
+    }
+
+    // ========================================================================
+    // ADVANCED KICKOFF REWARDS METRICS
+    // ========================================================================
+    {
+        auto m = SpeedFlipKickoffReward::GetAndResetMetrics();
+        if (m.flipDetected > 0 || m.contactSuccess > 0) {
+            report.AddAvg("Kickoff/SpeedFlip/FlipDetected",   (float)m.flipDetected);
+            report.AddAvg("Kickoff/SpeedFlip/ContactSuccess", (float)m.contactSuccess);
+        }
+    }
+    {
+        auto m = DelayedKickoffReward::GetAndResetMetrics();
+        if (m.delaySuccess > 0)
+            report.AddAvg("Kickoff/Delayed/Success", (float)m.delaySuccess);
+    }
+    {
+        auto m = FakeKickoffReward::GetAndResetMetrics();
+        if (m.fakeSuccess > 0)
+            report.AddAvg("Kickoff/Fake/Success", (float)m.fakeSuccess);
+    }
+    {
+        auto m = ReactiveKickoffReward::GetAndResetMetrics();
+        if (m.scenarioA + m.scenarioB + m.scenarioC > 0) {
+            report.AddAvg("Kickoff/Reactive/ScenarioA", (float)m.scenarioA);
+            report.AddAvg("Kickoff/Reactive/ScenarioB", (float)m.scenarioB);
+            report.AddAvg("Kickoff/Reactive/ScenarioC", (float)m.scenarioC);
+        }
+    }
+    {
+        auto m = PredictiveSecondManReward::GetAndResetMetrics();
+        if (m.correctRead > 0) {
+            report.AddAvg("Kickoff/SecondMan/CorrectRead",  (float)m.correctRead);
+            report.AddAvg("Kickoff/SecondMan/PrereadBonus", (float)m.prereadBonus);
+        }
+    }
+    {
+        auto m = DiagonalBoostKickoffReward::GetAndResetMetrics();
+        if (m.partialReward + m.fullReward > 0) {
+            report.AddAvg("Kickoff/DiagBoost/PartialReward", (float)m.partialReward);
+            report.AddAvg("Kickoff/DiagBoost/FullReward",    (float)m.fullReward);
+        }
+    }
+    {
+        auto m = SpanishDemoKickoffReward::GetAndResetMetrics();
+        if (m.demoFired > 0) {
+            report.AddAvg("Kickoff/SpanishDemo/DemoFired",     (float)m.demoFired);
+            report.AddAvg("Kickoff/SpanishDemo/PayoffSuccess", (float)m.payoffSuccess);
+        }
+    }
+
     // Add our metrics
     for (auto& state : states) {
         // Determine game mode from current state

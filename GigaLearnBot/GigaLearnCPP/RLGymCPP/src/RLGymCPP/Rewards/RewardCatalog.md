@@ -38,7 +38,7 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 | FastAerialReward | AdvancedRewards.h | Fast aerial sequence detection | See file | 4+ | Active |
 | DribbleBumpReward | AdvancedRewards.h | Aggressive ground dribble + bump | 2 | 3+ | Active |
 | DemoAwarenessReward | AdvancedDemoRewards.h | Demo positioning awareness | 2 | 3+ | Active |
-| AirDribbleDemoAssist | AdvancedDemoRewards.h | Air dribble → bump | 8 | 5+ | Active |
+| AirDribbleDemoAssist | AdvancedDemoRewards.h | Air dribble → bump | 8 | 5+ | DEPRECATED (pending AirDribbleBumpConversionReward validation) |
 | ProgressiveRotationReward | RotationRewards.h | Phase-gated rotation quality | 5–20 | All | Active |
 | RetreatAfterTouchReward | RotationRewards.h | Retreat to rotation after touch | 3–5 | 2+ | Active |
 | BoostAwareRotationReward | RotationRewards.h | Rotation with boost awareness | 5–8 | 6+ | Active |
@@ -107,7 +107,7 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | PitchControlAerialReward | 5.0f | POSITIONING | Pitch control via aerial | Yes | Aerial dominance |
 | AirDribbleSetupReward | 7.0f | MECHANICS | Air dribble setup | Yes | Transition to air dribble |
 | UnifiedAirDribbleReward | (disabled) | MECHANICS | Air dribble execution | Yes | Replaced by FlipReset focus |
-| AirDribbleBumpReward | 20.0f | MECHANICS | Bump during air dribble | Yes | Aggressive air play |
+| AirDribbleBumpReward | 20.0f | MECHANICS | Bump during air dribble | Yes | DEPRECATED (pending AirDribbleBumpConversionReward validation) |
 | CompositeFlickReward | 30.0f | MECHANICS | Flick variety (Advanced+Backflip+Musty+Exploration) | Yes | Multi-flick rewards combined |
 | FlickOutplayReward | 30.0f | MECHANICS | Dribble flick vs opponent | Yes | Context-aware flick |
 | EnhancedSpeedFlipReward | 15.0f | MECHANICS | Speed flip quality | No | Recovery technique |
@@ -117,9 +117,12 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 
 | Reward | Weight | Category | Trigger | ZeroSum? | Notes |
 |---|---|---|---|---|---|
-| ProperLandingReward | 0.75f | MECHANICS | Multi-wheel landing | No | Smooth recovery |
-| AdvancedRecoveryReward | (disabled) | MECHANICS | Recovery quality | No | Replaced by enhanced variants |
-| BumpedFlipRecoveryReward | (disabled) | MECHANICS | Recovery after bump | No | Rare edge case |
+| ProperLandingReward | Phase 6: 1.5f | MECHANICS | Multi-wheel landing (airtime ≥0.2s, 2+ wheels) | No | 2026-04-20: 1.0→1.5 (+50%) |
+| AdvancedRecoveryReward | 0.4f | MECHANICS | Recovery quality (powerslide landing) | No | Keep at 0.4f; powerslide gate is narrow |
+| BumpedFlipRecoveryReward | Phase 6: 0.3f | MECHANICS | Recovery after bump/collision | No | 2026-04-20: 0.2→0.3 (+50%) |
+| WavedashBasicReward | Phase 6: 0.45f | MECHANICS | Flip→ground (non-kickoff) | No | 2026-04-20: 0.3→0.45 (+50%) |
+| OffBallAerialPenalty | Phase 6: 10.0f | PENALTY | Airborne >0.5s AND ball >3000 UU; 2x if boost <30 | No | 2026-04-20: boost-scaling added |
+| SecondaryAerialPenalty | Phase 6: 8.0f, Phase 7+: 8.0f | PENALTY | Airborne during aerial (ball >250 UU) when teammate closer to ball | No | 2026-04-20: NEW. 0.3s grace, 150 UU slack; 1v1 immune |
 
 ## Kickoff
 
@@ -128,8 +131,20 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | KickoffSpeedReward | 10.0f | KICKOFF | Speed achievement | No | Primary kickoff signal |
 | ClosestPlayerKickoffSideReward | 15.0f | KICKOFF | Closest player positioning | No | Strategic kickoff placement |
 | KickoffDoubleCommitPenalty | 15.0f | KICKOFF | Both teammates commit | No | Prevents bad kickoffs |
-| SpeedflipKickoffReward | 20.0f | KICKOFF | Speed flip execution | No | Technical kickoff bonus |
+| SpeedflipKickoffReward | RETIRED | KICKOFF | Speed flip execution | No | RETIRED 2026-04-26 → replaced by SpeedFlipKickoffReward |
+| SpeedFlipKickoffReward | 2.0f | KICKOFF | 3-phase: flip detection + contact quality | No | Kickoff/SpeedFlip/FlipDetected, /ContactSuccess |
+| DiagonalBoostKickoffReward | 1.5f | KICKOFF | Corner boost grab + commit + contact | No | Kickoff/DiagBoost/PartialReward, /FullReward |
+| DelayedKickoffReward | 1.5f | KICKOFF | Intentional delay → opponent commits first | No | Kickoff/Delayed/Success |
+| FakeKickoffReward | 2.0f | KICKOFF | Sell approach → abort → exploit | No | Kickoff/Fake/Success |
+| ReactiveKickoffReward | 1.5f | KICKOFF | Mid-kickoff read: counter speedflip/fake/delay | No | Kickoff/Reactive/ScenarioA, /B, /C |
+| PredictiveSecondManReward | 1.5f | KICKOFF | Second man pre-positions for predicted outcome | No | Kickoff/SecondMan/CorrectRead, /PrereadBonus |
+| SpanishDemoKickoffReward | 2.0f | KICKOFF | Second man demos opp kicker (2v2+) | No | Kickoff/SpanishDemo/DemoFired, /PayoffSuccess |
 | KickoffSupportBoostReward | 6.0f | KICKOFF | Support grabs corner boost | No | 2v2+ support play |
+| AntiLayeringPenalty | 15.0f | POSITIONING | Per-step penalty when teammate within ±200 Y units (2v2/3v3 only, exempt near own goal) | No | Penalty/AntiLayering/PenaltyFrames, /AvgPairsPerFrame |
+| DefensiveZoneOverlapPenalty | 15.0f | POSITIONING | Per-step penalty when 2+ teammates in same X-zone (left/center/right) while ball is in own defensive third (2v2/3v3 only, exempt if near net) | No | Penalty/DefZoneOverlap/PenaltyFrames, /AvgPairsPerFrame |
+| OverflipPenalty | 8.0f | POSITIONING | One-shot penalty when non-first-man flips toward ball within 3000 UU — overcommit flip detection | No | Penalty/Overflip/Count, /AvgDistToBall |
+| DiagonalZoneCoverageReward | 3.0f | POSITIONING | Continuous reward for third man (furthest from ball) being in the quadrant diagonal to the ball's quadrant (2v2/3v3, skip when ball in def third or near axes) | No | Positioning/DiagonalZone/CorrectFrames, /TotalEligible |
+| NoMansLandPenalty | 8.0f | POSITIONING | Per-step penalty for non-first-man sitting in center field strip (|x| < 2000) after 0.3s grace; exempt if near own goal or ball (2v2/3v3 only) | No | Penalty/NoMansLand/PenaltyFrames |
 
 ## Boost Management
 
@@ -159,6 +174,8 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | BallRedirectReward × ShotAccuracyInBoundsReward | 40.0f | SHOOTING | Redirect accuracy | Yes | Composite deflection |
 | BackboardReboundReward | 40.0f | SHOOTING | Offensive backboard play | Yes | Creative scoring |
 | DoomseeDisshShotReward | 20.0f | SHOOTING | Dooms-style dissh | Yes | Advanced mechanic |
+| SoloPlayComboReward | 6.0f ZeroSum | OFFENSE | 2+ distinct touches by same player (400 UU + 0.25s gap) → goal-threatening shot within 1.5s; any other player touch resets sequence | Yes | SoloPlay/Combo/* |
+| DualThreatReward | 5.0f ZeroSum | OFFENSE | Ball carrier with goal-directed ball AND unmarked teammate in scoring zone (2v2/3v3 only, per-step 0.05f) | Yes | SoloPlay/DualThreat/* |
 
 ## Defense & Clearing
 
@@ -191,8 +208,31 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | DemoReward | 350.0f | OFFENSE | Opponent demo (non-ZeroSum) | No | Aggressive play |
 | DemoReward (ZeroSum) | 500.0f | OFFENSE | Opponent demo (ZeroSum) | Yes | Defensive value |
 | SecondManOffensiveDemoReward | 140.0f | OFFENSE | 2nd-man demo (MIDDLE role) | No | Coordinated aggression |
+| PossessionSideDemoReward | Phase 5: 5.0, Phase 6: 12.0, Phase 7+: 15.0 | TEAMWORK | Demo/bump last defender during team possession in attacking half | Yes (ZeroSum 1.0) | Tactical possession-side demo |
 | NumericalAdvantageAttackingReward | 50.0f | OFFENSE | Attack in 2v1+ | Yes | Numeric leverage |
 | PossessionControlReward | 25.0f | OFFENSE | Ball possession | Yes | Offensive control |
+| AirDribbleBumpConversionReward | 0.0f (shadow) / 10.0f (live) | MECHANICS | Air dribble ≥2 touches → bump nearest defender while ball goal-bound → confirm shot survives 0.5s | Yes (ZeroSum 0.5f) | Phase 6+ Shadow Mode M2. Supersedes AirDribbleBumpReward, AirBumpDemoReward, AirDribbleDemoAssist. Rev 1.0 2026-04-21. |
+| AirDribbleExplorationReward | 1.5f | MECHANICS | Airborne ball contact at non-standard orientation (inverted/sideways), unusual touch timing (multi-tap <0.25s or delayed >2s), or high power delta >1200 UU/s | No | Phase 6+. 3 channels: orientation diversity, touch rhythm, power air touch. Complements AirDribbleAccuracyReward. Rev 1.0 2026-04-21. |
+| FlickVarietyReward | 4.0f | MECHANICS | State machine: carry → flip detected → ball separated. Scores side/behind/underside ball position, inverted/sideways orientation, flash (<0.15s) or patient (>1.5s) carry timing | No | Phase 6+. No bonus for standard front flicks (covered by CompositeFlickReward). 3.0s cooldown. Rev 1.1 2026-04-22 (renamed from FlickExplorationReward to avoid conflict with CompleteMechanicsRewards.h). |
+| RecoveryExplorationReward | 1.0f | CAR CONTROL | 4 sub-rewards: ceiling wavedash, wall-to-wall wavedash, squishy save momentum (driving through net curve), boost-to-surface (<0.6s contact after boost) | No | Phase 6+. Complements IntelligentWavedashReward (ground/wall) and WavedashBasicReward. Rev 1.0 2026-04-21. |
+| OutplayExplorationReward | 3.0f | MECHANICS | Ball touched + opponent threatening (within 1800 UU, 450+ UU/s toward ball or flipping) → 3 channels: aerial outplay (airborne + redirect score >0.25), wall outplay (on wall + redirect >0.2), sharp redirect (any touch redirect score >0.65) | No | Phase 6+. Fills aerial/wall gaps left by FlickOutplayReward (ground flick) and CutOutplayReward (ground z<260). Rev 1.0 2026-04-24. |
+| OutplayCreativityReward | 4.0f | MECHANICS | Ball touched + opponent threatening + redirect score >0.2 → 2 channels: inverted/sideways car orientation, low-boost (<30) commitment | No | Phase 6+. Rewards unusual car state during outplay touches. Paired with OutplayExplorationReward. Rev 1.0 2026-04-24. |
+| ShotExplorationReward | 3.0f | MECHANICS | Ball touched → shot on goal → 3 channels: wide-angle (|vx/vy|>0.35), height variety (aerial >400 UU / low <100 UU), field position (own half/corner/wall) | No | Phase 6+. Complements ShotPlacementReward (defender coverage) — measures WHERE bot shoots from and HOW angled. Independent 2s cooldown per channel. Rev 1.0 2026-04-24. |
+| ShotCreativityReward | 4.0f | MECHANICS | Ball touched → shot on goal → 3 channels: inverted/sideways car orientation, redirect geometry (car-ball vel divergence), first-touch shot (no touch in last 0.8s) | No | Phase 6+. Rewards unusual car state at shot moment. Shared IsShotOnGoal gate. Independent cooldowns: orient 2.5s, redirect 2.0s, first-touch 3.0s. Rev 1.0 2026-04-24. |
+
+## Predictive Demo Rewards (Shadow Mode — Phase 6)
+
+All 7 classes are in `PredictiveDemoRewards.h`. All registered with `shadowMode=true` in Phase 6 Champion. Zero policy impact until shadow wrapper is removed. W&B metrics under `PredictiveDemo/*` namespace.
+
+| Class | Weight | Category | Trigger | ZeroSum? | Notes |
+|---|---|---|---|---|---|
+| MomentumLeadDemoReward | 2.5f | PREDICTION | Demo opponent AFTER tracking their predicted future position (lead alignment > current alignment + 0.05) with confirmed lead | No | Phase 5+. Scales with opp speed. If DemosLed=0 at 50M steps, lower MIN_LEAD_ALIGNMENT to 0.45. 4s cooldown. Rev 1.1 2026-04-25. |
+| BallChaserAmbushReward | 2.0f | PREDICTION | Demo opponent while ball-chasing (chase_align > 0.72) while unaware of bot (vel toward bot < 0.40) | No | Phase 4+. Two quality signals multiplied: chase lock × unawareness. 4s cooldown. Rev 1.1 2026-04-25. |
+| PostTouchShadowDemoReward | 2.0f | PREDICTION | Demo opponent within 2s of their ball touch, at predicted follow-through vector. 1.5× pre-read bonus if bot was already heading there before the touch | No | Phase 4+. KEY metric: PreReadBonusFired — watch ratio vs BaseRewardFired. 4s cooldown. Rev 1.1 2026-04-25. |
+| AerialVulnerabilityDemoReward | 2.5f | PREDICTION | Demo airborne opponent committed to aerial (vel→ball > 0.55, ball z > 400 UU). Scales with height + flip bonus | No | Phase 5+. Bot must also be airborne (not ground-sniping). Flip tier adds 1.0 bonus. 4s cooldown. Rev 1.1 2026-04-25. |
+| RespawnHuntReward | 1.5f | PREDICTION | Demo opponent → route to their spawn zone (routedToSpawn gate) → demo again within 3.5s of respawn. Partial 0.5f for ambush presence only | No | Phase 5+. Monitor for spawn-camp obsession. routedToSpawn is critical anti-farming gate. 6s cooldown. Rev 1.1 2026-04-25. |
+| FunnelExitDemoReward | 2.0f | PREDICTION | Ball in corner → bot positions at exit path (1400 UU from corner) → demo opponent within 2s of ball leaving corner. Timeliness multiplier rewards early intercept | No | Phase 4+. If AtExitPosition/CornerEntries low, check AMBUSH_CONE (700 UU). 3s cooldown. Rev 1.1 2026-04-25. |
+| DoubleCommitDemoReward | 2.0f | PREDICTION | In 2v2/3v3: ALL opponents committed to ball (vel→ball > 0.60, within 2800 UU) with no defender; bot is 2nd man (not closest to ball) | No | Phase 5+, 2v2/3v3 only (returns 0 in 1v1). Start at very low weight — highest potential for weird emergent behaviors. 5s cooldown. Rev 1.1 2026-04-25. |
 
 ## Positioning & Rotation
 
@@ -241,7 +281,7 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | Reward | Phase 5 Weight | Category | Reason | Notes |
 |---|---|---|---|---|
 | HalfFlipReward | 2.0f | MECHANICS | Deprecated | Covered by EnhancedSpeedFlip |
-| WavedashBasicReward | 0.5f | MECHANICS | Deprecated | Low priority |
+| WavedashBasicReward | Phase 6: 0.45f | MECHANICS | Active — see Recovery & Movement section | — |
 | ReverseAerialReward | 9.0f | MECHANICS | Deprecated | Niche mechanic |
 | HighBallTouchReward | 15.0f | MECHANICS | Deprecated | Covered by AerialFirstTouch |
 | WallTouchReward | 20.0f | MECHANICS | Deprecated | Low priority |

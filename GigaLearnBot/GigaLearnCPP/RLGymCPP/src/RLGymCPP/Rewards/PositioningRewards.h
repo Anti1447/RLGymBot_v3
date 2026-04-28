@@ -357,257 +357,268 @@ public:
 // - Context-aware: different rewards based on distance to ball
 // - Stateless per-frame evaluation
 // ============================================================================
+// ============================================================================
+// ActiveSupportingPositionReward (v2) - Cross-Field Coverage
+// 2026-04-18 | NJH
+//
+// Redesigned from v1 (distance-to-ball) to target-based positioning.
+// Rewards 2nd man for holding opposite x-side from ball-carrier, solving
+// the Euclidean distance trap where same-side stacking was more rewarded.
+//
+// Key change: Instead of "distance to ball" (which favors same-side), use
+// distance to an ideal target that is mirrored to the opposite x-side and
+// slightly upfield. Same-side stacking becomes far from target → no reward.
+// ============================================================================
 class ActiveSupportingPositionReward : public Reward {
 private:
-    // Distance thresholds for supporting positioning
-    const float MIN_SUPPORT_DIST = 1000.0f;      // Too close = 1st man territory
-    const float OPTIMAL_SUPPORT_DIST = 2300.0f;  // Sweet spot for support
-    const float MAX_SUPPORT_DIST = 3600.0f;      // Too far = passive
+    // Target position offsets (UU)
+    static constexpr float LATERAL_TARGET      = 2500.0f;    // |x| of ideal supporter slot
+    static constexpr float UPFIELD_TARGET      = 1500.0f;    // y-offset past ball toward opp goal
+    static constexpr float TARGET_FALLOFF      = 3000.0f;    // dist at which reward -> 0
+    static constexpr float CENTER_BALL_EPS     = 500.0f;     // |ball.x| below = "centered"
 
-    // Possession and role detection
-    const float MIN_GAME_SIZE = 4;  // Minimum players for team play (2v2)
-    static constexpr float POSSESSION_RADIUS = 1500.0f; // UU — if closest player to ball is a teammate within this, team has possession
+    // Overlap penalty (same-side stacking)
+    static constexpr float OVERLAP_LATERAL_MAX = 1500.0f;    // lateral gap < this = overlap
+    static constexpr float OVERLAP_PENALTY     = 0.25f;      // max penalty magnitude
+    static constexpr float OVERLAP_Y_WINDOW    = 2000.0f;    // longitudinal window for overlap
+
+    // Gates
+    static constexpr float MIN_GAME_SIZE = 4;
+    static constexpr float POSSESSION_RADIUS = 1500.0f;
+
+    // Max reward
+    static constexpr float BASE_SCALE = 0.4f;
 
     inline static std::atomic<long long> s_rewardMilli{0};
+    inline static std::atomic<long long> s_penaltyMilli{0};
     inline static std::atomic<int> s_supportFrames{0};
-    inline static std::atomic<int> s_upfieldFrames{0};
+    inline static std::atomic<int> s_oppositeSideFrames{0};
+    inline static std::atomic<int> s_overlapFrames{0};
 
-    // Enum for role detection (matching RoleAwarenessReward)
-    enum class SimpleRole {
-        CLOSEST,    // Closest to ball
-        MIDDLE,     // Middle distance (2nd man / supporting)
-        FURTHEST    // Furthest from ball
-    };
+    enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
 
-    // Determine player's role based on distance to ball relative to teammates
     SimpleRole DetermineRole(const Player& player, const GameState& state) const {
         float distToBall = (player.pos - state.ball.pos).Length();
-
         std::vector<float> teammateDists;
         for (const auto& p : state.players) {
             if (p.team == player.team && p.carId != player.carId) {
                 teammateDists.push_back((p.pos - state.ball.pos).Length());
             }
         }
-
-        if (teammateDists.empty()) {
-            return SimpleRole::CLOSEST;
-        }
-
+        if (teammateDists.empty()) return SimpleRole::CLOSEST;
         std::sort(teammateDists.begin(), teammateDists.end());
-
-        // Determine role based on relative distance
-        if (distToBall < teammateDists[0]) {
-            return SimpleRole::CLOSEST;
-        }
-        else if (teammateDists.size() >= 2 && distToBall > teammateDists[1]) {
-            return SimpleRole::FURTHEST;
-        }
-        else {
-            return SimpleRole::MIDDLE;
-        }
+        if (distToBall < teammateDists[0]) return SimpleRole::CLOSEST;
+        if (teammateDists.size() >= 2 && distToBall > teammateDists[1]) return SimpleRole::FURTHEST;
+        return SimpleRole::MIDDLE;
     }
 
-    // Check if team has possession: closest player to ball is a teammate within POSSESSION_RADIUS.
-    // Proximity-only — no velocity check. The old "moving toward ball" dot-product broke during
-    // dribbling (ball on roof of car → dirToBall is straight up, car velocity is horizontal → dot≈0).
     bool DoesTeamHavePossession(const Player& player, const GameState& state) const {
         float closestDist = 1e10f;
-        Team  closestTeam = Team::BLUE;
-
+        Team closestTeam = Team::BLUE;
         for (const auto& p : state.players) {
             float dist = (p.pos - state.ball.pos).Length();
-            if (dist < closestDist) {
-                closestDist = dist;
-                closestTeam = p.team;
-            }
+            if (dist < closestDist) { closestDist = dist; closestTeam = p.team; }
         }
-
         return closestTeam == player.team && closestDist < POSSESSION_RADIUS;
-    }
-
-    // Check if player is upfield: farther along the attack axis (Y) than the ball.
-    // Uses Y-axis directly rather than 3D distance to goal — avoids false positives when
-    // ball is airborne (high Z inflates 3D distance) or player is wide on a side wall.
-    bool IsPositionedUpfield(const Player& player, const GameState& state) const {
-        if (player.team == Team::BLUE) {
-            return player.pos.y > state.ball.pos.y;   // Blue attacks +Y
-        } else {
-            return player.pos.y < state.ball.pos.y;   // Orange attacks -Y
-        }
-    }
-
-    // Returns true when ball is deep in the opponent's half AND near a side wall —
-    // the "corner play" scenario where second man should collapse toward the goal mouth.
-    bool IsBallInAttackingCorner(const Player& player, const GameState& state) const {
-        float attackY = (player.team == Team::BLUE) ? state.ball.pos.y : -state.ball.pos.y;
-        return attackY > 2800.0f && fabsf(state.ball.pos.x) > 2400.0f;
     }
 
 public:
     struct Metrics {
         double totalReward = 0.0;
+        double totalPenalty = 0.0;
         int supportFrames = 0;
-        int upfieldFrames = 0;
-        int optimalPositioningFrames = 0;
+        int oppositeSideFrames = 0;
+        int overlapFrames = 0;
     };
 
     static Metrics GetAndResetMetrics() {
         Metrics m;
-        long long r = s_rewardMilli.exchange(0);
-        m.totalReward = double(r) / 1000.0;
-        m.supportFrames = s_supportFrames.exchange(0);
-        m.upfieldFrames = s_upfieldFrames.exchange(0);
-        // optimalPositioningFrames tracked implicitly in reward frames
+        m.totalReward      = double(s_rewardMilli.exchange(0))  / 1000.0;
+        m.totalPenalty     = double(s_penaltyMilli.exchange(0)) / 1000.0;
+        m.supportFrames      = s_supportFrames.exchange(0);
+        m.oppositeSideFrames = s_oppositeSideFrames.exchange(0);
+        m.overlapFrames      = s_overlapFrames.exchange(0);
         return m;
     }
 
-    virtual void Reset(const GameState& initialState) override {
-        // No state needed - stateless per-frame evaluation
-    }
+    virtual void Reset(const GameState& initialState) override {}
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        // Skip 1v1 (only reward in 2v2+)
-        if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) {
-            return 0.0f;
+        if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) return 0.0f;
+        if (!DoesTeamHavePossession(player, state)) return 0.0f;
+        if (DetermineRole(player, state) != SimpleRole::MIDDLE) return 0.0f;
+
+        const float attackSign = (player.team == Team::BLUE) ? 1.0f : -1.0f;
+        const float ballX = state.ball.pos.x;
+        const float ballY = state.ball.pos.y;
+
+        // Build ideal supporter target
+        float targetX;
+        if (std::fabs(ballX) < CENTER_BALL_EPS) {
+            // Ball near center — stay on player's current side to avoid oscillation
+            targetX = (player.pos.x >= 0.0f) ? +LATERAL_TARGET : -LATERAL_TARGET;
+        } else {
+            // Mirror to opposite x-side from ball
+            targetX = (ballX > 0.0f) ? -LATERAL_TARGET : +LATERAL_TARGET;
+        }
+        float targetY = ballY + UPFIELD_TARGET * attackSign;
+        // Clamp to field bounds
+        targetX = RS_CLAMP(targetX, -3500.0f, +3500.0f);
+        targetY = RS_CLAMP(targetY, -4500.0f, +4500.0f);
+
+        // 2D distance to target (ignore Z for aerial resilience)
+        float dx = player.pos.x - targetX;
+        float dy = player.pos.y - targetY;
+        float distToTarget = std::sqrt(dx * dx + dy * dy);
+
+        float proximityScore = RS_CLAMP(1.0f - distToTarget / TARGET_FALLOFF, 0.0f, 1.0f);
+        float reward = BASE_SCALE * proximityScore;
+
+        // Overlap penalty: same-side AND laterally close AND longitudinally close
+        float overlap = 0.0f;
+        const bool sameSide = (ballX * player.pos.x > 0.0f) && std::fabs(ballX) > CENTER_BALL_EPS;
+        const float lateralGap = std::fabs(player.pos.x - ballX);
+        const float longitudinalGap = std::fabs(player.pos.y - ballY);
+
+        if (sameSide && lateralGap < OVERLAP_LATERAL_MAX && longitudinalGap < OVERLAP_Y_WINDOW) {
+            float strength = 1.0f - (lateralGap / OVERLAP_LATERAL_MAX);
+            overlap = -OVERLAP_PENALTY * strength;
+            s_overlapFrames.fetch_add(1);
+            s_penaltyMilli.fetch_add(static_cast<long long>(std::fabs(overlap) * 1000.0f));
         }
 
-        // Check if team has possession
-        // (Closest player must be teammate AND moving toward ball)
-        if (!DoesTeamHavePossession(player, state)) {
-            return 0.0f;  // Opponent has possession - play defense instead
-        }
+        // Metrics
+        s_supportFrames.fetch_add(1);
+        if (!sameSide) s_oppositeSideFrames.fetch_add(1);
+        if (reward > 0.0f) s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
 
-        // Determine player's role
-        SimpleRole role = DetermineRole(player, state);
+        return reward + overlap;
+    }
+};
 
-        // Only reward 2nd man (supporting / MIDDLE role)
-        if (role != SimpleRole::MIDDLE) {
-            return 0.0f;  // Not supporting role
-        }
+// ============================================================================
+// DeepBackPostCoverageReward - 3v3+ Back-Lane Defense
+// 2026-04-18 | NJH
+//
+// Rewards the 3rd defender (furthest from ball) in 3v3+ for holding deep
+// defensive position on the opposite x-side from the attacking ball,
+// covering the back-post lane to prevent back-door breakaways.
+//
+// Activation gates: 3v3+, opponent possession in attacking half, FURTHEST role, own half.
+// ============================================================================
+class DeepBackPostCoverageReward : public Reward {
+private:
+    // Target position offsets for back-post coverage
+    static constexpr float BACK_POST_LATERAL  = 2000.0f;    // |x| of ideal deep defender slot
+    static constexpr float BACK_POST_FALLOFF  = 2500.0f;    // dist at which reward -> 0
+    static constexpr float ACTIVE_THREAT_RANGE = 4500.0f;   // only fire if nearest attacker within this
 
-        // Check if positioned upfield
-        if (!IsPositionedUpfield(player, state)) {
-            return 0.0f;  // Not positioned upfield
-        }
+    // Gates
+    static constexpr float MIN_GAME_SIZE = 6;               // 3v3 (6 players)
+    static constexpr float POSSESSION_RADIUS = 1500.0f;
+    static constexpr float BASE_SCALE_BACK = 0.25f;
 
-        // Check distance to ball (should be in supporting range)
+    inline static std::atomic<long long> s_rewardMilli{0};
+    inline static std::atomic<int> s_backPostFrames{0};
+    inline static std::atomic<int> s_coverageOppositeFrames{0};
+
+    enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
+
+    SimpleRole DetermineRole(const Player& player, const GameState& state) const {
         float distToBall = (player.pos - state.ball.pos).Length();
-
-        if (distToBall < MIN_SUPPORT_DIST || distToBall > MAX_SUPPORT_DIST) {
-            return 0.0f;  // Outside supporting range
-        }
-
-        // Base reward: tapers around optimal ball distance (peak 0.4 at OPTIMAL_SUPPORT_DIST)
-        float deviation = std::abs(distToBall - OPTIMAL_SUPPORT_DIST);
-        float reward = 0.4f * (1.0f - (deviation / OPTIMAL_SUPPORT_DIST));
-        reward = RS_CLAMP(reward, 0.0f, 0.4f);
-
-        // Centrality bonus: nudge support toward the center of the field when in the
-        // attacking half — side-wall parking is worthless for passing/scoring.
-        float attackY = (player.team == Team::BLUE) ? player.pos.y : -player.pos.y;
-        if (attackY > 0.0f) {
-            float centralityBonus = RS_CLAMP(1.0f - fabsf(player.pos.x) / 2500.0f, 0.0f, 1.0f);
-            reward += 0.3f * centralityBonus;
-
-            // X-side opposition bonus: spread horizontally if first man is already on a wing.
-            // Better passing lanes when support is on opposite side of field from first man.
-            const Player* firstManX = nullptr;
-            float fmClosestDistX = 1e10f;
-            for (const auto& p : state.players) {
-                if (p.team == player.team && p.carId != player.carId) {
-                    float d = (p.pos - state.ball.pos).Length();
-                    if (d < fmClosestDistX) { fmClosestDistX = d; firstManX = &p; }
-                }
-            }
-            if (firstManX) {
-                float xAlignment = player.pos.x * firstManX->pos.x;  // Negative = opposite sides
-                if (xAlignment < 0.0f) {  // On opposite sides
-                    float oppositeSideBonus = RS_CLAMP(fabsf(player.pos.x) / 2500.0f, 0.0f, 1.0f);
-                    reward += 0.1f * oppositeSideBonus;  // Light bonus, scales with distance from center
-                }
-            }
-        }
-
-        // Corner play bonus: when first man is in the opponent's corner, pull the second
-        // man toward the goal mouth — ready to tap in any centering pass or deflection.
-        // Optimal distance is around 750 units from goal (close enough to finish, far enough to react).
-        if (IsBallInAttackingCorner(player, state)) {
-            Vec oppGoal = (player.team == Team::BLUE)
-                           ? CommonValues::ORANGE_GOAL_CENTER
-                           : CommonValues::BLUE_GOAL_CENTER;
-            float distToGoalMouth = (player.pos - oppGoal).Length();
-            float optimalDist = 750.0f;  // Ideal distance from goal
-            float distanceError = fabsf(distToGoalMouth - optimalDist);
-            float cornerBonus = 0.4f * RS_CLAMP(1.0f - distanceError / 750.0f, 0.0f, 1.0f);
-            reward += cornerBonus;
-        }
-
-        // Lead-runner bonus: 2nd man is pushed further toward opp goal than the 1st man.
-        // Encourages aggressive forward runs to get open for passes, not just ball-trailing.
-        const Player* firstMan = nullptr;
-        float fmClosestDist = 1e10f;
+        std::vector<float> teammateDists;
         for (const auto& p : state.players) {
             if (p.team == player.team && p.carId != player.carId) {
-                float d = (p.pos - state.ball.pos).Length();
-                if (d < fmClosestDist) { fmClosestDist = d; firstMan = &p; }
+                teammateDists.push_back((p.pos - state.ball.pos).Length());
             }
         }
-        if (firstMan) {
-            float myAttackY = (player.team == Team::BLUE) ?  player.pos.y   : -player.pos.y;
-            float fmAttackY = (player.team == Team::BLUE) ?  firstMan->pos.y : -firstMan->pos.y;
-            float lead = myAttackY - fmAttackY;
-            // Only apply lead bonus if NOT within 1000 units of opponent's goal
-            // (prevents overextension and getting caught out defensively)
-            if (lead > 0.0f && myAttackY < 1000.0f) {
-                reward += 0.55f * RS_CLAMP(lead / 2000.0f, 0.0f, 1.0f);
-            }
-        }
+        if (teammateDists.empty()) return SimpleRole::CLOSEST;
+        std::sort(teammateDists.begin(), teammateDists.end());
+        if (distToBall < teammateDists[0]) return SimpleRole::CLOSEST;
+        if (teammateDists.size() >= 2 && distToBall > teammateDists[1]) return SimpleRole::FURTHEST;
+        return SimpleRole::MIDDLE;
+    }
 
-        // Scale reward by team boost advantage and absolute boost level
-        // - Boost advantage: ±200 divisor gives 0.5-1.5x scaling
-        // - Absolute level: critical penalties if team is low on boost
-        float ourTeamTotalBoost = 0.0f;
-        float oppTeamTotalBoost = 0.0f;
-        int teamSize = 0;
-
+    bool IsOpponentInAttackingHalf(const Player& player, const GameState& state) const {
         for (const auto& p : state.players) {
-            if (p.team == player.team) {
-                ourTeamTotalBoost += p.boost;
-                teamSize++;
-            } else {
-                oppTeamTotalBoost += p.boost;
-            }
+            if (p.team == player.team) continue;  // Only check opponents
+            if (RewardMath::IsInOpponentHalf(p)) return true;  // Opponent in attacking half
         }
+        return false;
+    }
 
-        float avgOurBoost = ourTeamTotalBoost / (float)teamSize;
-        float avgOppBoost = oppTeamTotalBoost / (float)(state.players.size() - teamSize);
-        float boostAdvantage = avgOurBoost - avgOppBoost;  // Positive = we're ahead
-        float ourTeamBoostPct = ourTeamTotalBoost / (100.0f * teamSize);  // 0.0 to 1.0
+    bool IsPlayerInOwnHalf(const Player& player) const {
+        return RewardMath::IsInOwnHalf(player);
+    }
 
-        // Scaling: advantage-based (1.0 when even, 0.5-1.5 range)
-        float boostScale = RS_CLAMP(1.0f + (boostAdvantage / 200.0f), 0.5f, 1.5f);
-
-        // Critical penalty: if our team is low on boost, reduce reward
-        float lowBoostPenalty = 1.0f;
-        if (ourTeamBoostPct < 0.3f) {
-            lowBoostPenalty = 0.3f;  // Only 30% reward when critically low (<30% avg)
-        } else if (ourTeamBoostPct < 0.5f) {
-            lowBoostPenalty = 0.6f;  // 60% reward when moderate (30-50% avg)
+    const Player* GetNearestAttacker(const Player& player, const GameState& state) const {
+        const Player* nearest = nullptr;
+        float nearestDist = FLT_MAX;
+        for (const auto& p : state.players) {
+            if (p.team == player.team) continue;
+            float dist = (player.pos - p.pos).Length();
+            if (dist < nearestDist) { nearestDist = dist; nearest = &p; }
         }
+        return nearest;
+    }
 
-        // Final multiplier: combines advantage and absolute boost level
-        float boostMultiplier = boostScale * lowBoostPenalty;
+public:
+    struct Metrics {
+        double totalReward = 0.0;
+        int backPostFrames = 0;
+        int coverageOppositeFrames = 0;
+    };
 
-        // Apply boost scaling to final reward
-        reward *= boostMultiplier;
+    static Metrics GetAndResetMetrics() {
+        Metrics m;
+        m.totalReward          = double(s_rewardMilli.exchange(0)) / 1000.0;
+        m.backPostFrames       = s_backPostFrames.exchange(0);
+        m.coverageOppositeFrames = s_coverageOppositeFrames.exchange(0);
+        return m;
+    }
 
-        // Track metrics
-        s_supportFrames.fetch_add(1);
-        s_upfieldFrames.fetch_add(1);
-        if (reward > 0.0f) {
-            s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
-        }
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // Only 3v3+ (6+ players)
+        if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) return 0.0f;
+
+        // Only when defending (opponent has possession in attacking half)
+        if (!IsOpponentInAttackingHalf(player, state)) return 0.0f;
+
+        // Only FURTHEST role (3rd defender)
+        if (DetermineRole(player, state) != SimpleRole::FURTHEST) return 0.0f;
+
+        // Only in own half
+        if (!IsPlayerInOwnHalf(player)) return 0.0f;
+
+        // Only fire if nearest attacker is within threat range
+        const Player* nearestAttacker = GetNearestAttacker(player, state);
+        if (!nearestAttacker) return 0.0f;
+        if ((player.pos - nearestAttacker->pos).Length() > ACTIVE_THREAT_RANGE) return 0.0f;
+
+        // Determine own and opponent goal positions
+        const float defendSign = (player.team == Team::BLUE) ? -1.0f : 1.0f;
+        const float ownGoalY = defendSign * 4500.0f;
+
+        // Target: opposite x-side from nearest attacker, deep in own half
+        float targetX = (nearestAttacker->pos.x > 0.0f) ? -BACK_POST_LATERAL : +BACK_POST_LATERAL;
+        float targetY = ownGoalY + defendSign * 500.0f;  // Slightly forward from back wall
+        targetX = RS_CLAMP(targetX, -3500.0f, +3500.0f);
+
+        // 2D distance to target
+        float dx = player.pos.x - targetX;
+        float dy = player.pos.y - targetY;
+        float distToTarget = std::sqrt(dx * dx + dy * dy);
+
+        float proximityScore = RS_CLAMP(1.0f - distToTarget / BACK_POST_FALLOFF, 0.0f, 1.0f);
+        float reward = BASE_SCALE_BACK * proximityScore;
+
+        // Metrics: track opposite-side coverage
+        s_backPostFrames.fetch_add(1);
+        const bool oppositeXSide = (nearestAttacker->pos.x * player.pos.x) <= 0.0f;
+        if (oppositeXSide) s_coverageOppositeFrames.fetch_add(1);
+        if (reward > 0.0f) s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
 
         return reward;
     }
@@ -732,6 +743,408 @@ public:
         if (closestBoostDist <= MAX_BOOST_SEARCH_DIST) {
             float proximityReward = RS_CLAMP(1.0f - (closestBoostDist / MAX_BOOST_SEARCH_DIST), 0.0f, 1.0f);
             return proximityReward * 0.5f;  // Position reward (0.0 to 0.5)
+        }
+
+        return 0.0f;
+    }
+};
+
+
+// ============================================================================
+// AntiLayeringPenalty
+// ============================================================================
+// Penalizes 2v2/3v3 teams when two or more teammates occupy the same Y-band
+// (±LAYER_Y_THRESHOLD units). "Layers" are catastrophic: one challenge beats
+// two players simultaneously, leaving the remaining player in a numerical deficit.
+//
+// Exemption: if either player in the pair is within GOAL_EXEMPT_DIST of their
+// own goal line (Blue y=-5120, Orange y=+5120), that pair is skipped. Goalkeeping
+// or emergency retreating near the goal naturally creates same-Y clustering.
+//
+// Applied per-player, per-step: fires every frame a player is layered.
+// Not ZeroSum — both layering players are penalized independently.
+//
+// W&B: Positioning/AntiLayering/PenaltyFrames, /AvgPairsPerFrame
+// ============================================================================
+class AntiLayeringPenalty : public Reward {
+private:
+    static constexpr float LAYER_Y_THRESHOLD = 200.0f;   // Y distance that counts as layering
+    static constexpr float GOAL_EXEMPT_DIST  = 1500.0f;  // abs(y - ownGoalY) below this = exempt
+    static constexpr float PENALTY_PER_STEP  = -0.1f;    // per step while layered
+
+    inline static std::atomic<int> s_penaltyFrames { 0 };
+    inline static std::atomic<int> s_pairsSum      { 0 };
+
+public:
+    struct Metrics {
+        int    penaltyFrames  = 0;
+        int    pairsSum       = 0;  // total layering pairs detected (÷penaltyFrames = avg overlap)
+    };
+    static Metrics GetAndResetMetrics() {
+        return { s_penaltyFrames.exchange(0), s_pairsSum.exchange(0) };
+    }
+
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (player.isDemoed) return 0.0f;
+
+        // Only relevant in 2v2 or 3v3
+        int teamCount = 0;
+        for (const auto& p : state.players)
+            if (p.team == player.team) teamCount++;
+        if (teamCount < 2) return 0.0f;
+
+        // Own goal Y: Blue defends y=-5120, Orange defends y=+5120
+        float ownGoalY = (player.team == Team::BLUE) ? -5120.0f : 5120.0f;
+
+        // Exempt this player if they are near their own goal
+        if (fabsf(player.pos.y - ownGoalY) < GOAL_EXEMPT_DIST) return 0.0f;
+
+        // Count layering pairs for this player
+        int layeringPairs = 0;
+        for (const auto& tm : state.players) {
+            if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+
+            // Exempt if the teammate is near own goal (they're in goal position, not layering)
+            if (fabsf(tm.pos.y - ownGoalY) < GOAL_EXEMPT_DIST) continue;
+
+            if (fabsf(player.pos.y - tm.pos.y) < LAYER_Y_THRESHOLD) {
+                layeringPairs++;
+            }
+        }
+
+        if (layeringPairs > 0) {
+            s_penaltyFrames.fetch_add(1);
+            s_pairsSum.fetch_add(layeringPairs);
+            return PENALTY_PER_STEP;
+        }
+
+        return 0.0f;
+    }
+};
+
+
+// ============================================================================
+// DefensiveZoneOverlapPenalty
+// ============================================================================
+// When the ball is in a team's defensive third, the defensive zone is split
+// into three equal X-axis sections (left / center / right). No two teammates
+// should occupy the same section simultaneously — that creates defensive overlap:
+// one attacking play beats both players at once, leaving the goal exposed.
+//
+// This is the X-axis counterpart to AntiLayeringPenalty (which covers Y-axis).
+//
+// Sections (field width ±4096 → thirds at ±1365 UU):
+//   Left:   x < -1365
+//   Center: -1365 <= x <= 1365
+//   Right:  x > 1365
+//
+// Exemptions:
+//   - Ball not in own defensive third (active only when defending)
+//   - Either player within EMERGENCY_EXEMPT of goal center (simultaneous goal defence)
+//
+// W&B: Penalty/DefZoneOverlap/PenaltyFrames, /AvgPairsPerFrame
+// ============================================================================
+class DefensiveZoneOverlapPenalty : public Reward {
+private:
+    static constexpr float DEFENSIVE_THIRD_Y = 3413.0f;  // 10240 / 3
+    static constexpr float X_ZONE_BOUNDARY   = 1365.0f;  // 4096 / 3
+    static constexpr float EMERGENCY_EXEMPT  = 600.0f;   // both players near net = OK
+    static constexpr float PENALTY_PER_STEP  = -0.1f;
+
+    inline static std::atomic<int> s_penaltyFrames { 0 };
+    inline static std::atomic<int> s_pairsSum      { 0 };
+
+    int GetXZone(float x) const {
+        if (x < -X_ZONE_BOUNDARY) return 0;  // left
+        if (x >  X_ZONE_BOUNDARY) return 2;  // right
+        return 1;                             // center
+    }
+
+public:
+    struct Metrics { int penaltyFrames = 0; int pairsSum = 0; };
+    static Metrics GetAndResetMetrics() {
+        return { s_penaltyFrames.exchange(0), s_pairsSum.exchange(0) };
+    }
+
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (player.isDemoed) return 0.0f;
+
+        // 2v2/3v3 only
+        int teamCount = 0;
+        for (const auto& p : state.players)
+            if (p.team == player.team) teamCount++;
+        if (teamCount < 2) return 0.0f;
+
+        // Only when ball is in own defensive third
+        float ownGoalY = (player.team == Team::BLUE) ? -5120.0f : 5120.0f;
+        if (fabsf(state.ball.pos.y - ownGoalY) > DEFENSIVE_THIRD_Y) return 0.0f;
+
+        // Emergency exemption: this player is pressed against own net
+        Vec netCenter(0.0f, ownGoalY, 0.0f);
+        if ((player.pos - netCenter).Length() < EMERGENCY_EXEMPT) return 0.0f;
+
+        int myZone = GetXZone(player.pos.x);
+
+        int layeringPairs = 0;
+        for (const auto& tm : state.players) {
+            if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+            // Exempt this teammate if they're in emergency goal position
+            if ((tm.pos - netCenter).Length() < EMERGENCY_EXEMPT) continue;
+            if (GetXZone(tm.pos.x) == myZone) layeringPairs++;
+        }
+
+        if (layeringPairs > 0) {
+            s_penaltyFrames.fetch_add(1);
+            s_pairsSum.fetch_add(layeringPairs);
+            return PENALTY_PER_STEP;
+        }
+        return 0.0f;
+    }
+};
+
+
+// ============================================================================
+// OverflipPenalty
+// ============================================================================
+// Penalizes non-first-man players who flip toward the ball when they are already
+// too close to the play. "Over-flipping" is committing a rotation to a zone that
+// a teammate is already covering, wasting a flip and forcing an overcommit.
+//
+// Fires on the frame a new flip is detected when ALL of the following are true:
+//   1. Player is NOT the closest to ball on their team (not first man)
+//   2. Distance to ball < MAX_FLIP_DIST (within "too close" range)
+//   3. Flip velocity is aimed toward ball (alignment > MIN_BALL_ALIGN)
+//
+// One-shot penalty per flip event (not continuous).
+//
+// W&B: Penalty/Overflip/Count, /AvgDistToBall
+// ============================================================================
+class OverflipPenalty : public Reward {
+private:
+    static constexpr float MAX_FLIP_DIST   = 3000.0f;  // within this of ball = too close to flip
+    static constexpr float MIN_BALL_ALIGN  = 0.3f;     // cos(angle) toward ball to count
+    static constexpr float PENALTY         = -0.5f;    // one-shot on the flip frame
+
+    mutable std::map<uint32_t, bool> prevFlipping;
+
+    inline static std::atomic<int> s_flipCount { 0 };
+    inline static std::atomic<int> s_distSum   { 0 };  // UU, sum for avg
+
+public:
+    struct Metrics {
+        int    flipCount    = 0;
+        double avgDistToBall = 0.0;
+    };
+    static Metrics GetAndResetMetrics() {
+        int count   = s_flipCount.exchange(0);
+        int distSum = s_distSum.exchange(0);
+        return { count, count > 0 ? double(distSum) / count : 0.0 };
+    }
+
+    virtual void Reset(const GameState& initialState) override { prevFlipping.clear(); }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (player.isDemoed) return 0.0f;
+
+        uint32_t id = player.carId;
+        bool wasFlipping  = prevFlipping.count(id) ? prevFlipping[id] : false;
+        bool flipStarted  = (!wasFlipping && player.isFlipping && !player.isOnGround);
+        prevFlipping[id]  = player.isFlipping;
+
+        if (!flipStarted) return 0.0f;
+
+        // Is this player the first man (closest to ball on team)?
+        float myDist = (player.pos - state.ball.pos).Length();
+        bool isFirstMan = true;
+        for (const auto& tm : state.players) {
+            if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+            if ((tm.pos - state.ball.pos).Length() < myDist) { isFirstMan = false; break; }
+        }
+        if (isFirstMan) return 0.0f;  // first man can flip freely
+
+        // Not first man: check distance and direction
+        if (myDist > MAX_FLIP_DIST) return 0.0f;
+
+        Vec toBall = (state.ball.pos - player.pos).Normalized();
+        float align = player.vel.Normalized().Dot(toBall);
+        if (align < MIN_BALL_ALIGN) return 0.0f;  // not heading toward ball
+
+        s_flipCount.fetch_add(1);
+        s_distSum.fetch_add(static_cast<int>(myDist));
+        return PENALTY;
+    }
+};
+
+
+// ============================================================================
+// DiagonalZoneCoverageReward
+// ============================================================================
+// Trains the third man (player furthest from ball on their team) to position in
+// the quadrant diagonal to where the ball is. The field is split into 4 quadrants
+// by the center axes. The third man in the diagonal quadrant can cover any clear
+// or counter across the entire field.
+//
+//   Ball in top-right  (+x, +y)  →  third man targets bottom-left  (-x, -y)
+//   Ball in top-left   (-x, +y)  →  third man targets bottom-right (+x, -y)
+//   etc.
+//
+// Partial credit (30%) for being correct on one axis only.
+//
+// Exemptions:
+//   - Ball within QUADRANT_THRESHOLD of either center axis (ambiguous quadrant)
+//   - Ball in own defensive third (defer to defensive zone positioning instead)
+//   - Player within MIN_COVERAGE_DIST of ball (too close to be "third man coverage")
+//
+// W&B: Positioning/DiagonalZone/CorrectFrames, /TotalEligibleFrames
+// ============================================================================
+class DiagonalZoneCoverageReward : public Reward {
+private:
+    static constexpr float MIN_COVERAGE_DIST  = 1500.0f;  // must be this far from ball
+    static constexpr float QUADRANT_THRESHOLD = 500.0f;   // ball must be this far from axis
+    static constexpr float DEFENSIVE_THIRD_Y  = 3413.0f;  // skip when ball in own def third
+    static constexpr float BASE_REWARD        = 1.0f;
+    static constexpr float PARTIAL_REWARD     = 0.3f;     // correct on one axis only
+
+    inline static std::atomic<int> s_correctFrames { 0 };
+    inline static std::atomic<int> s_totalFrames   { 0 };
+
+public:
+    struct Metrics { int correctFrames = 0; int totalFrames = 0; };
+    static Metrics GetAndResetMetrics() {
+        return { s_correctFrames.exchange(0), s_totalFrames.exchange(0) };
+    }
+
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (player.isDemoed) return 0.0f;
+
+        // 2v2/3v3 only
+        int teamCount = 0;
+        for (const auto& p : state.players)
+            if (p.team == player.team) teamCount++;
+        if (teamCount < 2) return 0.0f;
+
+        // Skip if ball is in an ambiguous quadrant (near center axes)
+        if (fabsf(state.ball.pos.x) < QUADRANT_THRESHOLD ||
+            fabsf(state.ball.pos.y) < QUADRANT_THRESHOLD) return 0.0f;
+
+        // Skip if ball is in own defensive third (DefensiveZoneOverlapPenalty covers this)
+        float ownGoalY = (player.team == Team::BLUE) ? -5120.0f : 5120.0f;
+        if (fabsf(state.ball.pos.y - ownGoalY) < DEFENSIVE_THIRD_Y) return 0.0f;
+
+        // Only applies to the third man (furthest from ball on team)
+        float myDist = (player.pos - state.ball.pos).Length();
+        for (const auto& tm : state.players) {
+            if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+            if ((tm.pos - state.ball.pos).Length() > myDist) return 0.0f;  // someone is further
+        }
+
+        // Must be far enough from ball to count as coverage (not in the immediate play)
+        if (myDist < MIN_COVERAGE_DIST) return 0.0f;
+
+        // Determine diagonal target quadrant
+        float idealX = (state.ball.pos.x > 0.0f) ? -1.0f : 1.0f;
+        float idealY = (state.ball.pos.y > 0.0f) ? -1.0f : 1.0f;
+
+        bool correctX = (player.pos.x * idealX > 0.0f);
+        bool correctY = (player.pos.y * idealY > 0.0f);
+
+        s_totalFrames.fetch_add(1);
+
+        if (correctX && correctY) {
+            s_correctFrames.fetch_add(1);
+            return BASE_REWARD;
+        }
+        if (correctX || correctY) return PARTIAL_REWARD;
+
+        return 0.0f;
+    }
+};
+
+
+// ============================================================================
+// NoMansLandPenalty
+// ============================================================================
+// Penalizes non-first-man players for sitting in the open center field ("no
+// man's land") instead of the safe zone near the side walls.
+//
+// "Safe zone" per the transcript: side walls + roughly 1/4 of field width
+// toward center. No-man's-land = the remaining center strip (|x| < 2000).
+//
+// A 0.3-second grace timer prevents penalizing players who are simply
+// transiting through the center on their way to a wall.
+//
+// Exemptions:
+//   - Player is first man (closest to ball on team)
+//   - Player within GOAL_EXEMPT_DIST of own goal (defending)
+//   - Player within BALL_EXEMPT_DIST of ball (in the immediate play)
+//   - 1v1 (no concept of safe zone in 1v1)
+//
+// W&B: Penalty/NoMansLand/PenaltyFrames
+// ============================================================================
+class NoMansLandPenalty : public Reward {
+private:
+    static constexpr float NO_MANS_X_THRESHOLD = 2000.0f;  // |x| < this = no-man's-land
+    static constexpr float GOAL_EXEMPT_DIST    = 2000.0f;  // near own goal = exempt
+    static constexpr float BALL_EXEMPT_DIST    = 1500.0f;  // near ball = in the play, exempt
+    static constexpr float GRACE_SECS         = 0.3f;      // transit grace before penalty
+    static constexpr float PENALTY_PER_STEP   = -0.08f;
+
+    mutable std::map<uint32_t, float> nmlTimer;  // seconds spent in no-man's-land
+
+    inline static std::atomic<int> s_penaltyFrames { 0 };
+
+public:
+    struct Metrics { int penaltyFrames = 0; };
+    static Metrics GetAndResetMetrics() {
+        return { s_penaltyFrames.exchange(0) };
+    }
+
+    virtual void Reset(const GameState& initialState) override { nmlTimer.clear(); }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (player.isDemoed) return 0.0f;
+
+        // 2v2/3v3 only
+        int teamCount = 0;
+        for (const auto& p : state.players)
+            if (p.team == player.team) teamCount++;
+        if (teamCount < 2) return 0.0f;
+
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+        uint32_t id = player.carId;
+
+        // Exempt if first man (closest to ball on team)
+        float myDist = (player.pos - state.ball.pos).Length();
+        bool isFirstMan = true;
+        for (const auto& tm : state.players) {
+            if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+            if ((tm.pos - state.ball.pos).Length() < myDist) { isFirstMan = false; break; }
+        }
+        if (isFirstMan) { nmlTimer[id] = 0.0f; return 0.0f; }
+
+        // Exempt if near own goal
+        float ownGoalY = (player.team == Team::BLUE) ? -5120.0f : 5120.0f;
+        if (fabsf(player.pos.y - ownGoalY) < GOAL_EXEMPT_DIST) { nmlTimer[id] = 0.0f; return 0.0f; }
+
+        // Exempt if close to ball (in the immediate play)
+        if (myDist < BALL_EXEMPT_DIST) { nmlTimer[id] = 0.0f; return 0.0f; }
+
+        // Check if in no-man's-land
+        if (fabsf(player.pos.x) >= NO_MANS_X_THRESHOLD) { nmlTimer[id] = 0.0f; return 0.0f; }
+
+        // Accumulate grace timer
+        float& timer = nmlTimer[id];
+        timer += dt;
+
+        if (timer > GRACE_SECS) {
+            s_penaltyFrames.fetch_add(1);
+            return PENALTY_PER_STEP;
         }
 
         return 0.0f;

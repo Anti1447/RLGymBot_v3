@@ -135,13 +135,15 @@ namespace RLGC {
             paidThisKickoff.clear();
         }
 
-        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        // All kickoff state-machine transitions and time advancement live here.
+        // PreStep is called once per step — kickoffTime advances at the correct rate,
+        // and s_kickoffs fires exactly once per kickoff start (not once per player).
+        virtual void PreStep(const GameState& state) override {
             float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
 
             bool isKickoffNow = (state.ball.pos.Length() < kickoffDetectBallPos &&
                 state.ball.vel.Length() < kickoffDetectBallVel);
 
-            // Kickoff start
             if (isKickoffNow && !kickoffActive) {
                 kickoffActive = true;
                 kickoffTime = 0.0f;
@@ -155,7 +157,15 @@ namespace RLGC {
 
             if (kickoffActive) {
                 kickoffTime += dt;
+                if (!isKickoffNow || kickoffTime >= kickoffMaxTrackSec) {
+                    kickoffActive = false;
+                }
+            }
+        }
 
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            // kickoffActive and kickoffTime are maintained in PreStep.
+            if (kickoffActive) {
                 if (player.ballTouchedStep) {
                     touchedDuringKickoff[player.carId] = true;
 
@@ -165,11 +175,6 @@ namespace RLGC {
                         firstTouchTime = kickoffTime;
                     }
                 }
-
-                if (!isKickoffNow || kickoffTime >= kickoffMaxTrackSec) {
-                    kickoffActive = false;
-                }
-
                 return 0.0f;
             }
 

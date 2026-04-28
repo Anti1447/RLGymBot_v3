@@ -1465,13 +1465,39 @@ public:
 // Shot accuracy - checking if shot is within goal boundaries (ball radius adjusted)
 // ============================================================================
 
-// Multiplier reward for shot accuracy based on goal placement
-// Returns 1.5x for in-bounds shots, 0.7x for out-of-bounds (encourages precision)
-// Subtracts ball radius from left/right and top boundaries
-// NOTE: Use as a multiplier for shot rewards via MathRewardWrapper::MULTIPLY
+// ============================================================================
+// ShotAccuracyInBoundsReward
+// 2026-04-18 | Rev 2.0 | NJH / Claude
+// Predictive multiplier for shot rewards (via MathRewardWrapper::MULTIPLY).
+//
+// v1 only fired on the goal-scored frame, which almost never coincides with the
+// shot-event frame produced by SpeedScaledShot / BallRedirect / etc. — so the
+// multiplier was effectively 1.0 on every shot event. Wrapped rewards were
+// paid a flat amount regardless of placement.
+//
+// v2 extrapolates ball trajectory to the opponent goal plane every step
+// (velocity + gravity, same ballistic model as ShotPlacementReward) and
+// returns:
+//   2.0f  -> predicted to enter the goal mouth within in-bounds box
+//   0.5f  -> heading toward goal plane but predicted to miss
+//   1.0f  -> not heading at goal (neutral — no effect on multiplier partner)
+// Goal-scored frame keeps the v1 placement check as a fallback.
+// ============================================================================
 class ShotAccuracyInBoundsReward : public Reward {
 private:
     mutable std::map<uint32_t, Vec> lastBallPos;
+
+    static constexpr float MIN_BALL_SPEED   = 500.0f;   // UU/s — below this, not a shot
+    static constexpr float GRAVITY          = 650.0f;   // RocketSim ~650 UU/s^2
+    static constexpr float MAX_PREDICT_TIME = 4.0f;     // seconds — matches BallPrediction horizon
+    static constexpr float MIN_TOWARD_VY    = 50.0f;    // UU/s — reject near-lateral shots
+    static constexpr float MISS_MARGIN      = 400.0f;   // UU around goal mouth to count as "near miss"
+
+    static inline bool IsInBounds(float x, float z) {
+        const float IN_BOUNDS_W = CommonValues::GOAL_WIDTH_FROM_CENTER - CommonValues::BALL_RADIUS - 40.0f;
+        const float IN_BOUNDS_H = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS - 40.0f;
+        return fabsf(x) <= IN_BOUNDS_W && z >= CommonValues::BALL_RADIUS && z <= IN_BOUNDS_H;
+    }
 
 public:
     virtual void Reset(const GameState& initialState) override {
@@ -1479,41 +1505,44 @@ public:
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        // Track ball position for goal checking
         lastBallPos[player.carId] = state.ball.pos;
 
-        // Check if goal scored this frame
-        if (!state.goalScored) {
-            return 1.0f; // No goal - neutral multiplier (no effect)
+        // Fallback: trust the actual goal classification when it fires this frame
+        if (state.goalScored) {
+            bool orangeScored = (state.ball.pos.y > 0);
+            bool playerTeamScored = (player.team == Team::ORANGE && orangeScored) ||
+                                    (player.team == Team::BLUE && !orangeScored);
+            if (!playerTeamScored) return 1.0f;
+
+            Vec p = lastBallPos[player.carId];
+            return IsInBounds(p.x, p.z) ? 2.0f : 0.5f;
         }
 
-        // Determine which team scored (check ball position at goal line)
-        // Ball in positive Y goal = ORANGE scored, negative Y goal = BLUE scored
-        bool orangeScored = (state.ball.pos.y > 0);
-        bool playerTeamScored = (player.team == Team::ORANGE && orangeScored) ||
-                                (player.team == Team::BLUE && !orangeScored);
+        // Predictive path: ballistic extrapolation to opponent goal plane
+        if (state.ball.vel.Length() < MIN_BALL_SPEED) return 1.0f;
 
-        // Only reward if this player's team scored
-        if (!playerTeamScored) {
-            return 1.0f; // Opposing team scored - neutral multiplier
-        }
+        float goalY = (player.team == Team::BLUE) ?  CommonValues::BACK_WALL_Y
+                                                  : -CommonValues::BACK_WALL_Y;
 
-        // Get last ball position before it reset/moved
-        Vec ballPos = lastBallPos[player.carId];
+        bool movingToGoal = (player.team == Team::BLUE)
+                            ? (state.ball.vel.y >  MIN_TOWARD_VY)
+                            : (state.ball.vel.y < -MIN_TOWARD_VY);
+        if (!movingToGoal) return 1.0f;
 
-        // Goal boundary constants (with ball radius subtracted)
-        // Ball center must be within these bounds for a "good" shot
-        const float ADJUSTED_WIDTH = CommonValues::GOAL_WIDTH_FROM_CENTER - CommonValues::BALL_RADIUS - 40.0f;  // ±800.005f
-        const float ADJUSTED_HEIGHT = CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS - 40.0f; // 550.025f
+        float tToGoal = (goalY - state.ball.pos.y) / state.ball.vel.y;
+        if (tToGoal < 0.0f || tToGoal > MAX_PREDICT_TIME) return 1.0f;
 
-        // Check if shot is within adjusted boundaries (X and Z axes)
-        bool withinLeftRight = std::abs(ballPos.x) <= ADJUSTED_WIDTH;
-        bool withinHeight = ballPos.z >= 0.0f && ballPos.z <= ADJUSTED_HEIGHT;
+        float xAtGoal = state.ball.pos.x + state.ball.vel.x * tToGoal;
+        float zAtGoal = state.ball.pos.z + state.ball.vel.z * tToGoal
+                         - 0.5f * GRAVITY * tToGoal * tToGoal;
 
-        if (withinLeftRight && withinHeight) {
-            return 2.0f; // In-bounds shot - 1.5x multiplier bonus!
-        }
-        return 0.5f; // Out-of-bounds shot - 0.7x multiplier penalty
+        if (IsInBounds(xAtGoal, zAtGoal)) return 2.0f;
+
+        // Heading at goal plane but predicted to miss — still a shot attempt, half credit
+        bool nearMiss = fabsf(xAtGoal) <= (CommonValues::GOAL_WIDTH_FROM_CENTER + MISS_MARGIN)
+                     && zAtGoal >= -MISS_MARGIN
+                     && zAtGoal <= (CommonValues::GOAL_HEIGHT + MISS_MARGIN);
+        return nearMiss ? 0.5f : 1.0f;
     }
 };
 
@@ -1559,6 +1588,120 @@ public:
 //       - soft close touch (possession-preserving) => small immediate reward + stores for follow-up
 //       - follow-up aerial within timeout after a soft touch => bonus (encourages setting up aerials / airdribble)
 // - Works robustly with and without state.prev
+
+// ============================================================================
+// OffBallAerialPenalty
+// 2026-04-19 | Rev 1.0 | NJH / Claude
+//
+// Direct counterpressure against off-ball aerial commitment. Fires a small
+// continuous penalty each step the player is:
+//   1. Airborne (!isOnGround)
+//   2. Ball distance > BALL_DIST_THRESHOLD (3000 UU)
+//   3. Airborne for longer than GRACE_PERIOD (0.5s) without touching the ball
+//
+// The grace period avoids penalizing normal jumps or brief wall hops. Only
+// sustained aerial commitment far from the ball triggers the penalty.
+//
+// Do NOT ZeroSum — this is a per-player behavioral penalty, not a competitive
+// outcome. ZeroSumming would reward the opponent for your bot's bad aerial,
+// which is a separate signal already covered by goal and possession rewards.
+//
+// W&B health check: Watch flip_reset_acquisition_rate — if it drops >30%,
+// penalty weight is too high and suppressing legitimate aerial attempts near ball.
+// ============================================================================
+class OffBallAerialPenalty : public Reward {
+private:
+    mutable std::map<uint32_t, float> airtimeWithoutTouch;
+
+    static constexpr float BALL_DIST_THRESHOLD    = 3000.0f;  // UU
+    static constexpr float GRACE_PERIOD           = 0.5f;     // seconds before penalty starts
+    static constexpr float PENALTY_PER_SECOND     = 0.15f;    // penalty rate while off-ball-aerial
+    // 2026-04-20 | Boost-scaling: low boost makes off-ball aerials 2x as costly.
+    static constexpr float BOOST_LOW_THRESHOLD    = 30.0f;    // below this = "low boost"
+    static constexpr float LOW_BOOST_PENALTY_SCALE = 2.0f;   // multiplier when boost < threshold
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        airtimeWithoutTouch.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+        if (player.isOnGround || player.ballTouchedStep) {
+            airtimeWithoutTouch[player.carId] = 0.0f;
+            return 0.0f;
+        }
+
+        float& airtime = airtimeWithoutTouch[player.carId];
+        airtime += dt;
+
+        if (airtime <= GRACE_PERIOD) return 0.0f;
+
+        float ballDist = (player.pos - state.ball.pos).Length();
+        if (ballDist <= BALL_DIST_THRESHOLD) return 0.0f;
+
+        float boostScale = (player.boost < BOOST_LOW_THRESHOLD) ? LOW_BOOST_PENALTY_SCALE : 1.0f;
+        return -PENALTY_PER_SECOND * boostScale * dt;
+    }
+};
+
+// SecondaryAerialPenalty: discourages non-closest teammate from committing to an aerial.
+// Fires when: ball height > 250 UU (aerial situation), player is airborne, AND at least
+// one teammate is closer to ball than this player by more than DIST_SLACK UU.
+// Grace period prevents penalizing quick reactions. 1v1: no teammates = no penalty ever.
+// Not ZeroSummed: per-player behavioral penalty.
+class SecondaryAerialPenalty : public Reward {
+private:
+    mutable std::map<uint32_t, float> secondaryAirtime;
+
+    static constexpr float BALL_HEIGHT_THRESHOLD = 250.0f;   // aerial is "active" above this
+    static constexpr float GRACE_PERIOD          = 0.3f;     // seconds before penalty starts
+    static constexpr float PENALTY_PER_SECOND    = 0.10f;    // penalty rate (gentler than OffBallAerial)
+    static constexpr float DIST_SLACK            = 150.0f;   // UU slack to avoid penalizing near-ties
+
+public:
+    virtual void Reset(const GameState& initialState) override {
+        secondaryAirtime.clear();
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+
+        // No aerial situation or player already on ground -> reset and skip
+        if (state.ball.pos.z < BALL_HEIGHT_THRESHOLD || player.isOnGround) {
+            secondaryAirtime[player.carId] = 0.0f;
+            return 0.0f;
+        }
+
+        // Check if any teammate is meaningfully closer to the ball
+        float myDist = (player.pos - state.ball.pos).Length();
+        bool teammateCloser = false;
+        for (const auto& p : state.players) {
+            if (p.team == player.team && p.carId != player.carId) {
+                float tDist = (p.pos - state.ball.pos).Length();
+                if (tDist + DIST_SLACK < myDist) {
+                    teammateCloser = true;
+                    break;
+                }
+            }
+        }
+
+        if (!teammateCloser) {
+            secondaryAirtime[player.carId] = 0.0f;
+            return 0.0f;
+        }
+
+        // Accumulate airtime as secondary aerial
+        float& airtime = secondaryAirtime[player.carId];
+        airtime += dt;
+
+        if (airtime <= GRACE_PERIOD) return 0.0f;
+
+        return -PENALTY_PER_SECOND * dt;
+    }
+};
+
 class BackboardDefenseReward : public Reward {
 private:
     mutable std::map<uint32_t, float> lastSoftTouchTime;

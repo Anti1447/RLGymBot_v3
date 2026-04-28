@@ -338,7 +338,7 @@
       "KickoffSpeedReward": 10.0,
       "ClosestPlayerKickoffSideReward": 15.0,
       "KickoffDoubleCommitPenalty": 15.0,
-      "SpeedflipKickoffReward": 20.0,
+      "SpeedFlipKickoffReward": 2.0,
       "KickoffNoChaseTeamPenalty": 30.0,
       "KickoffSupportBoostReward": 7.0,
       "PickupBoostReward": 70.0,

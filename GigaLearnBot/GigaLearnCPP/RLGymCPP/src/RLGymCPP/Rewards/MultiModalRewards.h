@@ -2,41 +2,74 @@
 #include "../Framework.h"
 #include "../CommonValues.h"
 #include "BallPrediction.h"
+#include <atomic>
 #include <cmath>
 
 namespace RLGC {
 
     // ============================================================================
-    // DOUBLE COMMIT PENALTY - Penalize multiple teammates on same touch
+    // DOUBLE COMMIT PENALTY - Penalize second/third man ball-chasing
     // ============================================================================
-    // In multi-modal training (1v1, 2v2, 3v3), penalize situations where multiple
-    // bots on the same team are going for the same ball touch. This teaches proper
-    // positioning and rotation instead of ball-chasing mentality.
+    // In multi-modal training (2v2, 3v3), penalize any player who commits to the
+    // ball when a closer teammate is already first man. Returns 0 in 1v1 (no
+    // teammates to double-commit with).
     //
-    // Immediate punishment: -0.1 per additional teammate within threshold
-    // Continuous effect: Applied every frame teammates overlap
-    //
-    // Rev 1.0 (2025-01-15, NJH)
+    // Rev 2.0 (2026-04-26, NJH + Claude) — fixes from Rev 1.0:
+    //   - BUG FIX: commitCount > 1 → >= 1 (was dead in 2v2 — only 1 teammate exists)
+    //   - First-man exemption: closest player to ball on team is immune
+    //   - Emergency defensive gate: no penalty when ball is near own goal
+    //   - Tighter commit detection: cos 0.3→0.5 (72°→60°), speed 300→500 UU/s
+    //   - Penalty formula: (commitCount-1) → commitCount (counts all extra bots)
+    //   - Added Config struct, Metrics, W&B atomics
+    // ============================================================================
     class DoubleCommitPenalty : public Reward {
+    public:
+        struct Config {
+            float commitDistance       = 1500.0f; // radius: teammate within this of ball counts
+            float penaltyPerBot        = 0.1f;    // penalty per committing teammate
+            float minDistBeforePenalty = 300.0f;  // no penalty if player is basically on ball
+            float commitThreshold      = 0.5f;    // seconds of overlap before penalty fires
+            float minCommitSpeed       = 500.0f;  // min speed to count as committing (was 300)
+            float commitAlignCos       = 0.5f;    // cos(angle) threshold — 60° cone (was 0.3 = 72°)
+            float emergencyGoalDist    = 1000.0f; // ball within this of own goal → no penalty
+            bool  shadowMode           = false;
+        };
+
+        struct Metrics {
+            int    penaltyFrames  = 0;   // frames where penalty was applied to this player
+            int    commitCountSum = 0;   // sum of commitCounts at penalty frames (÷penaltyFrames = avg)
+            double penaltySum     = 0.0; // total penalty magnitude issued
+        };
+
     private:
-        // State tracking for event-based penalty with timing window
-        mutable std::map<uint32_t, float> commitStartTime;  // When teammate commit began for this player
+        mutable std::map<uint32_t, float> commitStartTime;
+        Config config;
+
+        // Metrics — thread-safe atomics (shared across all instances / all parallel envs)
+        inline static std::atomic<int>       s_penaltyFrames  { 0 };
+        inline static std::atomic<int>       s_commitCountSum { 0 };
+        inline static std::atomic<long long> s_penaltyMilli   { 0 };
 
     public:
-        float commitDistance;       // Distance within which bots are "committing"
-        float penaltyPerBot;        // Punishment per additional committing teammate
-        float minDistBeforePenalty; // Don't penalize if ball is extremely close
-        float commitThreshold;      // Time (seconds) before penalty applies (default 0.5s)
+        DoubleCommitPenalty() : config() {}
+        explicit DoubleCommitPenalty(const Config& cfg) : config(cfg) {}
 
-        DoubleCommitPenalty(
-            float distance = 1500.0f,
-            float penalty = 0.1f,
-            float minDist = 300.0f,
-            float threshold = 0.5f
-        ) : commitDistance(distance),
-            penaltyPerBot(penalty),
-            minDistBeforePenalty(minDist),
-            commitThreshold(threshold) {
+        // Legacy positional constructor — preserves all existing RewardConfig.cpp call sites
+        DoubleCommitPenalty(float distance, float penalty, float minDist, float threshold)
+            : config() {
+            config.commitDistance       = distance;
+            config.penaltyPerBot        = penalty;
+            config.minDistBeforePenalty = minDist;
+            config.commitThreshold      = threshold;
+        }
+
+        static Metrics GetAndResetMetrics() {
+            Metrics m;
+            m.penaltyFrames  = s_penaltyFrames.exchange(0);
+            m.commitCountSum = s_commitCountSum.exchange(0);
+            long long pm     = s_penaltyMilli.exchange(0);
+            m.penaltySum     = double(pm) / 1000.0;
+            return m;
         }
 
         virtual void Reset(const GameState& initialState) override {
@@ -46,69 +79,72 @@ namespace RLGC {
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (player.isDemoed) return 0.0f;
 
-            Vec toBall = state.ball.pos - player.pos;
-            float distToBall = toBall.Length();
+            // 1v1: no teammates, penalty never applies
+            // (commitCount will be 0 naturally, but early exit is cleaner)
+            bool hasTeammate = false;
+            for (const auto& p : state.players) {
+                if (p.team == player.team && p.carId != player.carId) { hasTeammate = true; break; }
+            }
+            if (!hasTeammate) return 0.0f;
 
-            // Don't penalize if we're basically on the ball
-            if (distToBall < minDistBeforePenalty) return 0.0f;
+            float distToBall = (state.ball.pos - player.pos).Length();
+            if (distToBall < config.minDistBeforePenalty) return 0.0f;
 
-            // Helper: Check if teammate is actively heading toward ball (intent detection)
+            // Emergency defensive gate: everyone committing near own goal is correct
+            Vec ownGoal = (player.team == Team::BLUE)
+                ? CommonValues::BLUE_GOAL_CENTER
+                : CommonValues::ORANGE_GOAL_CENTER;
+            if ((state.ball.pos - ownGoal).Length() < config.emergencyGoalDist &&
+                state.ball.pos.z < 400.0f)
+                return 0.0f;
+
+            // First-man exemption: if this player is the closest to ball on their team,
+            // their commit is correct — penalize them would be wrong
+            float myDistToBall = distToBall;
+            for (const auto& tm : state.players) {
+                if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+                if ((tm.pos - state.ball.pos).Length() < myDistToBall)
+                    goto has_closer_teammate;
+            }
+            // No teammate is closer — this player IS the first man, commitment is valid
+            { commitStartTime.erase(player.carId); return 0.0f; }
+            has_closer_teammate:
+
+            // Commit detection: tighter cone (0.5 = 60°) and higher speed floor (500 UU/s)
             auto IsActivelyCommitting = [&](const Player& p) -> bool {
                 if (p.isDemoed) return false;
-
-                Vec toBallTeammate = (state.ball.pos - p.pos);
-                float distToBallTeammate = toBallTeammate.Length();
-
-                // If already on ball, definitely committing
-                if (distToBallTeammate < 1e-3f) return true;
-
-                // Check if velocity is aligned with ball direction
-                Vec ballDir = toBallTeammate.Normalized();
-                float velocityAlignment = p.vel.Dot(ballDir);
+                Vec toBallTm = (state.ball.pos - p.pos);
+                if (toBallTm.Length() < 1e-3f) return true;
                 float speed = p.vel.Length();
-
-                // Actively committing: moving toward ball at >300 UU/s
-                // AND velocity vector aligned with ball (dot > 0.3 ≈ 73° cone)
-                return (speed > 300.0f && velocityAlignment > 0.3f * speed);
+                if (speed < config.minCommitSpeed) return false;
+                return p.vel.Normalized().Dot(toBallTm.Normalized()) > config.commitAlignCos;
             };
 
-            // Count how many teammates are within commit range AND actively heading toward ball
+            // Count teammates also committing (these are additional first-men, also wrong)
             int commitCount = 0;
-            for (const auto& teammate : state.players) {
-                if (teammate.team != player.team) continue;
-                if (teammate.carId == player.carId) continue;
-                if (teammate.isDemoed) continue;
-
-                float tmDist = (state.ball.pos - teammate.pos).Length();
-                if (tmDist < commitDistance) {
-                    // NEW: Only count if ALSO actively heading toward ball
-                    if (IsActivelyCommitting(teammate)) {
-                        commitCount++;
-                    }
-                }
+            for (const auto& tm : state.players) {
+                if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+                float tmDist = (state.ball.pos - tm.pos).Length();
+                if (tmDist < config.commitDistance && IsActivelyCommitting(tm))
+                    commitCount++;
             }
 
-            // NEW: Event-based penalty with timing window
-            // Only apply penalty if 2+ teammates are committing
             float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
             uint32_t playerId = player.carId;
 
-            if (commitCount > 1) {
-                // First frame of commit: initialize timer
-                if (commitStartTime.find(playerId) == commitStartTime.end()) {
-                    commitStartTime[playerId] = 0.0f;
-                }
-
-                // Increment commit timer
+            if (commitCount >= 1) {  // was > 1 — this was the 2v2 dead-code bug
                 commitStartTime[playerId] += dt;
 
-                // Only apply penalty if overlap persists > threshold (default 0.5s)
-                // This prevents false positives from brief rotations and is frame-rate independent
-                if (commitStartTime[playerId] > commitThreshold) {
-                    return -penaltyPerBot * (commitCount - 1);  // Penalize only extra teammates
+                if (commitStartTime[playerId] > config.commitThreshold) {
+                    float penalty = config.penaltyPerBot * commitCount;  // was (commitCount-1)
+
+                    s_penaltyFrames.fetch_add(1);
+                    s_commitCountSum.fetch_add(commitCount);
+                    s_penaltyMilli.fetch_add(static_cast<long long>(penalty * 1000.0f));
+
+                    return config.shadowMode ? 0.0f : -penalty;
                 }
             } else {
-                // Reset timer when separation occurs (fewer teammates in range)
                 commitStartTime.erase(playerId);
             }
 
