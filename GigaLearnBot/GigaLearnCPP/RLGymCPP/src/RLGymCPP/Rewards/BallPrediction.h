@@ -53,7 +53,7 @@ namespace BallPred {
     constexpr int   NUM_SLICES       = (int)(DURATION_SEC * SAMPLE_HZ);  // 60 slices
 
     // Physics coefficients
-    constexpr float DRAG_COEF        = 0.03f;   // fractional speed loss per second
+    constexpr float DRAG_COEF        = CommonValues::BALL_DRAG;  // fractional speed loss per second
     constexpr float BOUNCE_COEF      = 0.6f;    // velocity retention on surface bounce
 
     // -------------------------------------------------------------------------
@@ -87,6 +87,8 @@ namespace BallPred {
 
         // Populate the slice array from the current game state.
         // Should be called exactly once per step, from PreStep().
+        // NOTE: Angular velocity / Magnus effect not modeled. Predictions degrade
+        // after high-spin ball contacts. Accurate for free-flight and surface bounces.
         void Update(const GameState& state) {
             const float r = CommonValues::BALL_RADIUS;
 
@@ -98,6 +100,7 @@ namespace BallPred {
             bool sCeiling   = false;
             bool sBackboard = false;
             groundBounces   = 0;
+            bool prevGrounded = false;  // tracks grounded state across ticks for bounce-event counting
 
             for (int slice = 0; slice < NUM_SLICES; slice++) {
                 // Integrate TICKS_PER_SLICE physics ticks before recording this slice
@@ -116,7 +119,10 @@ namespace BallPred {
                         pos.z = r;
                         vel.z = -vel.z * BOUNCE_COEF;
                         sGround = true;
-                        groundBounces++;
+                        if (!prevGrounded) groundBounces++;  // count crossing events, not ticks
+                        prevGrounded = true;
+                    } else {
+                        prevGrounded = false;
                     }
 
                     // Ceiling bounce
@@ -143,6 +149,28 @@ namespace BallPred {
                         vel.y = -vel.y * BOUNCE_COEF;
                         sBackboard = true;
                     }
+
+                    // Corner walls: diagonal planes at |x|+|y| = CORNER_AXIS_INTERCEPT, 45° normal.
+                    // Must be checked after axis bounces to catch balls that cleared individual
+                    // axis limits but still violate the diagonal corner constraint.
+                    {
+                        float cornerSum = std::abs(pos.x) + std::abs(pos.y);
+                        float cornerThresh = CommonValues::CORNER_AXIS_INTERCEPT - r;
+                        if (cornerSum > cornerThresh) {
+                            float overshoot = cornerSum - cornerThresh;
+                            float signX = (pos.x >= 0.0f) ? 1.0f : -1.0f;
+                            float signY = (pos.y >= 0.0f) ? 1.0f : -1.0f;
+                            pos.x -= signX * overshoot * 0.5f;
+                            pos.y -= signY * overshoot * 0.5f;
+                            // Reflect velocity along 45° diagonal (only if moving into wall)
+                            float normalComp = (vel.x * signX + vel.y * signY) * 0.5f;
+                            if (normalComp > 0.0f) {
+                                vel.x -= signX * normalComp * (1.0f + BOUNCE_COEF);
+                                vel.y -= signY * normalComp * (1.0f + BOUNCE_COEF);
+                            }
+                            sWall = true;
+                        }
+                    }
                 }
 
                 // Record slice (surface flags are sticky)
@@ -159,9 +187,10 @@ namespace BallPred {
         }
 
         // Return the slice whose time is closest to `seconds` (clamped to bounds).
-        // Example: AtTime(1.0f) → slice at index 14 (t ≈ 0.933s) or 15 (t = 1.0s).
+        // Slice i has t = (i+1)*SLICE_DT, so nearest index = round(seconds/SLICE_DT) - 1.
+        // Example: AtTime(1.0f) → slices[14] (t = 1.0s); AtTime(0.0667f) → slices[0].
         const BallSlice& AtTime(float seconds) const {
-            int idx = (int)(seconds * SAMPLE_HZ);
+            int idx = (int)roundf(seconds / SLICE_DT) - 1;
             if (idx < 0)            idx = 0;
             if (idx >= NUM_SLICES)  idx = NUM_SLICES - 1;
             return slices[idx];
@@ -185,6 +214,37 @@ namespace BallPred {
         bool HitSurfaceBy(float seconds) const {
             const BallSlice& s = AtTime(seconds);
             return s.hitWall || s.hitCeiling || s.hitBackboard;
+        }
+
+        // Returns the time of the first ground contact, or -1.0f if none in window.
+        float FirstGroundHitTime() const {
+            for (int i = 0; i < NUM_SLICES; i++) {
+                if (slices[i].hitGround) return slices[i].t;
+            }
+            return -1.0f;
+        }
+
+        // Returns the time of the first non-ground surface contact, or -1.0f if none.
+        float FirstSurfaceHitTime() const {
+            for (int i = 0; i < NUM_SLICES; i++) {
+                if (slices[i].hitWall || slices[i].hitCeiling || slices[i].hitBackboard)
+                    return slices[i].t;
+            }
+            return -1.0f;
+        }
+
+        // Returns true if a ground bounce occurs strictly between t0 and t1.
+        bool HitGroundBetween(float t0, float t1) const {
+            return AtTime(t1).hitGround && !AtTime(t0).hitGround;
+        }
+
+        // Returns true if a non-ground surface bounce occurs strictly between t0 and t1.
+        bool HitSurfaceBetween(float t0, float t1) const {
+            const BallSlice& s1 = AtTime(t1);
+            const BallSlice& s0 = AtTime(t0);
+            bool hitByT1 = s1.hitWall || s1.hitCeiling || s1.hitBackboard;
+            bool hitByT0 = s0.hitWall || s0.hitCeiling || s0.hitBackboard;
+            return hitByT1 && !hitByT0;
         }
     };
 

@@ -54,7 +54,7 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 | CornerClearReward | DefensiveClearingRewards.h | Clear from corner | 3 | 6+ | Active (ZeroSum) |
 | BackboardDefenseReward | PositioningRewards.h | Defensive backboard coverage | 5 | 6+ | Active |
 | GoalpostPositioningReward | PositioningRewards.h | Goalpost positioning | 10 | 5+ | Active |
-| ActiveSupportingPositionReward | PositioningRewards.h | Support position off-ball | 8 | 5+ | Active |
+| ActiveSupportingPositionReward | PositioningRewards.h | 3-slot pass-to-score positioning (far post / penalty spot / wide diagonal) | 8 | 5+ | Active |
 | OwnNetCenteringPenalty | PositioningRewards.h | Penalty for own-net centering | 10–15 | 5+ | Active |
 | OpponentPassInterceptionReward | ConfidenceRewards.h | Intercept opponent pass | 10–15 | 5+ | Active (ZeroSum) |
 | EarlyDangerDetectionReward | PreemptiveSaveRewards.h | Early danger read | 1.2 | 6+ | Active |
@@ -212,6 +212,7 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | NumericalAdvantageAttackingReward | 50.0f | OFFENSE | Attack in 2v1+ | Yes | Numeric leverage |
 | PossessionControlReward | 25.0f | OFFENSE | Ball possession | Yes | Offensive control |
 | AirDribbleBumpConversionReward | 0.0f (shadow) / 10.0f (live) | MECHANICS | Air dribble ≥2 touches → bump nearest defender while ball goal-bound → confirm shot survives 0.5s | Yes (ZeroSum 0.5f) | Phase 6+ Shadow Mode M2. Supersedes AirDribbleBumpReward, AirBumpDemoReward, AirDribbleDemoAssist. Rev 1.0 2026-04-21. |
+| InterceptClearingDemoReward | 75.0f (ZeroSum 0.5f) | OFFENSE | Demo opponent whose projected pos (pos+vel*t) is within 1500 UU of ball's predicted trajectory when ball is predicted to reach within 2500 UU of opp goal in ≤3s | Yes (ZeroSum 0.5f) | Phase 6+. Uses BallPred::Cache. Does NOT overlap PredictiveDemoRewards (those target ball-chasing / aerial / post-touch). Rev 1.0 2026-05-12. |
 | AirDribbleExplorationReward | 1.5f | MECHANICS | Airborne ball contact at non-standard orientation (inverted/sideways), unusual touch timing (multi-tap <0.25s or delayed >2s), or high power delta >1200 UU/s | No | Phase 6+. 3 channels: orientation diversity, touch rhythm, power air touch. Complements AirDribbleAccuracyReward. Rev 1.0 2026-04-21. |
 | FlickVarietyReward | 4.0f | MECHANICS | State machine: carry → flip detected → ball separated. Scores side/behind/underside ball position, inverted/sideways orientation, flash (<0.15s) or patient (>1.5s) carry timing | No | Phase 6+. No bonus for standard front flicks (covered by CompositeFlickReward). 3.0s cooldown. Rev 1.1 2026-04-22 (renamed from FlickExplorationReward to avoid conflict with CompleteMechanicsRewards.h). |
 | RecoveryExplorationReward | 1.0f | CAR CONTROL | 4 sub-rewards: ceiling wavedash, wall-to-wall wavedash, squishy save momentum (driving through net curve), boost-to-surface (<0.6s contact after boost) | No | Phase 6+. Complements IntelligentWavedashReward (ground/wall) and WavedashBasicReward. Rev 1.0 2026-04-21. |
@@ -242,7 +243,7 @@ All 7 classes are in `PredictiveDemoRewards.h`. All registered with `shadowMode=
 | ProgressiveRotationReward | 15.0f | POSITIONING | Progressive rotation (Champion tier) | No | Rotation quality |
 | BoostAwareRotationReward | 3.0f | POSITIONING | Rotation + boost awareness | No | Contextual rotation |
 | RetreatAfterTouchReward | 2.5f | POSITIONING | Retreat after touch | No | Rotation prep |
-| ActiveSupportingPositionReward | 10.0f | POSITIONING | Support position upfield | No | 2nd-man holding |
+| ActiveSupportingPositionReward | 10.0f | POSITIONING | 3-slot pass-to-score: far post / penalty spot / wide diagonal | No | 2nd-man scoring position |
 | GoalpostPositioningReward | 8.0f | POSITIONING | Goalpost coverage | No | Defensive coverage |
 | ShadowDefenseVsPossessionReward | 3.0f | POSITIONING | Shadow vs possession trade | Yes | Tactical balance |
 
@@ -257,6 +258,7 @@ All 7 classes are in `PredictiveDemoRewards.h`. All registered with `shadowMode=
 | PassingLaneNetworkReward | 7.0f | TEAMWORK | Passing lane control (team modes) | No | Spatial network (2v2/3v3 only) |
 | InfieldPassReward | 15.0f | TEAMWORK | Lateral pass | No | Pass quality |
 | DownfieldPassReward | 15.0f | TEAMWORK | Long downfield pass | No | Tactical passing |
+| PressureEscapeBackPassReward | 8.0f | TEAMWORK | Back pass in opp half to open man; ×1.5 under pressure, ×1.4 low boost | Yes (0.5f) | Possession reset under pressure |
 | SpatialFakeReward | 5.0f | OFFENSE | Spatial fake maneuver | No | Deception play |
 
 ## Dribbling

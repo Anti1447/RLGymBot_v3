@@ -64,12 +64,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_6_CHAMPION:
-        cfg.entropyScale = 0.02f;
-        cfg.policyLR = 8.5e-5f;
-        cfg.criticLR = 8.5e-5f;
-        cfg.noTouchTimeout = 12.0f;
+        cfg.entropyScale = 0.015f;
+        cfg.policyLR = 9e-5f;
+        cfg.criticLR = 9e-5f;
+        cfg.noTouchTimeout = 15.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.6f;
+        cfg.randomStateChance = 0.75f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;
@@ -173,16 +173,16 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 456;
 
     // === PPO CONFIG ===
-    int tsPerItr = 400'000;
+    int tsPerItr = 500'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
-    cfg.ppo.miniBatchSize = 50'000;
+    cfg.ppo.miniBatchSize = 25'000;
     cfg.ppo.epochs = 1;
     cfg.ppo.maskEntropy = true; // Enable entropy masking to combine with action masking. very important
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9955;
+    cfg.ppo.gaeGamma = 0.9959;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

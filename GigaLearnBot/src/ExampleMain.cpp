@@ -461,9 +461,11 @@ int main(int argc, char* argv[]) {
     // Set global render flag (used by EnvCreateFunc for cycling mode)
     g_renderMode = renderMode;
 
-    // Toggle here: change to KickoffMode::STOCHASTIC to disable hardcoded kickoffs, KickoffMode::HARDCODED to enable them
+    // HARDCODED: taker runs a position-specific speed-flip sequence; NN resumes after.
+    // STOCHASTIC: NN controls every frame including kickoffs (useful for debugging).
+    // Variant probabilities per position are set in KickoffController::SelectVariant().
+    //const RLGC::KickoffMode KICKOFF_MODE = RLGC::KickoffMode::HARDCODED;
     const RLGC::KickoffMode KICKOFF_MODE = RLGC::KickoffMode::STOCHASTIC;
-
     std::cout << "[CONFIG] Kickoff mode: " <<
         (KICKOFF_MODE == RLGC::KickoffMode::HARDCODED ? "HARDCODED" : "STOCHASTIC") << std::endl;
 

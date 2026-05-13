@@ -104,17 +104,18 @@ RLGC::EnvSet::EnvSet(const EnvSetConfig& config) : config(config), profiling(con
 		state.actionMasks = DimList2<uint8_t>(state.numPlayers, actionParsers[0]->GetActionAmount());
 	}
 
+	// Initialize kickoff state BEFORE ResetArena is called (ResetArena accesses kickoff_states)
+	for (int i = 0; i < (int)arenas.size(); i++) {
+		kickoff_controllers.push_back(KickoffController(config.kickoffMode));
+		kickoff_states.push_back(
+			std::vector<PlayerKickoffState>(arenas[i]->_cars.size(), PlayerKickoffState{}));
+	}
+
 	// Reset all arenas initially
 	g_ThreadPool.StartBatchedJobs(
 		std::bind(&RLGC::EnvSet::ResetArena, this, std::placeholders::_1),
 		config.numArenas, false
 	);
-
-	// After initializing all arenas, add this:
-	for (int i = 0; i < arenas.size(); i++) {
-		kickoff_controllers.push_back(KickoffController(config.kickoffMode));  // Pass mode
-		kickoff_indices.push_back(std::vector<int>(arenas[i]->_cars.size(), -1));
-	}
 
 	// Initialize temporary vectors for reward computation
 	for (int i = 0; i < config.numArenas; i++) {
@@ -161,34 +162,38 @@ void RLGC::EnvSet::StepSecondHalf(const IList& actionIndices, bool async) {
 		for (int i = 0; i < numPlayers; i++, carItr++) {
 			auto& player = gs.players[i];
 			auto& kickoff = kickoff_controllers[arenaIdx];
-			auto& kickoff_idx = kickoff_indices[arenaIdx];
+			auto& ks      = kickoff_states[arenaIdx][i];
 			Car* car = *carItr;
 			// ===== KICKOFF HANDLING =====
 			Action action;
 
-			if (kickoff.GetMode() == KickoffMode::HARDCODED && kickoff.should_begin_kickoff(gs)) {
-				// Initialize kickoff ONLY on first frame
-				if (kickoff_idx[i] == -1) {
-					kickoff_idx[i] = kickoff.is_player_kickoff_taker(player, gs) ? 0 : -2;
-				}
-
-				// Execute hardcoded kickoff if taker
-				if (kickoff_idx[i] >= 0 && kickoff_idx[i] < kickoff.get_sequence_length()) {
-					action = kickoff.get_kickoff_action(kickoff_idx[i], player.team);
-					kickoff_idx[i]++;
-				}
-				else {
-					// Not taker or sequence complete, use NN
-					action = actionParsers[arenaIdx]->ParseAction(actionIndices[playerStartIdx + i], player, gs);
-					if (kickoff_idx[i] >= kickoff.get_sequence_length()) {
-						kickoff_idx[i] = -1;
+			if (kickoff.GetMode() == KickoffMode::HARDCODED && kickoff.ShouldBeginKickoff(gs)) {
+				// First frame of this kickoff: select position + variant
+				if (ks.frameIndex == -1) {
+					if (kickoff.IsPlayerTaker(player, gs)) {
+						ks.position   = kickoff.DetectPosition(player);
+						ks.variant    = kickoff.SelectVariant(ks.position);
+						ks.frameIndex = 0;
+					} else {
+						ks.frameIndex = -2;  // not taker — NN handles
 					}
 				}
-			}
-			else {
-				// Stochastic mode or not in kickoff - always use NN
+
+				int seqLen = kickoff.GetSequenceLength(ks.position, ks.variant);
+				if (ks.frameIndex >= 0 && ks.frameIndex < seqLen) {
+					// Execute scripted frame
+					action = kickoff.GetAction(ks.position, ks.variant, ks.frameIndex, player.team);
+					ks.frameIndex++;
+				} else {
+					// Not taker, or sequence complete — hand back to NN
+					action = actionParsers[arenaIdx]->ParseAction(actionIndices[playerStartIdx + i], player, gs);
+					if (ks.frameIndex >= seqLen)
+						ks.frameIndex = -1;  // ready to reinitialise on next kickoff
+				}
+			} else {
+				// STOCHASTIC mode or ball not at centre — always NN; reset state
 				action = actionParsers[arenaIdx]->ParseAction(actionIndices[playerStartIdx + i], player, gs);
-				kickoff_idx[i] = -1;
+				ks = PlayerKickoffState{};
 			}
 			car->controls = (CarControls)action;
 			actions[i] = action;
@@ -343,6 +348,10 @@ void RLGC::EnvSet::ResetArena(int index) {
 	stateSetters[index]->ResetArena(arenas[index]);
 	GameState newState = GameState(arenas[index]);
 	state.gameStates[index] = newState;
+
+	// Reset kickoff state for every player so the new episode always
+	// starts at frameIndex == -1 (ready to reinitialise on first step).
+	KickoffController::ResetStates(kickoff_states[index]);
 
 	newState.userInfo = userInfos[index];
 

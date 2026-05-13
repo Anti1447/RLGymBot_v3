@@ -99,7 +99,8 @@
       "Bash(grep -l \"state\\\\.players\\\\.size\\(\\)\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
       "Bash(pwsh -Command ':*)",
       "Bash(grep -n \"#include.*RewardWrapper\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(del \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot\\\\CMakeCache.txt\")"
     ]
   }
 }

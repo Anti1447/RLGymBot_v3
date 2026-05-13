@@ -86,7 +86,7 @@ namespace RLGC {
 		std::vector<std::vector<TerminalCondition*>> terminalConditions;
 		std::vector<ObsBuilder*> obsBuilders;
 		std::vector<KickoffController> kickoff_controllers;
-		std::vector<std::vector<int>> kickoff_indices;
+		std::vector<std::vector<PlayerKickoffState>> kickoff_states;
 		std::vector<ActionParser*> actionParsers;
 		std::vector<StateSetter*> stateSetters;
 

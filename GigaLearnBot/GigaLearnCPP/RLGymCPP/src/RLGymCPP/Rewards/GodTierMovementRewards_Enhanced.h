@@ -82,8 +82,7 @@ public:
             auto& data = flipData[player.carId];
             
             // Check for air roll usage
-            if (abs(player.prevAction.roll) > 0.3f || 
-                abs(player.prevAction.yaw) > 0.3f) {
+            if (abs(player.prevAction.roll) > 0.3f){
                 data.airRollUsed = true;
             }
             

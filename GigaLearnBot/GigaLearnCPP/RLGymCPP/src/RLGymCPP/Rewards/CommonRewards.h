@@ -123,6 +123,21 @@ namespace RLGC {
 		return 0.1f + 0.9f * t;                      // 0.1 -> 1.0
 	}
 
+	// 2D (XY) proximity scale from ball to opponent goal center.
+	// 1.0 within 1000 UU, linear decay to 0.0 at 5120 UU, 0.0 beyond.
+	// Used by SpeedScaledShotReward, VelocityBallToGoalReward, EnhancedVelocityBallToGoalReward.
+	inline float GoalProximityScale2D(const Vec& ballPos, Team team) {
+		static constexpr float FULL_DIST = 1000.0f;
+		static constexpr float ZERO_DIST = 5120.0f;
+		float goalY = (team == Team::BLUE) ? 5120.0f : -5120.0f;
+		float dx = ballPos.x;          // opponent goal center X is always 0
+		float dy = ballPos.y - goalY;
+		float dist2D = std::sqrt(dx * dx + dy * dy);
+		if (dist2D <= FULL_DIST) return 1.0f;
+		if (dist2D >= ZERO_DIST) return 0.0f;
+		return (ZERO_DIST - dist2D) / (ZERO_DIST - FULL_DIST);
+	}
+
 	class SpeedScaledShotReward : public Reward {
 	private:
 		ShotReward inner;
@@ -130,7 +145,7 @@ namespace RLGC {
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			float r = inner.GetReward(player, state, isFinal);
 			if (r == 0.0f) return 0.0f;
-			return r * SpeedScale_PowerShot(state);
+			return r * SpeedScale_PowerShot(state) * GoalProximityScale2D(state.ball.pos, player.team);
 		}
 	};
 
@@ -187,9 +202,10 @@ namespace RLGC {
 				targetOrangeGoal = !targetOrangeGoal;
 
 			Vec targetPos = targetOrangeGoal ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-			
+
 			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
-			return ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
+			float base = ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
+			return base * GoalProximityScale2D(state.ball.pos, player.team);
 		}
 	};
 
@@ -308,7 +324,7 @@ namespace RLGC {
 				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.5f);
 			}
 
-			return reward;
+			return reward * GoalProximityScale2D(state.ball.pos, player.team);
 		}
 	};
 

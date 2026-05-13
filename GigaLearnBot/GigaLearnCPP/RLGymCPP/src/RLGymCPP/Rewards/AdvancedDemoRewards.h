@@ -28,6 +28,7 @@
 #pragma once
 
 #include "Reward.h"
+#include "BallPrediction.h"
 #include "../Math.h"
 #include "RewardMath.h"
 #include <map>
@@ -792,6 +793,87 @@ namespace RLGC {
             }
 
             return 0.0f;
+        }
+    };
+
+    // ============================================================================
+    // INTERCEPT CLEARING DEMO REWARD
+    // Rewards demoing an opponent who is positioned to intercept a ball that is
+    // predicted to reach the opponent's net. Uses BallPred::Cache to verify:
+    //   1. The ball will reach within GOAL_THREAT_DIST of the opponent's goal in
+    //      the next PREDICTION_WINDOW seconds.
+    //   2. The demoed opponent's projected position (pos + vel*t) is within
+    //      INTERCEPT_RADIUS of the ball's predicted position at some time t in
+    //      [0, PREDICTION_WINDOW].
+    //
+    // This fires only when a demo removes a genuine interception threat on a
+    // goal-bound ball — not on random demos, defensive demos, or stray contacts.
+    //
+    // Pairs with: DemoReward (base signal), SecondManOffensiveDemoReward (role approach),
+    //             PossessionSideDemoReward (possession context).
+    // Does NOT duplicate PredictiveDemoRewards — those target ball-chasing / aerial /
+    //   post-touch scenarios, not the ball-to-goal intercept trajectory specifically.
+    //
+    // Rev 1.0 (2026-05-12, NJH)
+    // ============================================================================
+    class InterceptClearingDemoReward : public Reward {
+    private:
+        // Ball predicted to reach within this of opponent goal → goal threat
+        static constexpr float GOAL_THREAT_DIST  = 2500.0f;
+        // Opponent projected pos within this of predicted ball pos → intercept threat
+        static constexpr float INTERCEPT_RADIUS  = 1500.0f;
+        // How far ahead to check (seconds)
+        static constexpr float PREDICTION_WINDOW = 3.0f;
+        // Base reward on successful intercept-clearing demo
+        static constexpr float BASE_REWARD       = 1.5f;
+
+        BallPred::Cache _ballCache;
+
+    public:
+        void PreStep(const GameState& state) override {
+            _ballCache.Update(state);
+        }
+
+        void Reset(const GameState& initialState) override {}
+
+        float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!player.eventState.demo || !_ballCache.valid) return 0.0f;
+
+            // Find the opponent who was demoed this frame
+            const Player* target = nullptr;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team) continue;
+                if (opp.eventState.demoed) { target = &opp; break; }
+            }
+            if (!target) return 0.0f;
+
+            Vec oppGoal = (player.team == Team::BLUE)
+                ? CommonValues::ORANGE_GOAL_BACK
+                : CommonValues::BLUE_GOAL_BACK;
+
+            int windowSlices = (int)(PREDICTION_WINDOW * BallPred::SAMPLE_HZ);
+            if (windowSlices > BallPred::NUM_SLICES) windowSlices = BallPred::NUM_SLICES;
+
+            // Gate 1: ball must be predicted to reach the opponent's goal region
+            bool ballGoalThreat = false;
+            for (int i = 0; i < windowSlices && !ballGoalThreat; i++) {
+                if ((_ballCache.slices[i].pos - oppGoal).Length() < GOAL_THREAT_DIST)
+                    ballGoalThreat = true;
+            }
+            if (!ballGoalThreat) return 0.0f;
+
+            // Gate 2: demoed opponent must have been on the ball's predicted path
+            // Linear extrapolation accounts for the opponent's current direction of travel
+            bool wasInterceptor = false;
+            for (int i = 0; i < windowSlices && !wasInterceptor; i++) {
+                float t = _ballCache.slices[i].t;
+                Vec projOpp = target->pos + target->vel * t;
+                if ((projOpp - _ballCache.slices[i].pos).Length() < INTERCEPT_RADIUS)
+                    wasInterceptor = true;
+            }
+            if (!wasInterceptor) return 0.0f;
+
+            return BASE_REWARD;
         }
     };
 

@@ -27,8 +27,8 @@ private:
         uint32_t closestOppCarId = UINT32_MAX;  // Closest opponent in air
     };
 
-    mutable std::map<uint32_t, AerialState> trackers;
-    mutable BallPred::Cache ballCache;
+    std::map<uint32_t, AerialState> trackers;
+    BallPred::Cache ballCache;
 
     // Constants
     static constexpr float AERIAL_MIN_AIRTIME = 0.15f;        // Must be in air for 150ms

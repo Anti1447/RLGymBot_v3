@@ -350,49 +350,49 @@ public:
 };
 
 // ============================================================================
-// ActiveSupportingPositionReward
-// Rewards active upfield positioning for the 2nd man (supporting role)
-// - Encourages positioning near opponent's net for passing opportunities
-// - Only rewards if team has possession (closest player is teammate moving toward ball)
-// - Context-aware: different rewards based on distance to ball
-// - Stateless per-frame evaluation
-// ============================================================================
-// ============================================================================
-// ActiveSupportingPositionReward (v2) - Cross-Field Coverage
-// 2026-04-18 | NJH
+// ActiveSupportingPositionReward (v3) - 3-Slot Pass-to-Score Positioning
+// 2026-05-01 | NJH
 //
-// Redesigned from v1 (distance-to-ball) to target-based positioning.
-// Rewards 2nd man for holding opposite x-side from ball-carrier, solving
-// the Euclidean distance trap where same-side stacking was more rewarded.
+// Redesigned from v2 (single cross-field target) to a 3-slot system that
+// models actual pass-to-score positions. The 2nd man is rewarded for holding
+// any of three optimal scoring positions given where the ball is:
 //
-// Key change: Instead of "distance to ball" (which favors same-side), use
-// distance to an ideal target that is mirrored to the opposite x-side and
-// slightly upfield. Same-side stacking becomes far from target → no reward.
+//   Slot 1 - Far Post:      near far goal post (~700 UU off-center, ~500 UU out)
+//   Slot 2 - Penalty Spot:  dead center, ~1000 UU in front of goal
+//   Slot 3 - Wide Diagonal: opposite side from ball, upfield ~600 UU from ball
+//
+// Reward = BASE_SCALE × max(proximity_1, proximity_2, proximity_3)
+// Gates: 2v2+, team possession, MIDDLE role, ball in opponent's half.
 // ============================================================================
 class ActiveSupportingPositionReward : public Reward {
 private:
-    // Target position offsets (UU)
-    static constexpr float LATERAL_TARGET      = 2500.0f;    // |x| of ideal supporter slot
-    static constexpr float UPFIELD_TARGET      = 1500.0f;    // y-offset past ball toward opp goal
-    static constexpr float TARGET_FALLOFF      = 3000.0f;    // dist at which reward -> 0
-    static constexpr float CENTER_BALL_EPS     = 500.0f;     // |ball.x| below = "centered"
+    // Slot geometry (UU)
+    static constexpr float SLOT1_X        = 700.0f;     // far post x offset from center
+    static constexpr float SLOT1_Y_BACK   = 500.0f;     // UU in front of opponent goal line
+    static constexpr float SLOT2_Y_BACK   = 1000.0f;    // central penalty spot UU from goal
+    static constexpr float SLOT3_X        = 2200.0f;    // wide far-side x offset
+    static constexpr float SLOT3_Y_UP     = 600.0f;     // UU upfield from ball
 
-    // Overlap penalty (same-side stacking)
-    static constexpr float OVERLAP_LATERAL_MAX = 1500.0f;    // lateral gap < this = overlap
-    static constexpr float OVERLAP_PENALTY     = 0.25f;      // max penalty magnitude
-    static constexpr float OVERLAP_Y_WINDOW    = 2000.0f;    // longitudinal window for overlap
+    static constexpr float TARGET_FALLOFF  = 3000.0f;
+    static constexpr float CENTER_BALL_EPS = 500.0f;
+
+    // Overlap penalty (same-side stacking near ball carrier)
+    static constexpr float OVERLAP_LATERAL_MAX = 1500.0f;
+    static constexpr float OVERLAP_PENALTY     = 0.25f;
+    static constexpr float OVERLAP_Y_WINDOW    = 2000.0f;
 
     // Gates
-    static constexpr float MIN_GAME_SIZE = 4;
+    static constexpr float MIN_GAME_SIZE     = 4;
     static constexpr float POSSESSION_RADIUS = 1500.0f;
 
-    // Max reward
     static constexpr float BASE_SCALE = 0.4f;
 
     inline static std::atomic<long long> s_rewardMilli{0};
     inline static std::atomic<long long> s_penaltyMilli{0};
     inline static std::atomic<int> s_supportFrames{0};
-    inline static std::atomic<int> s_oppositeSideFrames{0};
+    inline static std::atomic<int> s_slot1Frames{0};
+    inline static std::atomic<int> s_slot2Frames{0};
+    inline static std::atomic<int> s_slot3Frames{0};
     inline static std::atomic<int> s_overlapFrames{0};
 
     enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
@@ -424,20 +424,24 @@ private:
 
 public:
     struct Metrics {
-        double totalReward = 0.0;
+        double totalReward  = 0.0;
         double totalPenalty = 0.0;
-        int supportFrames = 0;
-        int oppositeSideFrames = 0;
-        int overlapFrames = 0;
+        int supportFrames   = 0;
+        int slot1Frames     = 0;
+        int slot2Frames     = 0;
+        int slot3Frames     = 0;
+        int overlapFrames   = 0;
     };
 
     static Metrics GetAndResetMetrics() {
         Metrics m;
-        m.totalReward      = double(s_rewardMilli.exchange(0))  / 1000.0;
-        m.totalPenalty     = double(s_penaltyMilli.exchange(0)) / 1000.0;
-        m.supportFrames      = s_supportFrames.exchange(0);
-        m.oppositeSideFrames = s_oppositeSideFrames.exchange(0);
-        m.overlapFrames      = s_overlapFrames.exchange(0);
+        m.totalReward   = double(s_rewardMilli.exchange(0))  / 1000.0;
+        m.totalPenalty  = double(s_penaltyMilli.exchange(0)) / 1000.0;
+        m.supportFrames = s_supportFrames.exchange(0);
+        m.slot1Frames   = s_slot1Frames.exchange(0);
+        m.slot2Frames   = s_slot2Frames.exchange(0);
+        m.slot3Frames   = s_slot3Frames.exchange(0);
+        m.overlapFrames = s_overlapFrames.exchange(0);
         return m;
     }
 
@@ -447,37 +451,56 @@ public:
         if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) return 0.0f;
         if (!DoesTeamHavePossession(player, state)) return 0.0f;
         if (DetermineRole(player, state) != SimpleRole::MIDDLE) return 0.0f;
+        if (!RewardMath::IsInOpponentHalf(state.ball.pos, player.team)) return 0.0f;
 
+        const float oppGoalY   = (player.team == Team::BLUE) ? 5120.0f : -5120.0f;
         const float attackSign = (player.team == Team::BLUE) ? 1.0f : -1.0f;
-        const float ballX = state.ball.pos.x;
-        const float ballY = state.ball.pos.y;
+        const float ballX      = state.ball.pos.x;
+        const float ballY      = state.ball.pos.y;
 
-        // Build ideal supporter target
-        float targetX;
+        // Far-side sign: opposite from ball; ties broken by player's current x side
+        float farSign;
         if (std::fabs(ballX) < CENTER_BALL_EPS) {
-            // Ball near center — stay on player's current side to avoid oscillation
-            targetX = (player.pos.x >= 0.0f) ? +LATERAL_TARGET : -LATERAL_TARGET;
+            farSign = (player.pos.x >= 0.0f) ? -1.0f : 1.0f;
         } else {
-            // Mirror to opposite x-side from ball
-            targetX = (ballX > 0.0f) ? -LATERAL_TARGET : +LATERAL_TARGET;
+            farSign = (ballX > 0.0f) ? -1.0f : 1.0f;
         }
-        float targetY = ballY + UPFIELD_TARGET * attackSign;
-        // Clamp to field bounds
-        targetX = RS_CLAMP(targetX, -3500.0f, +3500.0f);
-        targetY = RS_CLAMP(targetY, -4500.0f, +4500.0f);
 
-        // 2D distance to target (ignore Z for aerial resilience)
-        float dx = player.pos.x - targetX;
-        float dy = player.pos.y - targetY;
-        float distToTarget = std::sqrt(dx * dx + dy * dy);
+        // Slot 1: Far Post — near far goal post, just in front of goal line
+        float s1x = RS_CLAMP(farSign * SLOT1_X, -3800.0f, 3800.0f);
+        float s1y = RS_CLAMP(oppGoalY - attackSign * SLOT1_Y_BACK, -4900.0f, 4900.0f);
 
-        float proximityScore = RS_CLAMP(1.0f - distToTarget / TARGET_FALLOFF, 0.0f, 1.0f);
-        float reward = BASE_SCALE * proximityScore;
+        // Slot 2: Central Penalty Spot — dead center, ~1000 UU from goal
+        float s2x = 0.0f;
+        float s2y = RS_CLAMP(oppGoalY - attackSign * SLOT2_Y_BACK, -4900.0f, 4900.0f);
 
-        // Overlap penalty: same-side AND laterally close AND longitudinally close
+        // Slot 3: Wide Far-Side Diagonal — opposite side, upfield from ball
+        float s3x = RS_CLAMP(farSign * SLOT3_X, -3800.0f, 3800.0f);
+        float s3y = RS_CLAMP(ballY + attackSign * SLOT3_Y_UP, -4900.0f, 4900.0f);
+
+        // 2D proximity to each slot (ignore Z)
+        auto prox = [&](float tx, float ty) {
+            float dx = player.pos.x - tx;
+            float dy = player.pos.y - ty;
+            return RS_CLAMP(1.0f - std::sqrt(dx * dx + dy * dy) / TARGET_FALLOFF, 0.0f, 1.0f);
+        };
+
+        float p1 = prox(s1x, s1y);
+        float p2 = prox(s2x, s2y);
+        float p3 = prox(s3x, s3y);
+
+        float bestScore;
+        int bestSlot;
+        if (p1 >= p2 && p1 >= p3) { bestScore = p1; bestSlot = 1; }
+        else if (p2 >= p3)         { bestScore = p2; bestSlot = 2; }
+        else                        { bestScore = p3; bestSlot = 3; }
+
+        float reward = BASE_SCALE * bestScore;
+
+        // Overlap penalty: same-side AND close to ball carrier (stacking is still bad)
         float overlap = 0.0f;
-        const bool sameSide = (ballX * player.pos.x > 0.0f) && std::fabs(ballX) > CENTER_BALL_EPS;
-        const float lateralGap = std::fabs(player.pos.x - ballX);
+        const bool sameSide         = (ballX * player.pos.x > 0.0f) && std::fabs(ballX) > CENTER_BALL_EPS;
+        const float lateralGap      = std::fabs(player.pos.x - ballX);
         const float longitudinalGap = std::fabs(player.pos.y - ballY);
 
         if (sameSide && lateralGap < OVERLAP_LATERAL_MAX && longitudinalGap < OVERLAP_Y_WINDOW) {
@@ -489,7 +512,9 @@ public:
 
         // Metrics
         s_supportFrames.fetch_add(1);
-        if (!sameSide) s_oppositeSideFrames.fetch_add(1);
+        if (bestSlot == 1)      s_slot1Frames.fetch_add(1);
+        else if (bestSlot == 2) s_slot2Frames.fetch_add(1);
+        else                    s_slot3Frames.fetch_add(1);
         if (reward > 0.0f) s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
 
         return reward + overlap;

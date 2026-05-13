@@ -550,3 +550,141 @@ public:
         return MAX_REWARD * bestScore;
     }
 };
+
+// ============================================================================
+// PressureEscapeBackPassReward — Phase 6 possession reset under pressure
+// 2026-05-01 | NJH
+//
+// Rewards a deliberate back pass from the opponent's half to an open teammate
+// (no opponent within OPEN_MAN_RADIUS of receiver) who is behind the passer
+// toward their own goal. Scales up when the passer is under pressure (opponent
+// nearby) and/or low on boost.
+//
+// Teaches: when cornered in the attacking half, find the open man and reset
+// possession rather than forcing a bad play or surrendering the ball.
+//
+// Gates: ballTouchedStep, 2v2+, passer in opponent's half,
+//        ball velocity toward own goal (dot > 0.35), ball speed > 300 UU/s,
+//        best receiver is behind passer + uncontested + within 600–5000 UU.
+//
+// Multipliers (stackable):
+//   PRESSURE_MULT (×1.5) — opponent within 1800 UU of passer
+//   LOW_BOOST_MULT (×1.4) — passer boost < 33
+//
+// Max reward: 5.0 × 1.5 × 1.4 = 10.5 (rare full-stack case)
+// ZeroSum wrapped in RewardConfig at Phase 6.
+// ============================================================================
+class PressureEscapeBackPassReward : public Reward {
+private:
+    static constexpr float BACK_PASS_DOT_MIN   = 0.35f;   // ball vel component toward own goal
+    static constexpr float MIN_BALL_SPEED      = 300.0f;  // UU/s — filters dribble nudges
+    static constexpr float BEHIND_DOT_MIN      = 0.25f;   // receiver must be this "behind" passer
+    static constexpr float MIN_RECEIVER_DIST   = 600.0f;
+    static constexpr float MAX_RECEIVER_DIST   = 5000.0f;
+    static constexpr float OPEN_MAN_RADIUS     = 2000.0f; // no opp within this of receiver = open
+    static constexpr float PRESSURE_RADIUS     = 1800.0f; // opp within this of passer = under pressure
+    static constexpr float LOW_BOOST_THRESHOLD = 33.0f;
+    static constexpr float PRESSURE_MULT       = 1.5f;
+    static constexpr float LOW_BOOST_MULT      = 1.4f;
+    static constexpr float BASE_REWARD         = 5.0f;
+
+    inline static std::atomic<int>       s_fireCount{0};
+    inline static std::atomic<int>       s_pressureFires{0};
+    inline static std::atomic<int>       s_lowBoostFires{0};
+    inline static std::atomic<long long> s_rewardMilli{0};
+
+public:
+    struct Metrics {
+        int    fireCount     = 0;
+        int    pressureFires = 0;
+        int    lowBoostFires = 0;
+        double totalReward   = 0.0;
+    };
+    static Metrics GetAndResetMetrics() {
+        return {
+            s_fireCount.exchange(0),
+            s_pressureFires.exchange(0),
+            s_lowBoostFires.exchange(0),
+            double(s_rewardMilli.exchange(0)) / 1000.0
+        };
+    }
+
+    virtual void Reset(const GameState& initialState) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        if (!player.ballTouchedStep) return 0.0f;
+        if ((int)state.players.size() < 4) return 0.0f;
+
+        if (!RewardMath::IsInOpponentHalf(player)) return 0.0f;
+
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < MIN_BALL_SPEED) return 0.0f;
+
+        // Ball must be moving toward own goal (back pass)
+        Vec ownGoalBack = (player.team == Team::BLUE)
+            ? CommonValues::BLUE_GOAL_BACK
+            : CommonValues::ORANGE_GOAL_BACK;
+        Vec toOwnGoal = (ownGoalBack - player.pos).Normalized();
+        if (state.ball.vel.Normalized().Dot(toOwnGoal) < BACK_PASS_DOT_MIN) return 0.0f;
+
+        // Find best open teammate who is behind the passer
+        float bestOpenScore = 0.0f;
+
+        for (const auto& other : state.players) {
+            if (other.carId == player.carId) continue;
+            if (other.team != player.team)   continue;
+            if (other.isDemoed)              continue;
+
+            Vec toReceiver = other.pos - player.pos;
+            float dist = toReceiver.Length();
+            if (dist < MIN_RECEIVER_DIST || dist > MAX_RECEIVER_DIST) continue;
+
+            // Receiver must be behind the passer (toward own goal)
+            if (toReceiver.Normalized().Dot(toOwnGoal) < BEHIND_DOT_MIN) continue;
+
+            // Receiver must be uncontested
+            float nearestOppToReceiver = FLT_MAX;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team || opp.isDemoed) continue;
+                float d = (opp.pos - other.pos).Length();
+                if (d < nearestOppToReceiver) nearestOppToReceiver = d;
+            }
+            if (nearestOppToReceiver < OPEN_MAN_RADIUS) continue;
+
+            // Openness score: how far the nearest opponent is beyond the open radius
+            float openScore = RS_CLAMP(
+                (nearestOppToReceiver - OPEN_MAN_RADIUS) / OPEN_MAN_RADIUS, 0.0f, 1.0f
+            );
+            if (openScore > bestOpenScore) bestOpenScore = openScore;
+        }
+
+        if (bestOpenScore <= 0.0f) return 0.0f;
+
+        // Base: 2.5 at minimum openness, 5.0 at fully open
+        float reward = BASE_REWARD * (0.5f + 0.5f * bestOpenScore);
+
+        // Pressure bonus: opponent is close to the passer
+        bool underPressure = false;
+        for (const auto& opp : state.players) {
+            if (opp.team == player.team || opp.isDemoed) continue;
+            if ((opp.pos - player.pos).Length() < PRESSURE_RADIUS) {
+                underPressure = true;
+                break;
+            }
+        }
+        if (underPressure) {
+            reward *= PRESSURE_MULT;
+            s_pressureFires.fetch_add(1);
+        }
+
+        // Low boost bonus
+        if (player.boost < LOW_BOOST_THRESHOLD) {
+            reward *= LOW_BOOST_MULT;
+            s_lowBoostFires.fetch_add(1);
+        }
+
+        s_fireCount.fetch_add(1);
+        s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
+        return reward;
+    }
+};

@@ -42,8 +42,6 @@ namespace RLGC {
         static constexpr float BASE_REWARD = 0.1f;
         static constexpr float CRITICAL_MULTIPLIER = 3.0f;
 
-        BallPred::Cache _ballCache;
-
         // Check if ball is heading toward goal
         bool IsBallHeadingTowardGoal(const Player& player, const GameState& state, const Vec& goalPos) const {
             Vec ballToGoal = goalPos - state.ball.pos;
@@ -59,10 +57,6 @@ namespace RLGC {
         }
 
     public:
-        virtual void PreStep(const GameState& state) override {
-            _ballCache.Update(state);
-        }
-
         virtual void Reset(const GameState& initialState) override {
             // No state needed
         }
