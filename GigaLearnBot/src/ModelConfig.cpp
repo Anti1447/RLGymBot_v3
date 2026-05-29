@@ -8,7 +8,7 @@ PhaseConfig GetPhaseConfig() {
 
     switch (CURRENT_PHASE) {
     case TrainingPhase::PHASE_1_BRONZE: // OVERFITS AFTER 200M STEPS!!!
-        cfg.entropyScale = 0.045f;          // Highest exploration
+        cfg.entropyScale = 0.035f;          // Highest exploration
         cfg.policyLR = 2.5e-4f;
         cfg.criticLR = 2.5e-4f;
         cfg.noTouchTimeout = 15.0f;         // Very lenient
@@ -19,7 +19,7 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_2_SILVER:
-        cfg.entropyScale = 0.04f;
+        cfg.entropyScale = 0.03f;
         cfg.policyLR = 2e-4f;
         cfg.criticLR = 2e-4f;
         cfg.noTouchTimeout = 12.0f;
@@ -30,7 +30,7 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.035f;
+        cfg.entropyScale = 0.028f;
         cfg.policyLR = 1.8e-4f;
         cfg.criticLR = 1.8e-4f;
         cfg.noTouchTimeout = 12.0f;
@@ -65,11 +65,11 @@ PhaseConfig GetPhaseConfig() {
 
     case TrainingPhase::PHASE_6_CHAMPION:
         cfg.entropyScale = 0.015f;
-        cfg.policyLR = 9e-5f;
-        cfg.criticLR = 9e-5f;
+        cfg.policyLR = 8.7e-5f;
+        cfg.criticLR = 8.7e-5f;
         cfg.noTouchTimeout = 15.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.75f;
+        cfg.randomStateChance = 0.7f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 15% aerial training
         break;
@@ -127,15 +127,15 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // === CHECKPOINTS ===
     // Use absolute path to ensure it works regardless of working directory
     cfg.checkpointFolder = "C:\\Projects\\RLGymBot_v3\\GigaLearnBot\\build\\checkpoints";
-    cfg.tsPerSave = 200'000'000ULL;      // Save every 100M steps
-    cfg.checkpointsToKeep = 256;
+    cfg.tsPerSave = 50'000'000ULL;      // Save every 50M steps
+    cfg.checkpointsToKeep = 128;
 
     // === POLICY VERSIONS ===
-    cfg.tsPerVersion = 400'000'000ULL;   // New version every 200M steps
-    cfg.maxOldVersions = 128;
+    cfg.tsPerVersion = 100'000'000ULL;   // New version every 100M steps
+    cfg.maxOldVersions = 64;
 
     cfg.trainAgainstOldVersions = true;
-    cfg.trainAgainstOldChance = 0.5f;
+    cfg.trainAgainstOldChance = 0.2f;
 
     // === SKILL TRACKER ===
     // Skill tracker evaluates the agent across mixed game modes (1v1, 2v2, 3v3)
@@ -146,7 +146,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.skillTracker.numArenas = 32;       // Sufficient for mixed-mode evaluation
     cfg.skillTracker.simTime = 90.f;       // Per-arena sim time
     cfg.skillTracker.maxSimTime = 240.f;
-    cfg.skillTracker.updateInterval = 8;
+    cfg.skillTracker.updateInterval = 32;
     cfg.skillTracker.ratingInc = 5.f;
     cfg.skillTracker.initialRating = 0.f;
     cfg.skillTracker.deterministic = false;
@@ -165,15 +165,15 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.deviceType = LearnerDeviceType::GPU_CUDA;
 
     // === TIMING ===
-    cfg.tickSkip = 8;
+    cfg.tickSkip = 4;
     cfg.actionDelay = cfg.tickSkip - 1;
-    //cfg.numGames = 310; // best for Intel Ultra Core 5 225F. Gets 183 m steps/sec with new CPU
+    cfg.numGames = 310; // best for Intel Ultra Core 5 225F. Gets 183 m steps/sec with new CPU
     //cfg.numGames = 400; // best it can do is 190 m steps/sec, but not consistent
-	cfg.numGames = 360; // good balance for consistent 185-190 m steps/sec on Intel Ultra Core 5 225F
-    cfg.randomSeed = 456;
+	//cfg.numGames = 256; // good balance for consistent 185-190 m steps/sec on Intel Ultra Core 5 225F
+    cfg.randomSeed = 123;
 
     // === PPO CONFIG ===
-    int tsPerItr = 500'000;
+    int tsPerItr = 200'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -182,14 +182,14 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9959;
+    cfg.ppo.gaeGamma = 0.9951;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 
     // === NETWORK SIZE (CONSTANT FOR ALL PHASES) ===
-    cfg.ppo.sharedHead.layerSizes = { 1024, 512, 512 };
-    cfg.ppo.policy.layerSizes = { 512, 512 };
-    cfg.ppo.critic.layerSizes = { 512, 512 };
+    cfg.ppo.sharedHead.layerSizes = { 1024, 1024 };
+    cfg.ppo.policy.layerSizes = { 1024, 1024 };
+    cfg.ppo.critic.layerSizes = { 1024, 1024 };
 
     auto optim = ModelOptimType::ADAMW;
     cfg.ppo.policy.optimType = optim;

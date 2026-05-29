@@ -125,7 +125,6 @@ std::vector<RLGC::Action> GGL::InferUnit::BatchInferActions(const std::vector<RL
 							"Also, make sure there aren't an incorrect number of players (there are " << states[i].players.size() << " in this state)"
 						);
 					}
-
 					std::memcpy(cpuObsBatch[i].data_ptr<float>(), curObs.data(), obsSize * sizeof(float));
 
 					auto masks = actionParser->GetActionMask(players[i], states[i]);
@@ -156,7 +155,6 @@ std::vector<RLGC::Action> GGL::InferUnit::BatchInferActions(const std::vector<RL
 							"Also, make sure there aren't an incorrect number of players (there are " << states[i].players.size() << " in this state)"
 						);
 					}
-
 					std::memcpy(obsBatch[i].data_ptr<float>(), curObs.data(), obsSize * sizeof(float));
 
 					auto masks = actionParser->GetActionMask(players[i], states[i]);

@@ -880,93 +880,92 @@ namespace RLGC {
 		}
 	};
 
-	// Rev 3 (2025-01-10): Direction-aware touch acceleration
-	// - Rewards touches that increase ball speed toward opponent goal
-	// - Distinguishes offensive vs neutral vs defensive touches
-	// - Better reward scaling for training signal strength
+	// Classic Touch accel reward from Gigalearn repo
+	// Mostly based on the classic Necto rewards
+	// Total reward output for speeding the ball up to MAX_REWARDED_BALL_SPEED is 1.0
+	// The bot can do this slowly (putting) or quickly (shooting)
 	class TouchAccelReward : public Reward {
 	public:
-		// Tuning parameters
+		constexpr static float MAX_REWARDED_BALL_SPEED = RLGC::Math::KPHToVel(110);
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev)
+				return 0;
+
+			if (player.ballTouchedStep) {
+				float prevSpeedFrac = RS_MIN(1, state.prev->ball.vel.Length() / MAX_REWARDED_BALL_SPEED);
+				float curSpeedFrac = RS_MIN(1, state.ball.vel.Length() / MAX_REWARDED_BALL_SPEED);
+
+				if (curSpeedFrac > prevSpeedFrac) {
+					return (curSpeedFrac - prevSpeedFrac);
+				}
+				else {
+					// Not speeding up the ball so we don't care
+					return 0;
+				}
+			}
+			else {
+				return 0;
+			}
+		}
+	};
+
+	// Rev 4 (2026-05-12): Discrete-touch-only, cooldown-gated, direction-agnostic
+	// - Rewards touches that increase raw ball speed (no goal-direction bonus)
+	// - Per-player cooldown prevents farming during air/ground dribbles
+	// - Cooldown counts down every step (not just when touching), so it expires correctly
+	class NEWTouchAccelReward : public Reward {
+	public:
 		float maxRewardedBallSpeed;
 		float maxRewardedImpulse;
-		float directionWeight;      // How much to weight goal-direction vs raw speed
-		bool rewardRedirects;       // Whether to reward speed-maintaining redirects toward goal
+		float cooldownSeconds;
 
-		TouchAccelReward(
+		NEWTouchAccelReward(
 			float maxBallSpeed = RLGC::Math::KPHToVel(110),
-			float maxImpulse = RLGC::Math::KPHToVel(80),
-			float dirWeight = 0.3f,
-			bool allowRedirects = true
+			float maxImpulse   = RLGC::Math::KPHToVel(80),
+			float cooldownMs   = 500.0f
 		) : maxRewardedBallSpeed(maxBallSpeed),
 			maxRewardedImpulse(maxImpulse),
-			directionWeight(dirWeight),
-			rewardRedirects(allowRedirects) {
+			cooldownSeconds(cooldownMs / 1000.0f)
+		{}
+
+		virtual void Reset(const GameState& initialState) override {
+			_cooldownRemaining.clear();
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.prev) return 0.0f;
+
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			float& cd = _cooldownRemaining[player.carId];
+			if (cd > 0.0f) {
+				cd = RS_MAX(0.0f, cd - dt);
+				return 0.0f;
+			}
+
 			if (!player.ballTouchedStep) return 0.0f;
 
-			const Vec& ballPos = state.ball.pos;
-			const Vec& ballVel = state.ball.vel;
-			const Vec& prevBallVel = state.prev->ball.vel;
-
-			const float prevSpeed = prevBallVel.Length();
-			const float curSpeed = ballVel.Length();
-
-			// Get goal positions based on player team
-			const Vec& oppGoal = (player.team == Team::BLUE)
-				? RLGC::CommonValues::ORANGE_GOAL_CENTER
-				: RLGC::CommonValues::BLUE_GOAL_CENTER;
-
-			// Direction to opponent goal (normalized)
-			Vec toGoal = (oppGoal - ballPos).Normalized();
-
-			// Speed toward goal (before and after)
-			float prevGoalSpeed = prevBallVel.Dot(toGoal);
-			float curGoalSpeed = ballVel.Dot(toGoal);
-			float goalSpeedDelta = curGoalSpeed - prevGoalSpeed;
-
-			// Raw speed delta
+			const float prevSpeed = state.prev->ball.vel.Length();
+			const float curSpeed  = state.ball.vel.Length();
 			float speedDelta = curSpeed - prevSpeed;
+			if (speedDelta <= 0.0f) return 0.0f;
 
-			// Impulse magnitude
-			float impulse = (ballVel - prevBallVel).Length();
+			float impulse     = (state.ball.vel - state.prev->ball.vel).Length();
 			float impulseFrac = RS_CLAMP(impulse / maxRewardedImpulse, 0.0f, 1.0f);
 
-			// Base reward: speed increase
-			float baseReward = 0.0f;
+			float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+			float curSpeedFrac  = RS_CLAMP(curSpeed  / maxRewardedBallSpeed, 0.0f, 1.0f);
+			float baseReward    = curSpeedFrac - prevSpeedFrac;
 
-			if (speedDelta > 0) {
-				// Ball sped up - original behavior
-				float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
-				float curSpeedFrac = RS_CLAMP(curSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
-				baseReward = (curSpeedFrac - prevSpeedFrac);
-			}
-			else if (rewardRedirects && goalSpeedDelta > 0) {
-				// Ball didn't speed up overall, but IS going more toward goal
-				// Give partial credit for good redirects
-				float redirectBonus = RS_CLAMP(goalSpeedDelta / maxRewardedBallSpeed, 0.0f, 0.5f);
-				baseReward = redirectBonus * 0.5f;  // Half credit for redirects
-			}
-			else {
-				return 0.0f;  // Neither sped up nor redirected toward goal
-			}
+			float reward = (baseReward * impulseFrac) * 2.0f;
+			if (reward <= 0.0f) return 0.0f;
 
-			// Direction bonus: extra reward if ball is now heading toward goal
-			float directionBonus = 0.0f;
-			if (curGoalSpeed > 0) {
-				// Ball heading toward opponent goal
-				float goalSpeedFrac = RS_CLAMP(curGoalSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
-				directionBonus = goalSpeedFrac * directionWeight;
-			}
-
-			// Combine: base reward scaled by impulse quality, plus direction bonus
-			float reward = (baseReward * impulseFrac) + (directionBonus * impulseFrac);
-
-			// Scale up for better training signal (optional)
-			return reward * 2.0f;  // Doubles effective magnitude
+			cd = cooldownSeconds;
+			return reward;
 		}
+
+	private:
+		mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
 	};
 
 
@@ -982,24 +981,123 @@ namespace RLGC {
 			if (!state.prev)
 				return 0;
 
-			if (!player.ballTouchedStep)
+			if (player.ballTouchedStep) {
+				float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
+				if (hitForce < minRewardedVel)
+					return 0;
+
+				return RS_MIN(1, hitForce / maxRewardedVel);
+			}
+			else {
 				return 0;
+			}
+		}
+	};
+
+
+	// Rewards airborne flip touches directed toward the opponent goal.
+	// Provides gradient signal for moderate-power flip contacts that fall below
+	// StrongTouchReward's threshold (≥5 kph vs ≥100 kph in Phase 6).
+	// Gate: player.isFlipping && !player.isOnGround && ball touched → impulse × dirMult.
+	class FlipIntoContactReward : public Reward {
+	public:
+		float minRewardedVel, maxRewardedVel, cooldownSeconds;
+
+		FlipIntoContactReward(float minKPH = 5.0f, float maxKPH = 100.0f, float cooldownMs = 500.0f) {
+			minRewardedVel  = RLGC::Math::KPHToVel(minKPH);
+			maxRewardedVel  = RLGC::Math::KPHToVel(maxKPH);
+			cooldownSeconds = cooldownMs / 1000.0f;
+		}
+
+		virtual void Reset(const GameState&) override { _cooldown.clear(); }
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev) return 0.0f;
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			float& cd = _cooldown[player.carId];
+			if (cd > 0.0f) { cd = RS_MAX(0.0f, cd - dt); return 0.0f; }
+
+			if (!player.ballTouchedStep || !player.isFlipping || player.isOnGround) return 0.0f;
 
 			float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
-			if (hitForce < minRewardedVel)
-				return 0;
+			if (hitForce < minRewardedVel) return 0.0f;
 
-			// Direction multiplier: dot of post-touch ball velocity with to-opponent-goal direction.
-			// Clamp to [0,1] so own-goal touches yield 0, on-target touches yield full reward.
 			const Vec& oppGoal = (player.team == Team::BLUE)
 				? RLGC::CommonValues::ORANGE_GOAL_CENTER
 				: RLGC::CommonValues::BLUE_GOAL_CENTER;
-			Vec toGoal = (oppGoal - state.ball.pos).Normalized();
-			float dirMult = RS_CLAMP(state.ball.vel.Normalized().Dot(toGoal), 0.0f, 1.0f);
+			float dirMult = RS_CLAMP(state.ball.vel.Normalized().Dot(
+				(oppGoal - state.ball.pos).Normalized()), 0.0f, 1.0f);
 
-			return RS_MIN(1.0f, hitForce / maxRewardedVel) * dirMult;
+			float result = RS_MIN(1.0f, hitForce / maxRewardedVel) * dirMult;
+			if (result > 0.0f) cd = cooldownSeconds;
+			return result;
 		}
+
+	private:
+		mutable std::unordered_map<uint32_t, float> _cooldown;
 	};
+
+
+	// Rewards a flip contact that occurs within halfVolleyWindowSec of the ball
+	// bouncing off the ground. Bounce detection runs in PreStep (once per step).
+	// A half-volley combines the ball's rising momentum with the flip's linear
+	// velocity for maximum power.
+	class HalfVolleyReward : public Reward {
+	public:
+		float minRewardedVel, maxRewardedVel, cooldownSeconds, halfVolleyWindowSec;
+
+		HalfVolleyReward(float windowSec = 0.4f, float minKPH = 5.0f,
+			float maxKPH = 130.0f, float cooldownMs = 500.0f) {
+			halfVolleyWindowSec = windowSec;
+			minRewardedVel      = RLGC::Math::KPHToVel(minKPH);
+			maxRewardedVel      = RLGC::Math::KPHToVel(maxKPH);
+			cooldownSeconds     = cooldownMs / 1000.0f;
+		}
+
+		virtual void Reset(const GameState&) override {
+			_cooldown.clear();
+			_timeSinceBounce = 99.0f;
+		}
+
+		virtual void PreStep(const GameState& state) override {
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			_timeSinceBounce += dt;
+			// Ground bounce: ball was meaningfully falling, now rising, near floor
+			if (state.prev &&
+				state.prev->ball.vel.z < -100.0f &&
+				state.ball.vel.z > 0.0f &&
+				state.ball.pos.z < 250.0f) {
+				_timeSinceBounce = 0.0f;
+			}
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev || _timeSinceBounce > halfVolleyWindowSec) return 0.0f;
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			float& cd = _cooldown[player.carId];
+			if (cd > 0.0f) { cd = RS_MAX(0.0f, cd - dt); return 0.0f; }
+
+			if (!player.ballTouchedStep || !player.isFlipping || player.isOnGround) return 0.0f;
+
+			float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
+			if (hitForce < minRewardedVel) return 0.0f;
+
+			const Vec& oppGoal = (player.team == Team::BLUE)
+				? RLGC::CommonValues::ORANGE_GOAL_CENTER
+				: RLGC::CommonValues::BLUE_GOAL_CENTER;
+			float dirMult = RS_CLAMP(state.ball.vel.Normalized().Dot(
+				(oppGoal - state.ball.pos).Normalized()), 0.0f, 1.0f);
+
+			float result = RS_MIN(1.0f, hitForce / maxRewardedVel) * dirMult;
+			if (result > 0.0f) cd = cooldownSeconds;
+			return result;
+		}
+
+	private:
+		float _timeSinceBounce = 99.0f;
+		mutable std::unordered_map<uint32_t, float> _cooldown;
+	};
+
 
 	// https://github.com/AechPro/rocket-league-gym-sim/blob/main/rlgym_sim/utils/reward_functions/common_rewards/player_ball_rewards.py
 	// Rewards movement toward closest opponent (light demo/bump shaping)

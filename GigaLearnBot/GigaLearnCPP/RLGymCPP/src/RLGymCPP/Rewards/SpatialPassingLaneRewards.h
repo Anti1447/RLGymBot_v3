@@ -3,7 +3,7 @@
 #include "../Math.h"
 #include "RewardMath.h"
 #include "../CommonValues.h"
-#include <map>
+#include <unordered_map>
 #include <cmath>
 #include <algorithm>
 
@@ -153,8 +153,20 @@ public:
         // 1v1 has no teammates → no passing lanes to model
         if ((int)state.players.size() < 4) return 0.0f;
 
-        float offScore = PLN::TotalTeamLaneScore(player, state, cfg.k);
-        float defScore = PLN::TotalOppLaneScore(player, state, cfg.k);
+        // Count living teammates and opponents for normalization.
+        // Without this, the reward sums N-1 lanes in 3v3 vs 1 in 2v2, making the
+        // effective weight 2× larger in 3v3 and causing inconsistent gradients across modes.
+        int numTeammates = 0, numOpponents = 0;
+        for (const auto& p : state.players) {
+            if (p.isDemoed) continue;
+            if (p.team == player.team && p.carId != player.carId) numTeammates++;
+            else if (p.team != player.team) numOpponents++;
+        }
+
+        float offScore = (numTeammates > 0)
+            ? PLN::TotalTeamLaneScore(player, state, cfg.k) / (float)numTeammates : 0.0f;
+        float defScore = (numOpponents > 0)
+            ? PLN::TotalOppLaneScore(player, state, cfg.k)  / (float)numOpponents : 0.0f;
         return cfg.wOffensive * offScore - cfg.wDefensive * defScore;
     }
 };
@@ -194,13 +206,11 @@ private:
         float laneScoreAtArm = 0.0f;
         float emaLaneScore   = 0.0f;
         bool  initialized    = false;
+        float rearmCooldown  = 0.0f;
     };
 
     Config cfg;
-    mutable std::map<uint32_t, FakeState> states;
-
-    // 8-tick skip at 120 Hz physics → ~0.0667s per training step
-    static constexpr float DT = 8.0f / 120.0f;
+    mutable std::unordered_map<uint32_t, FakeState> states;
 
 public:
     explicit SpatialFakeReward(Config c = Config()) : cfg(c) {}
@@ -211,6 +221,10 @@ public:
         if ((int)state.players.size() < 4) return 0.0f;
 
         auto& fs = states[player.carId];
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
+        // Tick down re-arm cooldown every step
+        fs.rearmCooldown = RS_MAX(0.0f, fs.rearmCooldown - dt);
 
         // Update EMA of current team lane score
         float currentLane = PLN::TotalTeamLaneScore(player, state, cfg.k);
@@ -227,7 +241,7 @@ public:
 
         switch (fs.phase) {
             case FakeState::IDLE:
-                if (myAlpha >= cfg.armThreshold) {
+                if (fs.rearmCooldown <= 0.0f && myAlpha >= cfg.armThreshold) {
                     fs.phase          = FakeState::THREATENING;
                     fs.timeLeft       = cfg.windowSec;
                     fs.laneScoreAtArm = fs.emaLaneScore;
@@ -235,7 +249,7 @@ public:
                 break;
 
             case FakeState::THREATENING:
-                fs.timeLeft -= DT;
+                fs.timeLeft -= dt;
                 if (myAlpha < cfg.disengageThresh) {
                     // Fake triggered — player disengaged; open evaluation window
                     fs.phase    = FakeState::PENDING_EVAL;
@@ -247,11 +261,12 @@ public:
                 break;
 
             case FakeState::PENDING_EVAL:
-                fs.timeLeft -= DT;
+                fs.timeLeft -= dt;
                 {
                     float laneGain = fs.emaLaneScore - fs.laneScoreAtArm;
                     if (laneGain >= cfg.laneGainThreshold) {
                         // Lane opened up as a result of the fake — award reward
+                        fs.rearmCooldown = 2.0f;
                         fs.phase = FakeState::IDLE;
                         return cfg.wFake * laneGain;
                     }

@@ -316,7 +316,6 @@ private:
 	};
 
 	std::unordered_map<uint32_t, AdvantageMemory> memory;
-	int currentStep = 0;
 
 	// Constants
 	static constexpr float DEMO_RANGE = 1500.0f;
@@ -360,10 +359,10 @@ private:
 			}
 		}
 
-		// Count opponent players defending
+		// Count opponent players defending (not in our attacking zone = defending their own goal)
 		for (const auto& p : state.players) {
 			if (p.team != player.team) {
-				if (!RewardMath::IsInOpponentHalf(p) || (p.pos - opponentGoal).Length() < ATTACKING_ZONE_DIST) {
+				if (!IsInAttackingZone(p)) {
 					defendingCount++;
 				}
 			}
@@ -466,7 +465,6 @@ private:
 public:
 	void Reset(const GameState& state) override {
 		memory.clear();
-		currentStep = 0;
 	}
 
 	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -502,10 +500,6 @@ public:
 			// Event reward if demo just happened
 			if (mem.framesSinceDemoBump == 0) {
 				reward += 0.4f;  // Successful demo/bump
-			}
-
-			if (mem.framesSinceDemoBump < POST_ACTION_WINDOW) {
-				mem.framesSinceDemoBump++;
 			}
 		}
 
@@ -582,9 +576,7 @@ public:
 		return reward;
 	}
 
-	void PreStep(const GameState& state) override {
-		currentStep++;
-	}
+	void PreStep(const GameState& state) override {}
 };
 
 // ============================================================================

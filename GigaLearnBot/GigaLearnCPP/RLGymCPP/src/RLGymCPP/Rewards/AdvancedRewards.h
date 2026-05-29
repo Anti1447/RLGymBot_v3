@@ -1465,109 +1465,81 @@ namespace RLGC {
     // ============================================================================
     class BallRedirectReward : public Reward {
     private:
-        mutable std::map<uint32_t, Vec> lastBallVel;
-        mutable std::map<uint32_t, float> lastBallSpeed;
-        mutable std::map<uint32_t, uint32_t> lastBallTouchedBy;  // Track who last touched the ball
+        static constexpr float HIGH_SPEED_THRESHOLD     = 1500.0f;
+        static constexpr float SPEED_RETENTION_MIN      = 0.85f;
+        static constexpr float ANGLE_THRESHOLD          = 0.349f;
+        static constexpr float GOAL_ALIGNMENT_THRESHOLD = 0.3f;
 
-        static constexpr float HIGH_SPEED_THRESHOLD = 1500.0f;  // Only high-speed redirects
-        static constexpr float SPEED_RETENTION_MIN = 0.85f;     // Keep 85%+ speed
-        static constexpr float ANGLE_THRESHOLD = 0.349f;        // ~20 degrees minimum
-        static constexpr float GOAL_ALIGNMENT_THRESHOLD = 0.3f; // Min alignment toward goal
+        float cooldownSeconds;
+        mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
+        mutable uint32_t _lastToucherCarId = 0;
 
     public:
+        BallRedirectReward(float cooldownMs = 500.0f)
+            : cooldownSeconds(cooldownMs / 1000.0f) {}
+
         virtual void Reset(const GameState& initialState) override {
-            lastBallVel.clear();
-            lastBallSpeed.clear();
-            lastBallTouchedBy.clear();
+            _cooldownRemaining.clear();
+            _lastToucherCarId = 0;
+        }
+
+        // Track last toucher once per frame (PreStep runs once, not once per player)
+        virtual void PreStep(const GameState& state) override {
+            for (const auto& p : state.players) {
+                if (p.ballTouchedStep) {
+                    _lastToucherCarId = p.carId;
+                    break;
+                }
+            }
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            // Track who last touched the ball (all players update this)
-            for (const auto& p : state.players) {
-                if (p.ballTouchedStep) {
-                    lastBallTouchedBy[0] = p.carId;
-                }
-            }
+            if (!state.prev) return 0.0f;
 
-            float currentSpeed = state.ball.vel.Length();
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            float& cd = _cooldownRemaining[player.carId];
+            if (cd > 0.0f) { cd = RS_MAX(0.0f, cd - dt); return 0.0f; }
 
-            auto velIt = lastBallVel.find(player.carId);
-            auto speedIt = lastBallSpeed.find(player.carId);
+            if (!player.ballTouchedStep) return 0.0f;
 
-            // Initialize on first call
-            if (velIt == lastBallVel.end()) {
-                lastBallVel[player.carId] = state.ball.vel;
-                lastBallSpeed[player.carId] = currentSpeed;
-                return 0.0f;
-            }
+            const Vec& prevBallVel = state.prev->ball.vel;
+            const Vec& curBallVel  = state.ball.vel;
+            float lastSpeed = prevBallVel.Length();
+            float curSpeed  = curBallVel.Length();
 
-            Vec lastVel = velIt->second;
-            float lastSpeed = speedIt->second;
+            if (lastSpeed < HIGH_SPEED_THRESHOLD) return 0.0f;
 
-            // Update for next step
-            lastBallVel[player.carId] = state.ball.vel;
-            lastBallSpeed[player.carId] = currentSpeed;
+            float speedRetention = curSpeed / RS_MAX(lastSpeed, 1.0f);
+            if (speedRetention < SPEED_RETENTION_MIN) return 0.0f;
 
-            // Only reward high-speed contact redirects
-            if (lastSpeed < HIGH_SPEED_THRESHOLD) {
-                return 0.0f;
-            }
-
-            // Speed must be maintained (no significant deceleration)
-            float speedRetention = currentSpeed / RS_MAX(lastSpeed, 1.0f);
-            if (speedRetention < SPEED_RETENTION_MIN) {
-                return 0.0f;  // Ball lost too much speed
-            }
-
-            // Calculate direction change
-            float dotProduct = lastVel.Normalized().Dot(state.ball.vel.Normalized());
-            dotProduct = RS_CLAMP(dotProduct, -1.0f, 1.0f);
+            float dotProduct = RS_CLAMP(prevBallVel.Normalized().Dot(curBallVel.Normalized()), -1.0f, 1.0f);
             float angleChange = acos(dotProduct);
+            if (angleChange < ANGLE_THRESHOLD) return 0.0f;
 
-            // Minimum angle threshold (no reward for tiny deflections)
-            if (angleChange < ANGLE_THRESHOLD) {
-                return 0.0f;
-            }
+            Vec opponentGoal = (player.team == Team::BLUE)
+                ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+            float goalAlignment = curBallVel.Normalized().Dot((opponentGoal - state.ball.pos).Normalized());
+            if (goalAlignment < GOAL_ALIGNMENT_THRESHOLD) return 0.0f;
 
-            // NEW: Validate redirect is toward opponent goal
-            Vec opponentGoal = (player.team == Team::BLUE) ?
-                CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-            Vec ballToGoal = (opponentGoal - state.ball.pos).Normalized();
-            Vec ballDir = state.ball.vel.Normalized();
-            float goalAlignment = ballDir.Dot(ballToGoal);
-
-            if (goalAlignment < GOAL_ALIGNMENT_THRESHOLD) {
-                return 0.0f;  // Not redirecting toward goal
-            }
-
-            // Reward formula:
-            // - Angle matters: sharp changes (90°+) get 1.0x multiplier
-            // - Speed matters: well-maintained speed adds bonus (0-0.35)
-            float sharpness = RS_CLAMP(angleChange / 1.571f, 0.0f, 1.0f);  // Max at 90°
+            float sharpness  = RS_CLAMP(angleChange / 1.571f, 0.0f, 1.0f);
             float speedBonus = RS_CLAMP(speedRetention - SPEED_RETENTION_MIN, 0.0f, 0.35f);
-            float baseReward = sharpness * (2.0f + speedBonus);  // 0-2.35 reward range
+            float baseReward = sharpness * (2.0f + speedBonus);
+            float goalMult   = (goalAlignment > 0.7f) ? 2.0f : 1.5f;
 
-            // NEW: Apply goal direction multiplier
-            float goalMultiplier = 1.5f;
-            if (goalAlignment > 0.7f) {
-                goalMultiplier = 2.0f;  // Directly toward goal
-            }
-
-            // NEW: Check if last touch was from a teammate
-            uint32_t lastToucher = lastBallTouchedBy[0];
             bool lastTouchWasTeammate = false;
-
-            if (lastToucher != player.carId) {
+            if (_lastToucherCarId != player.carId) {
                 for (const auto& other : state.players) {
-                    if (other.carId == lastToucher && other.team == player.team) {
+                    if (other.carId == _lastToucherCarId && other.team == player.team) {
                         lastTouchWasTeammate = true;
                         break;
                     }
                 }
             }
+            float teamMult = lastTouchWasTeammate ? 2.0f : 1.0f;
 
-            float teammateBonusMultiplier = lastTouchWasTeammate ? 2.0f : 1.0f;
-            return baseReward * goalMultiplier * teammateBonusMultiplier;  // 0-9.4 reward range
+            float result = baseReward * goalMult * teamMult;
+            if (result > 0.0f) cd = cooldownSeconds;
+            return result;
         }
     };
 

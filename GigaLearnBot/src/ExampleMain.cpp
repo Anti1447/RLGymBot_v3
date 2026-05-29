@@ -6,12 +6,13 @@
 #include <RLGymCPP/TerminalConditions/NoTouchCondition.h>
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
 #include <RLGymCPP/TerminalConditions/DemoCountCondition.h>
-#include <RLGymCPP/OBSBuilders/AdvancedObsPadded.h>
+#include <RLGymCPP/OBSBuilders/AdvancedObsPaddedV2.h>
 #include <RLGymCPP/StateSetters/KickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/StateSetters/AerialTrainingState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
+#include <RLGymCPP/ActionParsers/AdvancedAction.h>
 #include <RLGymCPP/Gamestates/GameState.h>
 #include <RLGymCPP/Rewards/AirDribbleAccuracyReward.h>
 #include <RLGymCPP/Rewards/AirDribbleClearingReward.h>
@@ -68,14 +69,20 @@ EnvCreateResult EnvCreateFunc(int index) {
     int playersPerTeam = GameModeConfig::GetPlayersPerTeam(mode);
 
     auto arena = Arena::Create(GameMode::SOCCAR);
-    for (int i = 0; i < playersPerTeam; i++) {
+    if (mode == GameModeType::MODE_SOLO) {
         arena->AddCar(Team::BLUE);
-        arena->AddCar(Team::ORANGE);
+    } else {
+        for (int i = 0; i < playersPerTeam; i++) {
+            arena->AddCar(Team::BLUE);
+            arena->AddCar(Team::ORANGE);
+        }
     }
 
     EnvCreateResult result = {};
-    result.actionParser = new DefaultAction();
-    result.obsBuilder = new AdvancedObsPadded(3);  // Max 3 players per team, not 6. lol.
+    result.actionParser = new AdvancedAction(); // uses more discrete bins instead of the original DefaultAction.
+    auto* obsBuilder = new AdvancedObsPaddedV2(3);  // Max 3 players per team
+    obsBuilder->SetMemoryBlocksEnabled(CURRENT_PHASE >= TrainingPhase::PHASE_5_DIAMOND);
+    result.obsBuilder = obsBuilder;
 
     // Create state setters based on phase configuration
     std::vector<std::pair<StateSetter*, float>> stateSetters;
@@ -466,8 +473,8 @@ int main(int argc, char* argv[]) {
     // Variant probabilities per position are set in KickoffController::SelectVariant().
     //const RLGC::KickoffMode KICKOFF_MODE = RLGC::KickoffMode::HARDCODED;
     const RLGC::KickoffMode KICKOFF_MODE = RLGC::KickoffMode::STOCHASTIC;
-    std::cout << "[CONFIG] Kickoff mode: " <<
-        (KICKOFF_MODE == RLGC::KickoffMode::HARDCODED ? "HARDCODED" : "STOCHASTIC") << std::endl;
+    //std::cout << "[CONFIG] Kickoff mode: " <<
+        //(KICKOFF_MODE == RLGC::KickoffMode::HARDCODED ? "HARDCODED" : "STOCHASTIC") << std::endl;
 
     // Get phase configuration
     PhaseConfig phaseCfg = GetPhaseConfig();
@@ -508,7 +515,7 @@ int main(int argc, char* argv[]) {
     };
     printf("\n=== TRAINING PHASE: %s ===\n", phaseNames[(int)CURRENT_PHASE]);
     printf("Entropy: %.4f, Policy LR: %.2e\n", phaseCfg.entropyScale, phaseCfg.policyLR);
-    printf("Network: Shared[512, 512] Policy[512,512,512] Critic[512,512,512]\n\n");
+    printf("Network: Shared[1024, 1024] Policy[1024, 1024] Critic[1024, 1024]\n\n");
 
     Learner* learner = new Learner(EnvCreateFunc, cfg, StepCallback);
     learner->Start();

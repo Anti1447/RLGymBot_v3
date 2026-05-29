@@ -100,7 +100,26 @@
       "Bash(pwsh -Command ':*)",
       "Bash(grep -n \"#include.*RewardWrapper\" /c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/*.h)",
       "Bash(git checkout:*)",
-      "Bash(del \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot\\\\CMakeCache.txt\")"
+      "Bash(del \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot\\\\CMakeCache.txt\")",
+      "Bash(grep -n \"TrainingPhase CURRENT_PHASE\" \"/c/Projects/RLGymBot_v3/GigaLearnBot/src/RewardConfig.h\")",
+      "Bash(grep -n \"prev.*ball\\\\|ball.*bounce\\\\|ball.*ground\" \"/c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards\"/*.h | head -30)",
+      "Bash(grep -n \"struct BallState\\\\|ball.pos.z\" \"/c/Projects/RLGymBot_v3/GigaLearnBot/GigaLearnCPP/RLGymCPP/RocketSim/src/Sim/Ball/Ball.h\" | head -30)",
+      "Bash(Select-String -Path \"C:\\\\Projects\\\\RLGymBot_v3\\\\GigaLearnBot\\\\GigaLearnCPP\\\\RLGymCPP\\\\src\\\\RLGymCPP\\\\Rewards\\\\CommonRewards.h\" -Pattern \"^}\")",
+      "Bash(Select-Object -Last 5)",
+      "Read(//c/Users/nhafe/AppData/Local/RLBot5/bots/**)",
+      "Bash(find /c/ -maxdepth 6 -name \"*GGLBot2*\" 2>/dev/null | head -20)",
+      "Bash(find \"C:/Users/nhafe/Projects_2/GGLBot2/\" -type f ! -path \"*/Debug/*\" ! -path \"*/Release/*\" ! -path \"*/.git/*\" 2>/dev/null | sort)",
+      "Bash(cp \"C:/Users/nhafe/Projects_2/GGLBot2/Release/GGLBot2.exe\" \"C:/Users/nhafe/Projects_2/GGLBot2/Mushy_1.0/GGLBot2.exe\" && echo \"Copied OK\")",
+      "Bash(copy /Y \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\Release\\\\GGLBot2.exe\" \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\Mushy_1.0\\\\GGLBot2.exe\")",
+      "WebFetch(domain:download.pytorch.org)",
+      "Bash(curl -L -o \"C:/Users/nhafe/Projects_2/GGLBot2/libtorch-291cpu.zip\" \"https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.9.1%2Bcpu.zip\" --progress-bar)",
+      "Bash(rm \"C:/Users/nhafe/Projects_2/GGLBot2/CMakeCache.txt\")",
+      "Bash(rm -rf \"C:/Users/nhafe/Projects_2/GGLBot2/CMakeFiles\")",
+      "Bash(ls \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\\" 2>/dev/null || dir /b \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\\")",
+      "PowerShell(cmake --build \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\" --config Release --parallel 4 2>&1)",
+      "PowerShell(cmake --build \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\" --config Release --parallel 4 2>&1 | Select-String -Pattern \"error|warning LNK|AdvancedObsPaddedV2|InferUnit|GGLBot2.exe\" | ForEach-Object { $_.Line })",
+      "Bash(Copy-Item \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\Release\\\\GGLBot2.exe\" \"C:\\\\Users\\\\nhafe\\\\Projects_2\\\\GGLBot2\\\\Mushy_1.0\\\\GGLBot2.exe\" -Force)",
+      "Bash(Write-Host \"Copied successfully\")"
     ]
   }
 }

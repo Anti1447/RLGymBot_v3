@@ -15,6 +15,9 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 |---|---|---|---|---|---|
 | GoalReward | CommonRewards.h | Goal scored | 250–450 | All | Active |
 | VelocityPlayerToBallReward | CommonRewards.h | Car moving toward ball | 0.5–2.0 | 1–3 | Active |
+| RolvVelocityPlayerToBallReward | RolvVelocityPlayerToBallRewards.h | Car vel toward ball, dt-normalized (1.0/s at max speed). Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
+| DotQuotientVPBReward | RolvVelocityPlayerToBallRewards.h | Inverse-time-to-ball accounting for ball velocity (vd/dd). Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
+| TrajectoryComparisonVPBReward | RolvVelocityPlayerToBallRewards.h | Linear trajectory comparison; most accurate closing-speed estimate. Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
 | VelocityBallToGoalReward | CommonRewards.h | Ball moving toward opp goal | 15 | All | Active |
 | TouchBallReward | CommonRewards.h | Any ball contact | 5 | 1–2 | Active |
 | StrongTouchReward | CommonRewards.h | Ball contact above speed threshold | 25–30 | 1–4 | Active |
@@ -30,6 +33,14 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 | DemoReward | CommonRewards.h | Demo | 60 | 3+ | Active (ZeroSum) |
 | PickupBoostReward | CommonRewards.h | Boost pickup | 5 | 1 | Active |
 | PowerSlideControlReward | CommonRewards.h | Powerslide with control | 0.5–0.55 | 1–3 | Active |
+| PowerslideSharpTurnReward | PowerslideTurnRewards.h | Handbrake held + on-ground + speed > 500 UU/s + yaw-rate > 1.8 rad/s; per-frame trickle capped at 0.05f | 1.0 | 3+ | Active |
+| Powerslide180ForwardReward | PowerslideTurnRewards.h | Handbrake slide release: 150–210 deg total yaw, forward throttle dominant, stayed grounded, min speed 350 UU/s | 1.5 | 3+ | Active |
+| Powerslide180ReverseReward | PowerslideTurnRewards.h | Handbrake slide release: reverse throttle first ~90 deg, then forward throttle second ~90 deg, total 150–210 deg, grounded | 1.5 | 3+ | Active |
+| Powerslide360Reward | PowerslideTurnRewards.h | Handbrake slide release: 320–400 deg total yaw in single continuous slide, any throttle, grounded, min speed 350 UU/s | 2.0 | 3+ | Active |
+| PowerShotImpactAngleReward | PowerShotRewards.h | ballTouchedStep + prior ball speed ≥ 400 UU/s; angle of hit dir vs prior ball vel: 90-180° full power [0.5,1.0], 0-90° reduced [0.15,0.5] | 3.0–4.0 (per context gate) | 3+ | Active |
+| PowerShotMassAlignmentReward | PowerShotRewards.h | ballTouchedStep + ballHitInfo.isValid; front-corner contact (lateral × forward offset) = 1.0, nose = 0.7; multiplied by center-drive alignment (fwd·toBall ≥ 0.5) | 3.0–4.0 (per context gate) | 3+ | Active |
+| PowerShotDodgeTimingReward | PowerShotRewards.h | ballTouchedStep; isFlipping at contact = +1.0, flip ended frame before contact (whiff) = -0.3, no flip = 0 | 1.5 (per context gate) | 3+ | Active |
+| PowerShotContextGate | PowerShotRewards.h | Wrapper: gates inner reward to GROUND (on-ground, ball z ≤ 260) / HALF_VOLLEY (airborne, ball z ≤ 260, ball.vel.z > 0) / VOLLEY (airborne, ball z > 260) / AERIAL_NODODGE (airborne, !HasFlipOrJump, ball z > 260) | N/A (wrapper) | 3+ | Active |
 | AirReward | CommonRewards.h | Car airborne | 0.25 | 1 | Active |
 | FaceBallReward | CommonRewards.h | Car facing ball | 0.3 | 1 | Active |
 | VelocityReward | CommonRewards.h | Car speed | 0.4 | 1 | Active |

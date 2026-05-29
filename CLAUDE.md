@@ -512,3 +512,99 @@ This is the real success criterion — W&B alone cannot confirm this.]
 
 ### Notes
 [Anything else Claude Code needs to know to implement this correctly]
+
+---
+
+## 7C. Time-Dependent Reward Coding
+
+When a reward needs to gate on duration, cooldown, or time since an event, follow these rules.
+
+### Always use float seconds, never raw ticks
+
+All timing in this codebase is `float` seconds via `state.deltaTime`. Never use
+`lastTickCount` arithmetic for timing — it couples to tick-rate assumptions and is
+inconsistent with every other reward class.
+
+Fallback when deltaTime is zero or missing:
+```cpp
+float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+```
+
+### Cooldown / minimum re-trigger interval
+
+Use a **per-player countdown timer** stored in a map keyed by `player.carId`.
+The countdown decrements every step regardless of whether the trigger condition is met —
+this ensures the cooldown expires correctly even if the player is in continuous contact.
+
+```cpp
+// Members
+float cooldownSeconds;                                           // set in constructor
+mutable std::unordered_map<uint32_t, float> _cooldownRemaining; // cleared in Reset()
+
+// Constructor: accept milliseconds (user-facing), store as seconds (internal)
+MyReward(float cooldownMs = 500.0f) : cooldownSeconds(cooldownMs / 1000.0f) {}
+
+virtual void Reset(const GameState& initialState) override {
+    _cooldownRemaining.clear();
+}
+
+// In GetReward():
+float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+float& cd = _cooldownRemaining[player.carId];   // lazy-init to 0.0f
+if (cd > 0.0f) { cd = RS_MAX(0.0f, cd - dt); return 0.0f; }
+// ... compute reward ...
+if (reward > 0.0f) cd = cooldownSeconds;
+return reward;
+```
+
+### Duration windows (how long since an event)
+
+Use a **global `currentTime`** accumulated once per frame in `PreStep()`, plus a
+per-player `lastEventTime` map. This avoids the "accumulate-per-player" bug where
+`GetReward()` is called once per player (inflating the counter in 2v2/3v3).
+
+```cpp
+float currentTime = 0.0f;
+std::unordered_map<uint32_t, float> lastEventTime;
+
+virtual void Reset(...) override { lastEventTime.clear(); currentTime = 0.0f; }
+virtual void PreStep(const GameState& state) override {
+    currentTime += (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+}
+// In GetReward(): check (currentTime - lastEventTime[id]) < windowSeconds
+```
+
+**Do NOT** accumulate `currentTime` in `GetReward()` — that runs once per player, so
+in 3v3 you'd accumulate 3× per step.
+
+### Duration gating (reward while a condition holds)
+
+Use a **per-player duration counter** that resets when the condition breaks:
+
+```cpp
+std::unordered_map<uint32_t, float> durationActive;
+
+// In GetReward():
+float& dur = durationActive[player.carId];
+float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+if (conditionMet) { dur += dt; }
+else              { dur = 0.0f; return 0.0f; }
+// Bonus scales with dur, or triggers once dur > threshold
+```
+
+### Per-instance vs per-episode scope
+
+- **Per-instance:** Automatic — all state is in instance members, not statics.
+- **Per-episode:** Guaranteed by `Reset()` clearing maps. The training loop calls
+  `Reset()` at every episode boundary. A map NOT cleared in `Reset()` leaks state
+  across episodes, producing invisible bugs that look like strange activation patterns.
+
+### Common bugs to avoid
+
+| Bug | Symptom | Fix |
+|-----|---------|-----|
+| Accumulate time in `GetReward` (multi-player) | Timer runs 2–6× fast in 2v2/3v3 | Move accumulation to `PreStep` |
+| Forget to `Reset()` per-player map | Cooldown/state persists across episodes | Always `.clear()` in `Reset()` |
+| Use `uint64_t lastTickCount` for cooldown | Breaks if `tickSkip` changes; inconsistent | Use `float` seconds + `deltaTime` |
+| Only tick countdown when `ballTouchedStep` | Cooldown never expires during dribble | Tick countdown every step regardless of touch |
+| Set cooldown even when reward == 0 | First legitimate touch after condition fails is blocked | Only set cooldown when `reward > 0` |

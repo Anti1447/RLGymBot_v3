@@ -50,6 +50,9 @@ struct RotationConfig {
 	// Adaptive behavior
 	bool enableAdaptiveRotation;
 
+	// Spacing: whether to penalize players for being too far apart
+	bool enableMaxSpacing;
+
 	// Phase C: Second-man offensive support (NEW)
 	bool enableSecondManAdvance = true;
 	bool enablePassingLaneSetup = true;
@@ -61,72 +64,77 @@ struct RotationConfig {
 		switch (phase) {
 		case RotationPhase::BRONZE_SILVER:
 			// Focus: Stop triple-committing, basic spacing
-			cfg.minTeammateSpacing = 1200.0f;      // Very lenient - just don't be ON teammates
-			cfg.maxTeammateSpacing = 6000.0f;      // Very lenient - don't worry about being too far
-			cfg.clusterPenaltyWeight = 0.5f;       // Moderate penalty for clustering
-			cfg.backPostProximity = 0.0f;          // Not enabled yet
+			cfg.minTeammateSpacing = 1200.0f;
+			cfg.maxTeammateSpacing = 6000.0f;
+			cfg.clusterPenaltyWeight = 0.5f;
+			cfg.backPostProximity = 0.0f;
 			cfg.rotationEventReward = 0.0f;
 			cfg.rotationShapingWeight = 0.0f;
 			cfg.minRoleTime = 0.0f;
 			cfg.maxRoleTime = 999.0f;
 			cfg.enableRoleCycling = false;
 			cfg.enableAdaptiveRotation = false;
+			cfg.enableMaxSpacing = false;
 			break;
 
 		case RotationPhase::GOLD:
 			// Focus: Retreat after touching ball, better spacing
-			cfg.minTeammateSpacing = 1500.0f;      // Slightly stricter spacing
+			cfg.minTeammateSpacing = 1500.0f;
 			cfg.maxTeammateSpacing = 5500.0f;
-			cfg.clusterPenaltyWeight = 0.8f;       // Higher penalty for clustering
-			cfg.backPostProximity = 2000.0f;       // Very lenient back-post (just retreat somewhere)
-			cfg.rotationEventReward = 0.3f;        // Small event reward for retreating
-			cfg.rotationShapingWeight = 0.1f;      // Minimal shaping
+			cfg.clusterPenaltyWeight = 0.8f;
+			cfg.backPostProximity = 2000.0f;
+			cfg.rotationEventReward = 0.3f;
+			cfg.rotationShapingWeight = 0.1f;
 			cfg.minRoleTime = 0.0f;
 			cfg.maxRoleTime = 999.0f;
 			cfg.enableRoleCycling = false;
 			cfg.enableAdaptiveRotation = false;
+			cfg.enableMaxSpacing = false;
 			break;
 
 		case RotationPhase::PLATINUM:
 			// Focus: Proper back-post rotation, role awareness begins
-			cfg.minTeammateSpacing = 1800.0f;      // Good spacing
+			cfg.minTeammateSpacing = 1800.0f;
 			cfg.maxTeammateSpacing = 5000.0f;
-			cfg.clusterPenaltyWeight = 1.2f;       // Strong clustering penalty
-			cfg.backPostProximity = 1500.0f;       // Stricter back-post
-			cfg.rotationEventReward = 0.5f;        // Better event reward
-			cfg.rotationShapingWeight = 0.3f;      // More shaping
-			cfg.minRoleTime = 0.5f;                // Start role awareness (very short)
-			cfg.maxRoleTime = 12.0f;               // Lenient max time
-			cfg.enableRoleCycling = true;          // Enable basic role cycling
+			cfg.clusterPenaltyWeight = 1.2f;
+			cfg.backPostProximity = 1500.0f;
+			cfg.rotationEventReward = 0.5f;
+			cfg.rotationShapingWeight = 0.3f;
+			cfg.minRoleTime = 0.5f;
+			cfg.maxRoleTime = 12.0f;
+			cfg.enableRoleCycling = true;
 			cfg.enableAdaptiveRotation = false;
+			cfg.enableMaxSpacing = true;
 			break;
 
 		case RotationPhase::DIAMOND:
 			// Focus: Proper role cycling, faster rotations
-			cfg.minTeammateSpacing = 2000.0f;      // Ideal spacing
+			cfg.minTeammateSpacing = 2000.0f;
 			cfg.maxTeammateSpacing = 4500.0f;
 			cfg.clusterPenaltyWeight = 1.5f;
-			cfg.backPostProximity = 1200.0f;       // Precise back-post
-			cfg.rotationEventReward = 0.8f;        // Strong event reward
+			cfg.backPostProximity = 1200.0f;
+			cfg.rotationEventReward = 0.8f;
 			cfg.rotationShapingWeight = 0.5f;
-			cfg.minRoleTime = 1.0f;                // Proper role time
+			cfg.minRoleTime = 1.0f;
 			cfg.maxRoleTime = 10.0f;
 			cfg.enableRoleCycling = true;
-			cfg.enableAdaptiveRotation = true;     // Enable adaptive behavior
+			cfg.enableAdaptiveRotation = true;
+			cfg.enableMaxSpacing = true;
 			break;
 
 		case RotationPhase::CHAMPION_PLUS:
 			// Focus: Perfect rotation, high-speed flow
-			cfg.minTeammateSpacing = 1800.0f;      // Strict spacing
+			cfg.minTeammateSpacing = 1800.0f;
 			cfg.maxTeammateSpacing = 4000.0f;
 			cfg.clusterPenaltyWeight = 2.0f;
-			cfg.backPostProximity = 1200.0f;       // Very precise
-			cfg.rotationEventReward = 1.2f;        // Maximum event reward
+			cfg.backPostProximity = 1200.0f;
+			cfg.rotationEventReward = 1.2f;
 			cfg.rotationShapingWeight = 0.9f;
 			cfg.minRoleTime = 1.0f;
-			cfg.maxRoleTime = 12.0f;                // Strict max time
+			cfg.maxRoleTime = 12.0f;
 			cfg.enableRoleCycling = true;
 			cfg.enableAdaptiveRotation = true;
+			cfg.enableMaxSpacing = true;
 			break;
 		}
 
@@ -167,14 +175,14 @@ public:
 					float ratio = dist / config.minTeammateSpacing;
 					reward -= config.clusterPenaltyWeight * (1.0f - ratio);
 				}
-				// INSTANT PENALTY for being too far (only in advanced phases)
-				else if (dist > config.maxTeammateSpacing && config.maxTeammateSpacing < 5500.0f) {
+				// INSTANT PENALTY for being too far (only in phases that enforce max spacing)
+				else if (dist > config.maxTeammateSpacing && config.enableMaxSpacing) {
 					float excessDist = dist - config.maxTeammateSpacing;
-					reward -= 0.3f * RS_CLAMP(excessDist / 2000.0f, 0.0f, 1.0f);
+					reward -= config.clusterPenaltyWeight * 0.15f * RS_CLAMP(excessDist / 2000.0f, 0.0f, 1.0f);
 				}
-				// INSTANT REWARD for good spacing
+				// INSTANT REWARD for good spacing — proportional to phase severity
 				else {
-					reward += 0.2f;
+					reward += config.clusterPenaltyWeight * 0.1f;
 				}
 
 				teammateCount++;
@@ -203,7 +211,6 @@ private:
 	struct TouchMemory {
 		bool justTouched = false;
 		int touchStepCount = 0;
-		Vec touchPos = Vec(0, 0, 0);
 		bool hasGivenEventReward = false;
 		bool isRetreating = false;
 	};
@@ -226,16 +233,17 @@ private:
 		return Vec(backPostX, goalY, 0.0f);
 	}
 
-	bool IsRetreating(const Player& player, const Vec& touchPos) const {
-		// Are we moving away from where we touched?
-		Vec awayFromTouch = (player.pos - touchPos).Normalized();
+	bool IsRetreating(const Player& player) const {
+		// Retreating = moving toward own goal (encodes intent directly)
+		Vec ownGoal = (player.team == Team::BLUE)
+			? CommonValues::BLUE_GOAL_CENTER
+			: CommonValues::ORANGE_GOAL_CENTER;
+
 		Vec velocity = player.vel;
+		if (velocity.Length() < 50.0f) return false;
 
-		// Safety: Check if player is moving at all before normalizing
-		if (velocity.Length() < 50.0f) return false;  // Stationary players aren't retreating
-
-		velocity = velocity.Normalized();
-		return velocity.Dot(awayFromTouch) > 0.3f;  // Moving away at reasonable angle
+		Vec toGoal = (ownGoal - player.pos).Normalized();
+		return velocity.Normalized().Dot(toGoal) > 0.2f;
 	}
 
 public:
@@ -260,7 +268,6 @@ public:
 		if (player.ballTouchedStep && !mem.justTouched) {
 			mem.justTouched = true;
 			mem.touchStepCount = currentStep;
-			mem.touchPos = player.pos;
 			mem.hasGivenEventReward = false;
 			mem.isRetreating = false;
 		}
@@ -273,7 +280,7 @@ public:
 
 		// Process retreat if we recently touched
 		if (mem.justTouched) {
-			bool retreating = IsRetreating(player, mem.touchPos);
+			bool retreating = IsRetreating(player);
 
 			// EVENT REWARD: First frame of retreating (INSTANT feedback)
 			if (retreating && !mem.isRetreating && !mem.hasGivenEventReward) {
@@ -512,7 +519,8 @@ public:
 			mem.timeInRole = 0.0f;
 		}
 		else {
-			mem.timeInRole += CommonValues::TICK_TIME;
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			mem.timeInRole += dt;
 			mem.justTransitioned = false;
 		}
 
@@ -806,50 +814,19 @@ private:
 
 	std::unordered_map<uint32_t, RoleMemory> memory;
 	RotationConfig config;
-	int currentStep = 0;
 
 	// Constants
-	static constexpr int ROLE_STABILITY_STEPS = 120;  // ~1 second at 120 Hz
-	static constexpr float LOW_BOOST_THRESHOLD = 75.0f;
-	static constexpr float HIGH_BOOST_THRESHOLD = 100.0f;
+	static constexpr int ROLE_STABILITY_STEPS = 45;   // ~0.375s — was 120 (too anti-PPO)
+	static constexpr float LOW_BOOST_THRESHOLD = 30.0f;   // was 75 — now meaningfully "low"
+	static constexpr float HIGH_BOOST_THRESHOLD = 70.0f;  // was 100 (unreachable, max boost is 100)
 	static constexpr float BOOST_DISPARITY_THRESHOLD = 30.0f;
 
-	// Get the player's goal position (own goal center)
-	Vec GetOwnGoalPos(Team team) const {
-		return (team == Team::BLUE)
-			? CommonValues::BLUE_GOAL_CENTER
-			: CommonValues::ORANGE_GOAL_CENTER;
-	}
-
-	// Determine player's role based on goal-line distance (X coordinate)
-	// FURTHEST = closest to own goal, CLOSEST = furthest from own goal
+	// Determine player's role using the shared ball-centric helper for consistency with RoleAwarenessReward
 	BoostRole DeterminePlayerRole(const Player& player, const GameState& state) const {
-		float playerGoalDist = (player.pos - GetOwnGoalPos(player.team)).Length();
-
-		std::vector<float> teammateDists;
-		for (const auto& p : state.players) {
-			if (p.team == player.team && p.carId != player.carId) {
-				float dist = (p.pos - GetOwnGoalPos(player.team)).Length();
-				teammateDists.push_back(dist);
-			}
-		}
-
-		if (teammateDists.empty()) {
-			return BoostRole::CLOSEST;  // Only player on team
-		}
-
-		std::sort(teammateDists.begin(), teammateDists.end());
-
-		// Determine role based on distance to own goal
-		if (playerGoalDist <= teammateDists[0]) {
-			return BoostRole::FURTHEST;  // Closest to own goal = last man
-		}
-		else if (teammateDists.size() >= 2 && playerGoalDist >= teammateDists.back()) {
-			return BoostRole::CLOSEST;   // Furthest from own goal = first man
-		}
-		else {
-			return BoostRole::MIDDLE;    // In between (3v3+)
-		}
+		RoleType role = DetermineRoleCommon(player, state);
+		if (role == RoleType::CLOSEST)  return BoostRole::CLOSEST;
+		if (role == RoleType::FURTHEST) return BoostRole::FURTHEST;
+		return BoostRole::MIDDLE;
 	}
 
 	// Get boost disparity between player and closest teammate
@@ -912,7 +889,6 @@ public:
 
 	void Reset(const GameState& state) override {
 		memory.clear();
-		currentStep = 0;
 	}
 
 	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -977,9 +953,7 @@ public:
 		return reward;
 	}
 
-	void PreStep(const GameState& state) override {
-		currentStep++;
-	}
+	void PreStep(const GameState& state) override {}
 };
 
 // ============================================================================

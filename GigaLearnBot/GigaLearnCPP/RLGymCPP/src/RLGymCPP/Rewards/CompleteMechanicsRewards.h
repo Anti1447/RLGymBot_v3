@@ -384,49 +384,77 @@ public:
 
 
 // Power slide usage for better control
-// 2025-12-07 - Rev 2 - Reward short taps (<=0.25s), penalize long holds. (NJH)
+// 2026-05-21 - Rev 3 - Event-on-release, brevity bonus, yaw gate, one-shot penalty. (NJH)
 class PowerSlideControlReward : public Reward {
 private:
-    mutable std::map<uint32_t, float> slideTime;
+    mutable std::unordered_map<uint32_t, float> slideTime;
+    mutable std::unordered_map<uint32_t, bool>  wasSliding;
+    mutable std::unordered_map<uint32_t, float> slideYawAccum;
+    mutable std::unordered_map<uint32_t, float> slideSpeedMax;
 
-    float maxTapDuration = 0.25f; // seconds
+    float maxTapDuration = 0.25f;
 
 public:
     virtual void Reset(const GameState& initialState) override {
         slideTime.clear();
+        wasSliding.clear();
+        slideYawAccum.clear();
+        slideSpeedMax.clear();
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+        uint32_t id = player.carId;
 
-        if (!player.isOnGround || player.prevAction.handbrake <= 0.5f) {
-            // Reset when not sliding
-            slideTime[player.carId] = 0.0f;
+        bool currentlySliding = player.isOnGround && player.prevAction.handbrake > 0.5f;
+        bool prevSliding = wasSliding[id]; // lazy-inits false
+        wasSliding[id] = currentlySliding;
+
+        if (!currentlySliding && !prevSliding)
+            return 0.0f;
+
+        if (currentlySliding && !prevSliding) {
+            // Slide just started
+            slideTime[id]     = 0.0f;
+            slideYawAccum[id] = 0.0f;
+            slideSpeedMax[id] = player.vel.Length();
             return 0.0f;
         }
 
-        // Accumulate powerslide duration
-        float t = slideTime[player.carId] + dt;
-        slideTime[player.carId] = t;
+        if (currentlySliding) {
+            // Mid-slide: accumulate
+            slideTime[id]     += dt;
+            float spd = player.vel.Length();
+            if (spd > slideSpeedMax[id]) slideSpeedMax[id] = spd;
+            slideYawAccum[id] += std::abs(player.angVel.z) * dt;
+            return 0.0f;
+        }
 
-        float speed = player.vel.Length();
+        // Handbrake just released — fire single event
+        float t        = slideTime[id];
+        float maxSpeed = slideSpeedMax[id];
+        float yawAcc   = slideYawAccum[id];
+        slideTime[id]     = 0.0f;
+        slideYawAccum[id] = 0.0f;
 
-        // Only care if we’re actually moving
-        if (speed < 300.0f)
+        if (maxSpeed < 300.0f)
             return 0.0f;
 
-        // Short taps (0..0.25s): small positive
+        // Yaw gate: require actual turning (anti-farming)
+        if (yawAcc < 0.1f)
+            return 0.0f;
+
         if (t <= maxTapDuration) {
-            // Scale by time and speed
-            float tapFrac = t / maxTapDuration;          // [0,1]
-            float speedFrac = RS_MIN(1.0f, speed / 1500.0f);
-            return 0.5f * tapFrac * speedFrac;
+            float speedFrac = RS_MIN(1.0f, maxSpeed / 1500.0f);
+            float brevity   = 1.0f - (t / maxTapDuration); // shorter tap → higher bonus
+            float yawFrac   = RS_MIN(1.0f, yawAcc / 0.5f);
+            return 0.5f * (0.5f + 0.5f * brevity) * speedFrac * yawFrac;
         }
 
-        // Long holds: penalize every frame after threshold
+        // Long hold: one-shot penalty on release, capped at 3x
         float over = t - maxTapDuration;
-        float penaltyRate = 1.0f; // per second
-        return -penaltyRate * (over / maxTapDuration) * dt;
+        float penaltyScale = RS_MIN(3.0f, over / maxTapDuration);
+        return -0.5f * penaltyScale;
     }
 };
 
@@ -3898,10 +3926,47 @@ public:
 
 
 
-// Advanced recovery - landing with powerslide
+// Advanced recovery - landing with powerslide on any surface (ground, walls, ceiling)
+// 2026-05-22 - Rev 2 - Generalized surface detection via InferSurfaceNormal. (NJH)
+// Previously used rotMat.up.z > threshold which only rewarded flat-ground landings.
+// Now uses up.Dot(surfaceNormal) so the alignment check works identically on walls
+// and the ceiling.
 class AdvancedRecoveryReward : public Reward {
 private:
-    mutable std::map<uint32_t, bool> wasAirborne;
+    mutable std::unordered_map<uint32_t, bool> wasAirborne;
+
+    // Returns the outward surface normal for whichever surface the car is closest to.
+    // Ground  (z=0):     (0, 0,  1)
+    // Ceiling (z=2044):  (0, 0, -1)
+    // Right wall  (+x):  (-1, 0, 0)
+    // Left wall   (-x):  ( 1, 0, 0)
+    // Orange wall (+y):  (0, -1, 0)
+    // Blue wall   (-y):  (0,  1, 0)
+    // A perfect landing on any surface has rotMat.up.Dot(normal) == 1.0.
+    static Vec InferSurfaceNormal(const Player& player) {
+        using namespace CommonValues;
+        float px = player.pos.x;
+        float py = player.pos.y;
+        float pz = player.pos.z;
+
+        float dFloor   = pz;                  // dist from z = 0
+        float dCeiling = CEILING_Z - pz;      // dist from z = 2044
+        float dWallPX  = SIDE_WALL_X - px;    // dist from x = +4096
+        float dWallNX  = SIDE_WALL_X + px;    // dist from x = -4096
+        float dWallPY  = BACK_WALL_Y - py;    // dist from y = +5120
+        float dWallNY  = BACK_WALL_Y + py;    // dist from y = -5120
+
+        float minDist = dFloor;
+        Vec   normal  = Vec(0, 0, 1);
+
+        if (dCeiling < minDist) { minDist = dCeiling; normal = Vec(0, 0, -1); }
+        if (dWallPX  < minDist) { minDist = dWallPX;  normal = Vec(-1, 0, 0); }
+        if (dWallNX  < minDist) { minDist = dWallNX;  normal = Vec(1,  0, 0); }
+        if (dWallPY  < minDist) { minDist = dWallPY;  normal = Vec(0, -1, 0); }
+        if (dWallNY  < minDist) {                      normal = Vec(0,  1, 0); }
+
+        return normal;
+    }
 
 public:
     virtual void Reset(const GameState& initialState) override {
@@ -3911,23 +3976,22 @@ public:
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         bool wasInAir = wasAirborne[player.carId];
         wasAirborne[player.carId] = !player.isOnGround;
-        
-        // Just landed
-        if (wasInAir && player.isOnGround) {
-            float upZ = player.rotMat.up.z;
-            
-            // Check if using powerslide on landing
-            bool usingPowerslide = (player.prevAction.handbrake > 0.5f);
-            
-            if (upZ > 0.8f && usingPowerslide) {
-                // Perfect recovery with powerslide
-                return 5.0f;
-            } else if (upZ > 0.7f) {
-                // Good landing
-                return 2.0f;
-            }
-        }
-        
+
+        if (!wasInAir || !player.isOnGround)
+            return 0.0f;
+
+        // alignment == 1.0 → wheels flat on surface (perfect)
+        // alignment == 0.0 → car sideways on landing
+        // alignment  < 0.0 → car inverted / bad landing
+        Vec   surfaceNormal  = InferSurfaceNormal(player);
+        float alignment      = player.rotMat.up.Dot(surfaceNormal);
+        bool  usingPowerslide = (player.prevAction.handbrake > 0.5f);
+
+        if (alignment > 0.8f && usingPowerslide)
+            return 5.0f;   // Perfect landing on any surface + powerslide
+        if (alignment > 0.7f)
+            return 2.0f;   // Good landing on any surface
+
         return 0.0f;
     }
 };

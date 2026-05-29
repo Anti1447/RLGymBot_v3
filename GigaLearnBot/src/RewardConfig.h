@@ -55,6 +55,9 @@
 #include <RLGymCPP/Rewards/PredictiveDemoRewards.h>
 #include <RLGymCPP/Rewards/AdvancedKickoffRewards.h>
 #include <RLGymCPP/Rewards/SoloPlayRewards.h>
+#include <RLGymCPP/Rewards/RolvVelocityPlayerToBallRewards.h>
+#include <RLGymCPP/Rewards/PowerslideTurnRewards.h>
+#include <RLGymCPP/Rewards/PowerShotRewards.h>
 using namespace RLGC;
 
 enum class TrainingPhase {
@@ -70,7 +73,7 @@ enum class TrainingPhase {
 };
 
 // >>> SET YOUR CURRENT PHASE HERE <<<
-constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_6_CHAMPION;
+constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_3_GOLD;
 
 /// <summary>
 /// Get the reward configuration for the current training phase
