@@ -220,16 +220,16 @@ namespace RLGC {
         }
 
         // NEW HELPER: Check if flick is behind opponent (relative to their facing direction)
+        // Fixed Rev 3->4: normalize ballVel before dotting so score is purely directional
+        // (was dividing by magic 1000 — overflowed at high speeds, giving max score always).
         float ComputeBehindScore(const Vec& ballVel, const Player& opponent) {
-            // Opponent's forward direction
+            float spd = ballVel.Length();
+            if (spd < 1.0f) return 0.0f;
+            Vec ballDir = ballVel / spd;
             Vec oppFacing = opponent.rotMat.forward;
-
-            // How opposite is ball velocity to opponent's facing?
-            float dotProduct = ballVel.Dot(oppFacing);
-
-            // -1 = directly behind, 0 = sideways, +1 = directly in front
-            // We want negative (behind), so invert and clamp to [0, 1]
-            return RS_CLAMP(-dotProduct / 1000.0f, 0.0f, 1.0f);
+            // dot: -1 = ball going directly behind them, 0 = sideways, +1 = directly at face
+            float dot = ballDir.Dot(oppFacing);
+            return RS_CLAMP(-dot, 0.0f, 1.0f);  // 1.0 = directly behind them
         }
 
         // IMPROVED HELPER: Check if flick sends ball toward opponent's side/back

@@ -41,6 +41,9 @@ wandb/
 *.onnx
 *.npz
 
+# Backups (do not push heavy backup files)
+backups/
+
 # Misc
 *.tmp
 *.log

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EnhancedVelocityBallToGoalReward — Interactive Visualizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+  h1 { color: #00d4ff; font-size: 1.4em; margin-bottom: 4px; }
+  .subtitle { color: #888; font-size: 0.85em; margin-bottom: 20px; }
+
+  .layout { display: flex; gap: 20px; flex-wrap: wrap; }
+  .left { flex: 1; min-width: 460px; }
+  .right { flex: 0 0 320px; }
+
+  canvas { display: block; border: 1px solid #333; border-radius: 6px; cursor: crosshair; background: #0d1117; }
+
+  .panel {
+    background: #16213e;
+    border: 1px solid #2a3a5e;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .panel h3 { color: #00d4ff; font-size: 0.9em; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 0.82em; }
+  .row label { color: #aaa; }
+  .row input[type=range] { width: 120px; accent-color: #00d4ff; }
+  .val { color: #00d4ff; font-weight: bold; min-width: 50px; text-align: right; font-size: 0.9em; }
+
+  .reward-bar-wrap { margin-top: 6px; }
+  .reward-label { font-size: 0.75em; color: #aaa; margin-bottom: 3px; }
+  .reward-bar-bg { background: #0d1117; border-radius: 4px; height: 20px; overflow: hidden; position: relative; }
+  .reward-bar { height: 100%; border-radius: 4px; transition: width 0.1s, background 0.1s; }
+  .reward-val { position: absolute; right: 6px; top: 2px; font-size: 0.78em; font-weight: bold; }
+
+  .breakdown { font-size: 0.78em; line-height: 1.7; }
+  .breakdown .k { color: #888; }
+  .breakdown .v { color: #ffd700; font-weight: bold; }
+  .breakdown .note { color: #00ff88; font-size: 0.9em; }
+  .breakdown .warn { color: #ff6b6b; font-size: 0.9em; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.75em; color: #aaa; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .zone-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.75em; margin-top: 6px; }
+  .zone-item { display: flex; align-items: center; gap: 5px; color: #aaa; }
+  .zone-swatch { width: 14px; height: 8px; border-radius: 2px; opacity: 0.6; }
+
+  .instructions { font-size: 0.8em; color: #666; margin-top: 8px; }
+  .instructions b { color: #888; }
+
+  .formula-box {
+    background: #0d1117;
+    border: 1px solid #2a3a5e;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 0.78em;
+    font-family: 'Consolas', monospace;
+    line-height: 1.8;
+    color: #b0c4de;
+    margin-top: 6px;
+  }
+  .formula-box .hl { color: #00d4ff; }
+  .formula-box .green { color: #00ff88; }
+  .formula-box .yellow { color: #ffd700; }
+  .formula-box .red { color: #ff6b6b; }
+
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 8px; }
+  .mode-btn {
+    background: #0d1117;
+    border: 1px solid #2a3a5e;
+    color: #aaa;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 0.78em;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .mode-btn.active { background: #00d4ff22; border-color: #00d4ff; color: #00d4ff; }
+</style>
+</head>
+<body>
+
+<h1>EnhancedVelocityBallToGoalReward — Interactive Visualizer</h1>
+<p class="subtitle">CommonRewards.h:221 &nbsp;·&nbsp; Click/drag the field to move the ball &nbsp;·&nbsp; Adjust velocity direction and speed below</p>
+
+<div class="layout">
+  <div class="left">
+    <canvas id="field" width="460" height="620"></canvas>
+    <div class="instructions" style="margin-top:6px">
+      <b>Click or drag</b> the field to reposition the ball &nbsp;·&nbsp;
+      <b>Arrow shows</b> ball velocity direction (adjust angle below)
+    </div>
+    <div class="legend" style="margin-top:10px">
+      <div class="legend-item"><div class="legend-dot" style="background:#ff9800"></div>Ball</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#2196f3"></div>Blue car (attacker)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ff5722"></div>Orange car (attacker)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ffffff33;border:1px solid #fff"></div>Goals</div>
+    </div>
+    <div class="zone-legend">
+      <div class="zone-item"><div class="zone-swatch" style="background:#00ff88"></div>Close (1.5x, &lt;1500 UU)</div>
+      <div class="zone-item"><div class="zone-swatch" style="background:#ffd700"></div>Mid (1.2x→0.8x, 1500-3500)</div>
+      <div class="zone-item"><div class="zone-swatch" style="background:#ff6b6b"></div>Far (0.8x→0.4x, 3500-5000)</div>
+      <div class="zone-item"><div class="zone-swatch" style="background:#333"></div>Dead zone (&gt;5000 UU)</div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="panel">
+      <h3>Ball Velocity</h3>
+      <div class="row">
+        <label>Direction (° from +Y)</label>
+        <input type="range" id="velAngle" min="-180" max="180" value="0" step="1">
+        <span class="val" id="velAngleVal">0°</span>
+      </div>
+      <div class="row">
+        <label>Speed (kph)</label>
+        <input type="range" id="velSpeed" min="0" max="200" value="80" step="5">
+        <span class="val" id="velSpeedVal">80 kph</span>
+      </div>
+      <div class="row">
+        <label>Ball touched this step</label>
+        <input type="checkbox" id="touched" style="width:16px;height:16px;accent-color:#00d4ff">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Reward Output</h3>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btnBlue" onclick="setTeam('blue')">Blue (→ Orange goal)</button>
+        <button class="mode-btn" id="btnOrange" onclick="setTeam('orange')">Orange (→ Blue goal)</button>
+      </div>
+
+      <div class="reward-bar-wrap">
+        <div class="reward-label">Offensive Reward</div>
+        <div class="reward-bar-bg">
+          <div class="reward-bar" id="offBar" style="background:#00d4ff;width:0%"></div>
+          <span class="reward-val" id="offVal" style="color:#00d4ff">0.00</span>
+        </div>
+      </div>
+      <div class="reward-bar-wrap" style="margin-top:8px">
+        <div class="reward-label">Defensive Reward</div>
+        <div class="reward-bar-bg">
+          <div class="reward-bar" id="defBar" style="background:#00ff88;width:0%"></div>
+          <span class="reward-val" id="defVal" style="color:#00ff88">0.00</span>
+        </div>
+      </div>
+      <div class="reward-bar-wrap" style="margin-top:8px">
+        <div class="reward-label">Final Reward (max of above)</div>
+        <div class="reward-bar-bg" style="height:24px">
+          <div class="reward-bar" id="finalBar" style="background:#ffd700;width:0%"></div>
+          <span class="reward-val" id="finalVal" style="color:#ffd700;font-size:0.95em">0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Step-by-step Breakdown</h3>
+      <div class="breakdown" id="breakdown">
+        <span class="k">Move ball on field to begin</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Formula Reference</h3>
+      <div class="formula-box">
+<span class="hl">// OFFENSIVE PATH</span>
+goalAlignment = <span class="green">ballDir⃗·vel⃗</span> / maxSpeed
+if goalAlignment &lt; <span class="yellow">0.15</span>: return 0
+base = clamp(goalAlignment, 0, 1)
+weight = <span class="green">GetAlignmentWeightByDistance</span>(dist)
+reward = base × weight
+if touched: reward = clamp(reward + <span class="yellow">0.25</span>, 0, 1.5)
+reward × <span class="green">GoalProximityScale2D</span>(pos)
+
+<span class="hl">// DEFENSIVE PATH (ball &lt;2500 UU from own goal)</span>
+defAlign = <span class="red">ballDir⃗AwayFromOwnGoal · vel⃗</span>/max
+if defAlign &lt; 0.15: skip
+weight = GetAlignmentWeightByDistance(dist) × <span class="yellow">0.5x</span>
+reward = defAlign × weight
+if touched: reward = clamp(+0.25, 0, 1.5)
+
+<span class="hl">// PROXIMITY SCALE (2D XY distance)</span>
+≤1000 UU → <span class="green">1.0</span>
+1000→5120 → linear decay → <span class="red">0.0</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Constants (Rocket League UU) ───────────────────────────────
+const FIELD_WIDTH  = 8192;
+const FIELD_HEIGHT = 10240;
+const GOAL_WIDTH   = 1786;
+const GOAL_DEPTH   = 880;
+const BALL_MAX_SPEED = 6000; // UU/s ≈ 216 kph
+
+// Reward constants
+const TOUCH_BONUS    = 0.25;
+const MIN_ALIGNMENT  = 0.15;
+const CLOSE_RANGE    = 1500;
+const MID_RANGE      = 3500;
+const FAR_RANGE      = 5000;
+const CLOSE_BOOST    = 1.5;
+const DEFENSIVE_ZONE = 2500;
+
+// ─── Canvas setup ───────────────────────────────────────────────
+const canvas = document.getElementById('field');
+const ctx    = canvas.getContext('2d');
+const CW = canvas.width, CH = canvas.height;
+
+// UU → canvas (Y is flipped: +Y in RL = towards orange goal = top of screen)
+function toCanvas(x, y) {
+  return [
+    CW/2 + (x / FIELD_WIDTH) * CW * 0.5,
+    CH/2 - (y / FIELD_HEIGHT) * CH * 0.5
+  ];
+}
+function fromCanvas(cx, cy) {
+  return [
+    (cx - CW/2) / (CW * 0.5) * FIELD_WIDTH,
+    -(cy - CH/2) / (CH * 0.5) * FIELD_HEIGHT
+  ];
+}
+
+let ballUU = [0, 0]; // UU position
+let team = 'blue';
+
+function setTeam(t) {
+  team = t;
+  document.getElementById('btnBlue').classList.toggle('active', t === 'blue');
+  document.getElementById('btnOrange').classList.toggle('active', t === 'orange');
+  update();
+}
+
+// ─── Reward math ────────────────────────────────────────────────
+function getAlignmentWeightByDistance(dist) {
+  if (dist < CLOSE_RANGE) {
+    return CLOSE_BOOST - (0.3 * dist / CLOSE_RANGE);
+  } else if (dist < MID_RANGE) {
+    let p = (dist - CLOSE_RANGE) / (MID_RANGE - CLOSE_RANGE);
+    return 1.2 - 0.4 * p;
+  } else if (dist < FAR_RANGE) {
+    let p = (dist - MID_RANGE) / (FAR_RANGE - MID_RANGE);
+    return 0.8 - 0.4 * p;
+  }
+  return 0;
+}
+
+function goalProximityScale2D(bx, by, team) {
+  const FULL_DIST = 1000, ZERO_DIST = 5120;
+  const goalY = team === 'blue' ? 5120 : -5120;
+  const dx = bx;
+  const dy = by - goalY;
+  const dist2D = Math.sqrt(dx*dx + dy*dy);
+  if (dist2D <= FULL_DIST) return 1;
+  if (dist2D >= ZERO_DIST) return 0;
+  return (ZERO_DIST - dist2D) / (ZERO_DIST - FULL_DIST);
+}
+
+function normalize(vx, vy) {
+  const len = Math.sqrt(vx*vx + vy*vy);
+  if (len < 1e-6) return [0, 0];
+  return [vx/len, vy/len];
+}
+
+function computeReward(bx, by, velX, velY, touched) {
+  const speed = Math.sqrt(velX*velX + velY*velY);
+  const normalizedVelX = velX / BALL_MAX_SPEED;
+  const normalizedVelY = velY / BALL_MAX_SPEED;
+
+  // Defensive check
+  const ownGoalY = team === 'blue' ? -5120 : 5120;
+  const ownGoalX = 0;
+  const dox = bx - ownGoalX, doy = by - ownGoalY;
+  const distToOwnGoal = Math.sqrt(dox*dox + doy*doy);
+
+  let defReward = 0;
+  let defDetails = null;
+  if (distToOwnGoal < DEFENSIVE_ZONE) {
+    const [awayX, awayY] = normalize(dox, doy);
+    const defAlign = Math.max(0, Math.min(1, awayX*normalizedVelX + awayY*normalizedVelY));
+    if (defAlign > MIN_ALIGNMENT) {
+      const defWeight = getAlignmentWeightByDistance(distToOwnGoal) * 0.5;
+      defReward = defAlign * defWeight;
+      if (touched) defReward = Math.max(0, Math.min(1.5, defReward + TOUCH_BONUS));
+      defDetails = { defAlign, defWeight, distToOwnGoal };
+    }
+  }
+
+  // Offensive
+  const targetY = team === 'blue' ? 5120 : -5120;
+  const targetX = 0;
+  const [dirX, dirY] = normalize(targetX - bx, targetY - by);
+  const goalAlignment = dirX*normalizedVelX + dirY*normalizedVelY;
+
+  let offReward = 0;
+  let offDetails = null;
+  if (goalAlignment >= MIN_ALIGNMENT) {
+    const base = Math.max(0, Math.min(1, goalAlignment));
+    const distToGoal = Math.sqrt((bx-targetX)**2 + (by-targetY)**2);
+    const alignWeight = getAlignmentWeightByDistance(distToGoal);
+    if (alignWeight > 0) {
+      let r = base * alignWeight;
+      if (touched) r = Math.max(0, Math.min(1.5, r + TOUCH_BONUS));
+      const proxScale = goalProximityScale2D(bx, by, team);
+      offReward = r * proxScale;
+      offDetails = { goalAlignment, base, alignWeight, distToGoal, proxScale, r_before_prox: r };
+    }
+  }
+
+  return { offReward, defReward, offDetails, defDetails, defDistToOwnGoal: distToOwnGoal };
+}
+
+// ─── Drawing ────────────────────────────────────────────────────
+function drawZones() {
+  // Draw proximity zones from enemy goal (for current team)
+  const teamColor = team;
+  const targetY = team === 'blue' ? 5120 : -5120;
+  const [gcx, gcy] = toCanvas(0, targetY);
+
+  const zones = [
+    { dist: CLOSE_RANGE, color: '#00ff8830' },
+    { dist: MID_RANGE,   color: '#ffd70020' },
+    { dist: FAR_RANGE,   color: '#ff6b6b18' },
+    { dist: 5120,        color: '#ffffff08' },
+  ];
+  for (let i = zones.length-1; i >= 0; i--) {
+    const z = zones[i];
+    const r = (z.dist / FIELD_HEIGHT) * CH * 0.5;
+    ctx.beginPath();
+    ctx.arc(gcx, gcy, r, 0, Math.PI*2);
+    ctx.fillStyle = z.color;
+    ctx.fill();
+  }
+}
+
+function drawGoalProximityZone() {
+  // Goal proximity scale 2D: full ≤1000, decay 1000-5120
+  const targetY = team === 'blue' ? 5120 : -5120;
+  const [gcx, gcy] = toCanvas(0, targetY);
+  const r1 = (1000 / FIELD_HEIGHT) * CH * 0.5;
+  const r2 = (5120 / FIELD_HEIGHT) * CH * 0.5;
+  ctx.beginPath();
+  ctx.arc(gcx, gcy, r1, 0, Math.PI*2);
+  ctx.strokeStyle = '#ffffff33';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawField() {
+  ctx.clearRect(0, 0, CW, CH);
+
+  // Pitch
+  const grassGrad = ctx.createLinearGradient(0, 0, 0, CH);
+  grassGrad.addColorStop(0, '#1a2a1a');
+  grassGrad.addColorStop(1, '#1a1a2a');
+  ctx.fillStyle = grassGrad;
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Pitch outline
+  ctx.strokeStyle = '#2a5a2a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, CW-4, CH-4);
+
+  // Center line
+  ctx.beginPath();
+  ctx.moveTo(0, CH/2);
+  ctx.lineTo(CW, CH/2);
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Center circle
+  ctx.beginPath();
+  ctx.arc(CW/2, CH/2, (1800/FIELD_HEIGHT)*CH*0.5, 0, Math.PI*2);
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.stroke();
+
+  // Draw zones
+  drawZones();
+  drawGoalProximityZone();
+
+  // Goals
+  const gw = (GOAL_WIDTH / FIELD_WIDTH) * CW * 0.5;
+  const gd = (GOAL_DEPTH / FIELD_HEIGHT) * CH * 0.5;
+  // Blue goal (bottom, -Y in RL)
+  const [bgx, bgy] = toCanvas(-GOAL_WIDTH/2, -5120);
+  ctx.fillStyle = '#1a3a6a';
+  ctx.fillRect(bgx, bgy, gw*2, gd);
+  ctx.strokeStyle = '#4488ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bgx, bgy, gw*2, gd);
+
+  // Orange goal (top, +Y in RL)
+  const [ogx, ogy] = toCanvas(-GOAL_WIDTH/2, 5120);
+  ctx.fillStyle = '#6a3a1a';
+  ctx.fillRect(ogx, ogy - gd, gw*2, gd);
+  ctx.strokeStyle = '#ff8844';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ogx, ogy - gd, gw*2, gd);
+
+  // Goal labels
+  ctx.font = 'bold 11px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4488ff';
+  ctx.fillText('BLUE GOAL', CW/2, bgy + gd + 14);
+  ctx.fillStyle = '#ff8844';
+  ctx.fillText('ORANGE GOAL', CW/2, ogy - gd - 6);
+}
+
+function drawBall(bx, by) {
+  const [cx, cy] = toCanvas(bx, by);
+  const r = 10;
+  const grad = ctx.createRadialGradient(cx-2, cy-2, 1, cx, cy, r);
+  grad.addColorStop(0, '#fff9c4');
+  grad.addColorStop(1, '#ff9800');
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawVelocityArrow(bx, by, vx, vy) {
+  const [cx, cy] = toCanvas(bx, by);
+  const spd = Math.sqrt(vx*vx + vy*vy);
+  if (spd < 1) return;
+  const scale = (80 / FIELD_HEIGHT) * CH * 0.5;
+  const nx = vx / spd, ny = vy / spd;
+  // In canvas coords: +canvas Y = -UU Y
+  const ex = cx + nx * scale * 3;
+  const ey = cy - ny * scale * 3;
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(ex, ey);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Arrowhead
+  const angle = Math.atan2(ey - cy, ex - cx);
+  ctx.beginPath();
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ex - 10*Math.cos(angle-0.4), ey - 10*Math.sin(angle-0.4));
+  ctx.lineTo(ex - 10*Math.cos(angle+0.4), ey - 10*Math.sin(angle+0.4));
+  ctx.closePath();
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
+function drawCars() {
+  // Blue car: bottom left
+  const [blx, bly] = toCanvas(-1500, -2500);
+  ctx.beginPath();
+  ctx.arc(blx, bly, 8, 0, Math.PI*2);
+  ctx.fillStyle = '#2196f3';
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.font = '10px Segoe UI';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText('B', blx, bly + 4);
+
+  // Orange car: top right
+  const [orx, ory] = toCanvas(1500, 2500);
+  ctx.beginPath();
+  ctx.arc(orx, ory, 8, 0, Math.PI*2);
+  ctx.fillStyle = '#ff5722';
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.fillText('O', orx, ory + 4);
+}
+
+function drawDefZone(bx, by) {
+  const ownGoalY = team === 'blue' ? -5120 : 5120;
+  const distToOwn = Math.sqrt(bx*bx + (by - ownGoalY)**2);
+  if (distToOwn < DEFENSIVE_ZONE) {
+    const [cx, cy] = toCanvas(bx, by);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI*2);
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ─── UI update ──────────────────────────────────────────────────
+function getVelocityUU() {
+  const angleDeg = parseFloat(document.getElementById('velAngle').value);
+  const speedKph = parseFloat(document.getElementById('velSpeed').value);
+  const speedUU  = speedKph / 0.036; // kph → UU/s
+  const rad = (angleDeg * Math.PI) / 180;
+  // Angle from +Y axis, clockwise = positive
+  const vx = speedUU * Math.sin(rad);
+  const vy = speedUU * Math.cos(rad);
+  return [vx, vy, speedKph];
+}
+
+function bar(id, val, max, color) {
+  const pct = Math.min(100, (val / max) * 100);
+  document.getElementById(id + 'Bar').style.width = pct + '%';
+  document.getElementById(id + 'Bar').style.background = color;
+  document.getElementById(id + 'Val').textContent = val.toFixed(3);
+  document.getElementById(id + 'Val').style.color = color;
+}
+
+function fmt(v, d=3) { return v.toFixed(d); }
+
+function update() {
+  const [vx, vy, speedKph] = getVelocityUU();
+  const [bx, by] = ballUU;
+  const touched = document.getElementById('touched').checked;
+
+  // Draw
+  drawField();
+  drawDefZone(bx, by);
+  drawCars();
+  drawBall(bx, by);
+  drawVelocityArrow(bx, by, vx, vy);
+
+  // Compute
+  const { offReward, defReward, offDetails, defDetails, defDistToOwnGoal } = computeReward(bx, by, vx, vy, touched);
+  const finalReward = Math.max(offReward, defReward);
+
+  // Bars
+  bar('off',   offReward,   1.5, '#00d4ff');
+  bar('def',   defReward,   1.5, '#00ff88');
+  bar('final', finalReward, 1.5, '#ffd700');
+
+  // Breakdown
+  const targetY = team === 'blue' ? 5120 : -5120;
+  const distToGoal = Math.sqrt(bx*bx + (by - targetY)**2);
+  const ownGoalY = team === 'blue' ? -5120 : 5120;
+
+  let html = '';
+  html += `<div class="k">Ball position</div><div class="v">(${fmt(bx,0)}, ${fmt(by,0)}) UU</div>`;
+  html += `<div class="k">Ball speed</div><div class="v">${speedKph} kph (${fmt(Math.sqrt(vx*vx+vy*vy)/BALL_MAX_SPEED,3)} × max)</div>`;
+  html += `<div class="k">Team</div><div class="v">${team.toUpperCase()} → ${team==='blue'?'Orange':'Blue'} goal</div>`;
+  html += `<div class="k">Dist to enemy goal</div><div class="v">${fmt(distToGoal,0)} UU</div>`;
+  html += `<div class="k">Dist to own goal</div><div class="v">${fmt(defDistToOwnGoal,0)} UU ${defDistToOwnGoal < DEFENSIVE_ZONE ? '<span class="warn">⚠ DEF ZONE</span>' : ''}</div>`;
+  html += `<hr style="border-color:#2a3a5e;margin:6px 0">`;
+
+  if (offDetails) {
+    html += `<div class="note">✓ Offensive path taken</div>`;
+    html += `<div class="k">goalAlignment (dot)</div><div class="v">${fmt(offDetails.goalAlignment)} ${offDetails.goalAlignment < MIN_ALIGNMENT ? '<span class="warn">< 0.15 → 0</span>' : ''}</div>`;
+    html += `<div class="k">base (clamped align)</div><div class="v">${fmt(offDetails.base)}</div>`;
+    html += `<div class="k">alignWeight (zone)</div><div class="v">${fmt(offDetails.alignWeight)} × (dist=${fmt(offDetails.distToGoal,0)} UU)</div>`;
+    html += `<div class="k">r before prox</div><div class="v">${fmt(offDetails.r_before_prox)}${touched ? ' + 0.25 touch bonus' : ''}</div>`;
+    html += `<div class="k">GoalProximityScale2D</div><div class="v">${fmt(offDetails.proxScale)}</div>`;
+    html += `<div class="k">offReward</div><div class="v" style="color:#00d4ff">${fmt(offReward)}</div>`;
+  } else {
+    const targetX = 0;
+    const [dirX, dirY] = normalize(targetX - bx, targetY - by);
+    const vlen = Math.sqrt(vx*vx+vy*vy);
+    const goalAlignment = vlen > 0 ? dirX*(vx/BALL_MAX_SPEED) + dirY*(vy/BALL_MAX_SPEED) : 0;
+    const alignWeight = getAlignmentWeightByDistance(distToGoal);
+    html += `<div class="warn">✗ Offensive: no reward</div>`;
+    if (goalAlignment < MIN_ALIGNMENT) {
+      html += `<div class="k">goalAlignment</div><div class="v">${fmt(goalAlignment)} <span class="warn">< 0.15</span></div>`;
+    } else if (alignWeight <= 0) {
+      html += `<div class="k">Distance</div><div class="v">${fmt(distToGoal,0)} UU <span class="warn">> 5000 → dead zone</span></div>`;
+    } else {
+      html += `<div class="k">GoalProximityScale2D</div><div class="v">${fmt(goalProximityScale2D(bx,by,team))} (0 → no reward)</div>`;
+    }
+  }
+
+  html += `<hr style="border-color:#2a3a5e;margin:6px 0">`;
+
+  if (defDetails) {
+    html += `<div class="note">✓ Defensive path taken</div>`;
+    html += `<div class="k">defAlign (away from own goal)</div><div class="v">${fmt(defDetails.defAlign)}</div>`;
+    html += `<div class="k">defWeight (alignWeight × 0.5)</div><div class="v">${fmt(defDetails.defWeight)}</div>`;
+    html += `<div class="k">defReward</div><div class="v" style="color:#00ff88">${fmt(defReward)}</div>`;
+  } else {
+    html += `<div class="k">Defensive</div><div class="v">${defDistToOwnGoal >= DEFENSIVE_ZONE ? `dist ${fmt(defDistToOwnGoal,0)} UU ≥ 2500` : 'align too low'} → 0</div>`;
+  }
+
+  html += `<hr style="border-color:#2a3a5e;margin:6px 0">`;
+  html += `<div class="k">FINAL reward</div><div class="v" style="color:#ffd700;font-size:1.1em">${fmt(finalReward)}</div>`;
+
+  document.getElementById('breakdown').innerHTML = html;
+}
+
+// ─── Input events ───────────────────────────────────────────────
+document.getElementById('velAngle').addEventListener('input', function() {
+  document.getElementById('velAngleVal').textContent = this.value + '°';
+  update();
+});
+document.getElementById('velSpeed').addEventListener('input', function() {
+  document.getElementById('velSpeedVal').textContent = this.value + ' kph';
+  update();
+});
+document.getElementById('touched').addEventListener('change', update);
+
+let dragging = false;
+canvas.addEventListener('mousedown', e => { dragging = true; moveBall(e); });
+canvas.addEventListener('mousemove', e => { if (dragging) moveBall(e); });
+canvas.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('click', moveBall);
+
+function moveBall(e) {
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  // Scale to canvas internal coords
+  const sx = cx * (CW / rect.width);
+  const sy = cy * (CH / rect.height);
+  let [ux, uy] = fromCanvas(sx, sy);
+  // Clamp to field
+  ux = Math.max(-FIELD_WIDTH/2, Math.min(FIELD_WIDTH/2, ux));
+  uy = Math.max(-FIELD_HEIGHT/2, Math.min(FIELD_HEIGHT/2, uy));
+  ballUU = [ux, uy];
+  update();
+}
+
+// ─── Init ───────────────────────────────────────────────────────
+ballUU = [500, 1500];
+update();
+</script>
+</body>
+</html>

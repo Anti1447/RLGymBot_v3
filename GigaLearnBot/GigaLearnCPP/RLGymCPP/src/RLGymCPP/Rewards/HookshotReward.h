@@ -1,8 +1,10 @@
 #pragma once
 #include "../Framework.h"
+#include "../CommonValues.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace RLGC {
 
@@ -18,7 +20,15 @@ namespace RLGC {
 	// - Touch redirects ball in any direction EXCEPT toward own goal
 	// - Ball speed maintained or slightly adjusted
 	//
+	// Anti-farming (Rev 5):
+	// - Per-player cooldown (COOLDOWN_SECS): prevents back-to-back dribble
+	//   touches from farming the reward on consecutive steps.
+	// - Opposing goal proximity gate (OPP_GOAL_EXCLUSION_DIST = 1000 UU):
+	//   returns 0.0f when the ball is very close to the opponent's goal — this
+	//   is a finishing zone, not a redirect zone.
+	//
 	// 2025-01-28 - Rev 4 (NJH) - Significantly more lenient
+	// 2026-05-30 - Rev 5 (NJH) - Added cooldown + opposing-goal exclusion gate
 	// =========================================================================
 
 	class DirectionChangeReward : public Reward {
@@ -39,6 +49,16 @@ namespace RLGC {
 
 		// Goal safety
 		float minAwayFromOwnGoal = 0.4f;        // Lenient
+
+		// Anti-farming: cooldown between reward fires for the same player.
+		// 1.5s prevents chaining on a slow dribble but allows a genuine redirect
+		// followed by a second touch after the ball has had time to travel.
+		static constexpr float COOLDOWN_SECS = 1.5f;
+
+		// Opposing goal exclusion: ball within this Y-distance of the opponent's
+		// goal line returns 0.0f. Finishing touches near goal shouldn't count as
+		// "possession redirects."
+		static constexpr float OPP_GOAL_EXCLUSION_DIST = 1000.0f;
 
 		// =====================================================================
 		// METRICS STRUCTURE
@@ -68,14 +88,15 @@ namespace RLGC {
 		// INITIALIZATION
 		// =====================================================================
 
-		void Reset(const GameState& state) override {
+		void Reset(const GameState& /*state*/) override {
+			_cooldownRemaining.clear();
 		}
 
 		// =====================================================================
 		// REWARD COMPUTATION
 		// =====================================================================
 
-		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		virtual float GetReward(const Player& player, const GameState& state, bool /*isFinal*/) override {
 			// Only reward on actual ball touches
 			if (!player.ballTouchedStep || !state.prev)
 				return 0.0f;
@@ -84,12 +105,32 @@ namespace RLGC {
 			if (state.ball.pos.z > maxBallHeight)
 				return 0.0f;
 
+			// Opposing goal exclusion: skip when ball is in the opponent's finishing zone
+			Vec oppGoal = (player.team == Team::BLUE)
+				? CommonValues::ORANGE_GOAL_CENTER
+				: CommonValues::BLUE_GOAL_CENTER;
+			float distToOppGoal = (state.ball.pos - oppGoal).Length();
+			if (distToOppGoal < OPP_GOAL_EXCLUSION_DIST)
+				return 0.0f;
+
+			// Cooldown gate: tick down and reject if still on cooldown.
+			// Countdown is decremented every touch-step call; for correctness on
+			// multi-player frames, tie the decrement to deltaTime here (touch-gated,
+			// so it only runs once per ballTouchedStep per player — no multi-player
+			// inflation risk since each player has their own map entry).
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			float& cd = _cooldownRemaining[player.carId];
+			if (cd > 0.0f) {
+				cd = RS_MAX(0.0f, cd - dt);
+				return 0.0f;
+			}
+
 			// Get ball velocities before and after touch
 			Vec prevVel = state.prev->ball.vel;
-			Vec curVel = state.ball.vel;
+			Vec curVel  = state.ball.vel;
 
 			float prevHorizSpeed = Vec(prevVel.x, prevVel.y, 0.0f).Length();
-			float curHorizSpeed = Vec(curVel.x, curVel.y, 0.0f).Length();
+			float curHorizSpeed  = Vec(curVel.x,  curVel.y,  0.0f).Length();
 
 			// Ball must be rolling (very lenient)
 			if (prevHorizSpeed < minHorizontalSpeed || prevHorizSpeed > maxHorizontalSpeed)
@@ -107,7 +148,7 @@ namespace RLGC {
 
 			if (prevHorizSpeed > 1e-3f && curHorizSpeed > 1e-3f) {
 				Vec prevDir = Vec(prevVel.x, prevVel.y, 0.0f) / prevHorizSpeed;
-				Vec curDir = Vec(curVel.x, curVel.y, 0.0f) / curHorizSpeed;
+				Vec curDir  = Vec(curVel.x,  curVel.y,  0.0f) / curHorizSpeed;
 
 				Vec towardOwnGoal = (ownGoal - state.ball.pos).Normalized();
 				float towardOwnGoalAlignment = curDir.Dot(towardOwnGoal);
@@ -123,6 +164,9 @@ namespace RLGC {
 				float reward = 0.3f + (directionChangeBonus * 0.3f);
 				reward = RS_CLAMP(reward, 0.1f, 0.7f);
 
+				// Start cooldown so next touch must wait COOLDOWN_SECS
+				cd = COOLDOWN_SECS;
+
 				// Update metrics
 				metrics.attempts++;
 				metrics.successful++;
@@ -133,6 +177,9 @@ namespace RLGC {
 
 			return 0.0f;
 		}
+
+	private:
+		mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
 
 	public:
 

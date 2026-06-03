@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "reward-viz",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7777", "--directory", "ClaudeFiles"],
+      "port": 7777
+    }
+  ]
+}

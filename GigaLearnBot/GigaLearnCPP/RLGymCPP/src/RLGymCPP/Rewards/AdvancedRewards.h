@@ -591,24 +591,24 @@ namespace RLGC {
     class DribbleMasteryReward : public Reward {
     private:
         // Geometry / thresholds
-        float maxDribbleDistanceXY = 110.0f;  // horizontal radius around car
+        float maxDribbleDistanceXY = 105.0f;  // horizontal radius around car
         float maxLateralOffset = 100.0f;  // sideways tolerance (unused here but available)
-        float minBallHeightAboveCar = 55.0f;   // above car roof
-        float maxBallHeightAboveCar = 200.0f;  // can count pops relative to car
-        float minForwardDot = 0.1f;    // ball must be somewhat in front
-        float minSpeed = 600.0f;  // must be moving
+        float minBallHeightAboveCar = 40.0f;   // above car roof
+        float maxBallHeightAboveCar = 240.0f;  // can count pops relative to car
+        float minForwardDot = 0.15f;    // ball must be somewhat in front
+        float minSpeed = 800.0f;  // must be moving
 
         // NEW: absolute arena-ground threshold (only count dribbles when ball is low)
-        float groundMaxZ = 500.0f;   // ball.z must be <= this to count as a ground dribble
+        float groundMaxZ = 600.0f;   // ball.z must be <= this to count as a ground dribble
 
         float sustainRefSec = 2.f;    // ~1s "full" dribble reference
-        float minActiveTime = 0.50f;   // < this: almost no shaping
+        float minActiveTime = 0.40f;   // < this: almost no shaping
         float entryBonus = 0.1f;   // smaller one-off bonus at start
         float rewardScale = 1.0f;    // global multiplier
 
         // NEW: opponent proximity penalty for risky dribbles
-        float opponentDangerRange = 500.0f;   // penalty zone for dribbling near opponents
-        float maxOpponentPenalty = 1.0f;      // max penalty amount (reduces reward by 50%)
+        float opponentDangerRange = 600.0f;   // penalty zone for dribbling near opponents
+        float maxOpponentPenalty = 2.0f;      // max penalty amount (reduces reward by 50%)
 
         mutable std::map<uint32_t, float> sustainedTime;
         mutable std::map<uint32_t, bool>  wasOnCar;

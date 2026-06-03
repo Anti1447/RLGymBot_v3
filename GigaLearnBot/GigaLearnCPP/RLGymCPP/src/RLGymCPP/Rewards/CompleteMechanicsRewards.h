@@ -648,40 +648,127 @@ public:
     }
 };
 
-// Air roll shots - using air roll during aerial touches
+// Air roll shot: airborne + 20-80° roll + underside ball contact + flipping
+// Rev 2.0 2026-06-01 NJH — full rewrite with proper orientation, contact, and flip gates
 class AirRollShotReward : public Reward {
-public:
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (!player.ballTouchedStep) return 0.0f;
-        if (player.isOnGround) return 0.0f;
+private:
+    static constexpr float MIN_HEIGHT      = 300.0f;  // UU — minimum car height
+    static constexpr float MIN_BALL_Z      = 150.0f;  // UU — ball must be off ground
+    static constexpr float ROLL_COS_MIN    = 0.174f;  // cos(80°) — max roll allowed
+    static constexpr float ROLL_COS_MAX    = 0.940f;  // cos(20°) — min roll required
+    static constexpr float FLIP_WINDOW_SEC = 0.35f;   // seconds after flip start counts
+    static constexpr float COOLDOWN_SEC    = 1.0f;    // prevent multi-tick double-count
 
-        // Check if using air roll (angular velocity present)
-        float angVelMag = player.angVel.Length();
-        
-        if (angVelMag > 2.0f) {
-            // Using air roll during aerial touch
-            return 3.0f;
+    float currentTime = 0.0f;
+    mutable std::unordered_map<uint32_t, float> lastFlipStartTime;
+    mutable std::unordered_map<uint32_t, bool>  wasFlipping;
+    mutable std::unordered_map<uint32_t, float> cooldownRemaining;
+
+public:
+    virtual void Reset(const GameState&) override {
+        lastFlipStartTime.clear();
+        wasFlipping.clear();
+        cooldownRemaining.clear();
+        currentTime = 0.0f;
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+        currentTime += dt;
+        for (const auto& p : state.players) {
+            bool& prev = wasFlipping[p.carId];
+            if (!prev && p.isFlipping && !p.isOnGround)
+                lastFlipStartTime[p.carId] = currentTime;
+            prev = p.isFlipping;
+            float& cd = cooldownRemaining[p.carId];
+            if (cd > 0.0f) cd = RS_MAX(0.0f, cd - dt);
         }
-        
-        return 0.0f;
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool) override {
+        if (!player.ballTouchedStep)        return 0.0f;
+        if (player.isOnGround)              return 0.0f;
+        if (player.pos.z < MIN_HEIGHT)      return 0.0f;
+        if (state.ball.pos.z < MIN_BALL_Z)  return 0.0f;
+
+        // Cooldown guard
+        auto cdIt = cooldownRemaining.find(player.carId);
+        if (cdIt != cooldownRemaining.end() && cdIt->second > 0.0f) return 0.0f;
+
+        // Roll angle: 20-80° from upright (works for both left and right roll)
+        float rollDot = player.rotMat.up.Dot(Vec(0.0f, 0.0f, 1.0f));
+        if (rollDot < ROLL_COS_MIN || rollDot > ROLL_COS_MAX) return 0.0f;
+
+        // Underside contact: car center must be below ball center
+        if (player.pos.z >= state.ball.pos.z) return 0.0f;
+
+        // Flip requirement: flip must have started within FLIP_WINDOW_SEC
+        auto ftIt = lastFlipStartTime.find(player.carId);
+        if (ftIt == lastFlipStartTime.end()) return 0.0f;
+        if ((currentTime - ftIt->second) > FLIP_WINDOW_SEC) return 0.0f;
+
+        cooldownRemaining[player.carId] = COOLDOWN_SEC;
+        return 1.0f;
     }
 };
 
-// Demo awareness - avoiding demos or demoing opponents
+// ============================================================================
+// DemoAwarenessReward - Rev 2.0 (2026-05-30)
+// ============================================================================
+// Teaches the bot to avoid incoming demo and bump threats from ALL cars
+// (opponents AND teammates).
+//
+// Three tiers:
+//   1. Continuous proximity penalty when any car is close + closing fast
+//   2. Bump event penalty (-2.0) — any car, any source
+//   3. Demo event penalty (-5.0) — any car, any source
+//
+// The former demo reward (+10) is removed — DemoReward (ZeroSum) already
+// covers incentivizing demos. This class is purely about avoidance.
+// ============================================================================
 class DemoAwarenessReward : public Reward {
+private:
+    static constexpr float DANGER_RANGE      = 600.0f;  // UU — threat detection radius
+    static constexpr float MIN_CLOSING_SPEED = 300.0f;  // UU/s — min approach speed to trigger
+    static constexpr float PROXIMITY_SCALE   = 0.15f;   // per-step penalty scale per threat
+    static constexpr float MAX_PROXIMITY_PEN = 0.5f;    // cap total continuous penalty per step
+    static constexpr float BUMP_PENALTY      = 2.0f;    // event penalty for being bumped
+    static constexpr float DEMO_PENALTY      = 5.0f;    // event penalty for being demoed
+
 public:
-    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        // Reward for demo
-        if (player.eventState.demo) {
-            return 10.0f;
+    virtual void Reset(const GameState& /*initialState*/) override {}
+
+    virtual float GetReward(const Player& player, const GameState& state, bool /*isFinal*/) override {
+        if (player.isDemoed) return 0.0f;
+
+        // Tier 3: demo event — highest priority, return immediately
+        if (player.eventState.demoed)
+            return -DEMO_PENALTY;
+
+        // Tier 2: bump event — return immediately
+        if (player.eventState.bumped)
+            return -BUMP_PENALTY;
+
+        // Tier 1: continuous proximity danger from any car (opponents AND teammates)
+        float totalPenalty = 0.0f;
+        for (const auto& other : state.players) {
+            if (other.carId == player.carId || other.isDemoed) continue;
+
+            Vec  toPlayer = player.pos - other.pos;
+            float dist    = toPlayer.Length();
+            if (dist > DANGER_RANGE || dist < 1.0f) continue;
+
+            // How fast is the other car closing toward this player?
+            Vec  toPlayerDir  = toPlayer / dist;
+            float closingSpeed = other.vel.Dot(-toPlayerDir);  // positive = approaching
+            if (closingSpeed < MIN_CLOSING_SPEED) continue;
+
+            float closingFraction   = RS_CLAMP(closingSpeed / 1500.0f, 0.0f, 1.0f);
+            float proximityFraction = 1.0f - (dist / DANGER_RANGE);
+            totalPenalty += PROXIMITY_SCALE * proximityFraction * closingFraction;
         }
 
-        // Penalize being demo'd
-        if (player.eventState.demoed) {
-            return -5.0f;
-        }
-        
-        return 0.0f;
+        return -RS_CLAMP(totalPenalty, 0.0f, MAX_PROXIMITY_PEN);
     }
 };
 
@@ -1203,9 +1290,43 @@ public:
 //  - Detect opponent possession (dribble-ish or close control).
 //  - Reward shadowing: sit on line between ball and our goal at a safe distance,
 //    and match lateral (x) as ball moves.
+// 2026-06-03 - Rev 2 (NJH): align with dignitas shadow-defense guides.
+//  - Shadow distance is now DYNAMIC (500–1700 UU), scaled by how fast the play
+//    is developing (fast push → more space to react; slow dribble → sit closer).
+//  - Added VELOCITY MATCHING: reward moving WITH the possessor (mirrors speed and
+//    lateral movement in one term), per "move at the same speed as your opponent."
+//  - Added FACING term (car pointed at the play, ready to react).
+//  - Replaced the weak 0.1 "between" term with SOFT anti-overcommit multipliers:
+//    goal-side ramp (don't drift past the ball) + closing-speed cap (don't blitz).
+//  - Added W&B metrics (ShadowDefense/*).
 // ============================================================================
 class ShadowDefenseVsPossessionReward : public Reward {
 private:
+    // ---- Dynamic shadow distance ----
+    static constexpr float SHADOW_MIN      = 500.0f;   // UU — slow play, sit close
+    static constexpr float SHADOW_MAX      = 1700.0f;  // UU — fast play, more space to react
+    static constexpr float PLAY_REF_SPEED  = 1800.0f;  // UU/s — speed at which we want max spacing
+    // ---- Position band falloff ----
+    static constexpr float BAND_PLATEAU    = 250.0f;   // UU — full credit within this of target
+    static constexpr float BAND_FALLOFF    = 1100.0f;  // UU — zero credit beyond this
+    // ---- Velocity match ----
+    static constexpr float VEL_MATCH_SCALE = 1500.0f;  // UU/s — relative-speed scale for mirroring
+    // ---- Soft overcommit multipliers ----
+    static constexpr float GOALSIDE_RANGE  = 1200.0f;  // UU — margin range for goal-side ramp
+    static constexpr float CLOSE_CAP       = 900.0f;   // UU/s — closing speed allowed before penalty
+    static constexpr float CLOSE_RANGE     = 1200.0f;  // UU/s — falloff range above the cap
+    static constexpr float CLOSE_FLOOR     = 0.2f;     // min closing multiplier (don't fully zero)
+
+    inline static std::atomic<int>   s_fireCount     { 0 };
+    inline static std::atomic<float> s_rewardSum     { 0.0f };
+    inline static std::atomic<float> s_targetDistSum { 0.0f };
+    inline static std::atomic<float> s_velMatchSum   { 0.0f };
+
+    static void AtomicAdd(std::atomic<float>& a, float v) {
+        float prev = a.load();
+        while (!a.compare_exchange_weak(prev, prev + v)) {}
+    }
+
     bool OppHasPossession(const Player& me, const GameState& state, Player& outOpp) const {
         // Pick the “best” opponent possessor
         float bestScore = 0.0f;
@@ -1242,37 +1363,62 @@ private:
     }
 
 public:
+    struct Metrics { int fireCount = 0; float avgReward = 0.0f; float avgTargetDist = 0.0f; float avgVelMatch = 0.0f; };
+    static Metrics GetAndResetMetrics() {
+        int   count   = s_fireCount.exchange(0);
+        float rSum    = s_rewardSum.exchange(0.0f);
+        float tdSum   = s_targetDistSum.exchange(0.0f);
+        float vmSum   = s_velMatchSum.exchange(0.0f);
+        float inv     = count > 0 ? 1.0f / count : 0.0f;
+        return { count, rSum * inv, tdSum * inv, vmSum * inv };
+    }
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         Player possessor;
         if (!OppHasPossession(player, state, possessor)) return 0.0f;
 
         const Vec myGoal = (player.team == Team::BLUE) ? CommonValues::BLUE_GOAL_CENTER : CommonValues::ORANGE_GOAL_CENTER;
 
-        // Only really matters when ball is in/near our half
-        const bool ballInOwnHalf = (player.team == Team::BLUE) ? (state.ball.pos.y <= 800.0f) : (state.ball.pos.y >= -800.0f);
+        // Shadow defense applies while the ball is in our half or near midfield, so the
+        // bot can pick up the shadow early during the retreat ("gradually close in").
+        const bool ballInOwnHalf = (player.team == Team::BLUE) ? (state.ball.pos.y <= 1500.0f) : (state.ball.pos.y >= -1500.0f);
         if (!ballInOwnHalf) return 0.0f;
 
         Vec ballToGoalN = SafeNorm(myGoal - state.ball.pos);
 
-        // Shadow point: between ball and goal, a fixed distance from ball
-        float shadowDist = 1400.0f; // sweet spot for 1v1 shadowing
-        Vec shadowPoint = state.ball.pos + ballToGoalN * shadowDist;
+        // 1) DYNAMIC shadow point: distance scales with how fast the play is developing.
+        //    Faster opponent/ball → sit further back for reaction time; slower → tighten up.
+        float playSpeed  = RS_MAX(possessor.vel.Length(), state.ball.vel.Length());
+        float speedFrac  = RS_CLAMP(playSpeed / PLAY_REF_SPEED, 0.0f, 1.0f);
+        float targetDist = SHADOW_MIN + speedFrac * (SHADOW_MAX - SHADOW_MIN);   // 500..1700
+        Vec   shadowPt   = state.ball.pos + ballToGoalN * targetDist;
+        float distToPt   = (player.pos - shadowPt).Length();
+        float posBand    = RS_CLAMP(1.0f - (distToPt - BAND_PLATEAU) / (BAND_FALLOFF - BAND_PLATEAU), 0.0f, 1.0f);
 
-        float distToShadow = (player.pos - shadowPoint).Length();
+        // 2) VELOCITY MATCH: move WITH the possessor (mirrors speed and lateral movement).
+        float relVel     = (player.vel - possessor.vel).Length();
+        float velMatch   = RS_CLAMP(1.0f - relVel / VEL_MATCH_SCALE, 0.0f, 1.0f);
 
-        // Reward closeness to shadow point
-        float posScore = RS_CLAMP(1.0f - distToShadow / 1600.0f, 0.0f, 1.0f);
+        // 3) FACING the play (ready to react/challenge).
+        float facing     = RS_CLAMP(player.rotMat.forward.Dot(SafeNorm(state.ball.pos - player.pos)), 0.0f, 1.0f);
 
-        // Lateral match: encourage covering same x-line as ball (helps “side-to-side across goal”)
-        float xErr = fabs(player.pos.x - state.ball.pos.x);
-        float lateralScore = RS_CLAMP(1.0f - xErr / 1800.0f, 0.0f, 1.0f);
-
-        // Extra: be between ball and goal (don’t over-commit past ball)
+        // 4) SOFT anti-overcommit multipliers.
         float distPlayerGoal = (player.pos - myGoal).Length();
-        float distBallGoal = (state.ball.pos - myGoal).Length();
-        float between = (distPlayerGoal < distBallGoal) ? 1.0f : 0.0f;
+        float distBallGoal   = (state.ball.pos - myGoal).Length();
+        float margin     = distBallGoal - distPlayerGoal;                  // + = goal-side of ball (good)
+        float goalSide   = RS_CLAMP(0.5f + margin / GOALSIDE_RANGE, 0.1f, 1.0f);  // soft ramp, floor 0.1
+        float closing    = player.vel.Dot(SafeNorm(state.ball.pos - player.pos)); // + = charging the ball
+        float closeMult  = RS_CLAMP(1.0f - (closing - CLOSE_CAP) / CLOSE_RANGE, CLOSE_FLOOR, 1.0f);
 
-        return (0.6f * posScore + 0.3f * lateralScore + 0.1f * between);
+        float base   = 0.55f * posBand + 0.30f * velMatch + 0.15f * facing;
+        float reward = base * goalSide * closeMult;   // max ~1.0
+
+        s_fireCount.fetch_add(1);
+        AtomicAdd(s_rewardSum, reward);
+        AtomicAdd(s_targetDistSum, targetDist);
+        AtomicAdd(s_velMatchSum, velMatch);
+
+        return reward;
     }
 };
 
@@ -1363,17 +1509,25 @@ public:
         float horizDist = Vec(rel.x, rel.y, 0).Length();
         float heightAboveCar = rel.z;
 
-        // Tight "on-top" geometry: prefer balls that land near car center and atop the roof
-        bool isOnTop = (heightAboveCar > 50.0f && heightAboveCar < 140.0f && horizDist < 100.0f);
-
-        // Also accept slightly laxer "near-top" for partial credit
-        bool isNearTop = (heightAboveCar > 30.0f && heightAboveCar < 200.0f && horizDist < 220.0f);
-
         // Must be roughly in front of the car
         Vec forward = player.rotMat.forward;
         float frontAlign = forward.Dot(rel.Normalized()); // 1 = directly in front
         if (frontAlign < 0.4f)
             return 0.0f; // require stronger frontal alignment than before
+
+        // Signed forward projection of the ball relative to car centre.
+        // Positive  = ball is over the hood/front half.
+        // Negative  = ball is over the trunk/rear half.
+        // ~60 UU is roughly half the Octane hitbox length.
+        float forwardComp = forward.Dot(rel);
+
+        // On-top: tight geometry AND ball must be on the front half of the roof
+        bool isOnTop = (heightAboveCar > 50.0f && heightAboveCar < 140.0f
+                     && horizDist < 100.0f && forwardComp > 0.0f);
+
+        // Near-top: slightly looser — allow up to 60 UU behind centre (mid-roof) but not trunk
+        bool isNearTop = (heightAboveCar > 30.0f && heightAboveCar < 200.0f
+                       && horizDist < 220.0f && forwardComp > -60.0f);
 
         // Penalize if ball leaves too fast even after "catch"
         float baseCap = 1200.0f;
@@ -1390,13 +1544,18 @@ public:
         Vec relVel = state.ball.vel - player.vel;
         float relSpeed = relVel.Length();
 
-        // On-top carry bonus if relative speed is small
+        // Front-half scale: linearly ramps from 0.5x at car centre (forwardComp=0)
+        // to 1.5x at ~120 UU ahead (well over the hood). Rear-half is already gated
+        // out by isOnTop/isNearTop, but clamp to [0.5, 1.5] for safety.
+        float frontHalfScale = RS_CLAMP(0.5f + forwardComp / 120.0f, 0.5f, 1.5f);
+
+        // On-top carry bonus if relative speed is small, scaled by front-half position
         float carryBonus = 0.0f;
         if (isOnTop && relSpeed < 250.0f) {
-            carryBonus = 4.0f; // strong bonus for true on-top catches that are moving with car
+            carryBonus = 4.0f * frontHalfScale; // up to 6.0 for hood catches, 2.0 at centre
         }
         else if (isNearTop && relSpeed < 350.0f) {
-            carryBonus = 2.0f; // modest bonus for near-top, low relative speed
+            carryBonus = 2.0f * frontHalfScale; // up to 3.0 for front near-top
         }
 
         // Base catch reward: emphasize slowdown but scale by alignment and speed penalty

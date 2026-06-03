@@ -328,10 +328,66 @@ namespace RLGC {
 		}
 	};
 
+	// ============================================================================
+	// CornerToLaneReward
+	// Fires when the ball is in the opponent's corner (high |x|, opponent half).
+	// Rewards ball x-velocity directed toward the center lane (reducing |x|).
+	//
+	// Motivation: bots tend to pinch or blast the ball corner-to-corner without
+	// creating a real scoring chance. This reward teaches controlled touches that
+	// move the ball to the center lane where shots are actually viable.
+	//
+	// Only the x-component toward center is rewarded — the existing
+	// VelocityBallToGoalReward handles the y-component (toward goal) separately.
+	// Wrap in ZeroSumReward so both teams compete for center lane possession.
+	// ============================================================================
+	class CornerToLaneReward : public Reward {
+	private:
+		// Ball must be past this |x| to be considered "in the corner"
+		static constexpr float CORNER_X = 2000.0f;
+		// Ball must be in the opponent's half (past this |y| toward their goal)
+		static constexpr float CORNER_Y = 1500.0f;
+
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			const Vec& bpos = state.ball.pos;
+			const Vec& bvel = state.ball.vel;
+
+			// Ball must be in opponent's half
+			bool inOpponentHalf = (player.team == Team::BLUE)
+				? (bpos.y > CORNER_Y)
+				: (bpos.y < -CORNER_Y);
+			if (!inOpponentHalf) return 0.0f;
+
+			// Ball must be in the corner (near side wall)
+			if (fabsf(bpos.x) < CORNER_X) return 0.0f;
+
+			// Reward x-velocity directed toward the center lane.
+			// -sign(bpos.x) * vel.x is positive when ball moves toward x = 0.
+			float sign = (bpos.x > 0.0f) ? 1.0f : -1.0f;
+			float towardCenter = -sign * bvel.x / CommonValues::BALL_MAX_SPEED;
+			return RS_CLAMP(towardCenter, 0.0f, 1.0f);
+		}
+	};
+
 	// https://github.com/AechPro/rocket-league-gym-sim/blob/main/rlgym_sim/utils/reward_functions/common_rewards/player_ball_rewards.py
 	class VelocityPlayerToBallReward : public Reward {
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
+			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
+			return dirToBall.Dot(normVel);
+		}
+	};
+
+	// Kickoff-only variant of VelocityPlayerToBallReward.
+	// Returns the standard vel-toward-ball reward only while the ball is at kickoff position
+	// (pos.Length() < 280 UU && vel.Length() < 200 UU/s). Returns 0 otherwise.
+	class KickoffVelocityPlayerToBallReward : public Reward {
+	public:
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+			if (state.ball.pos.Length() >= 280.0f || state.ball.vel.Length() >= 200.0f)
+				return 0.0f;
 			Vec dirToBall = (state.ball.pos - player.pos).Normalized();
 			Vec normVel = player.vel / CommonValues::CAR_MAX_SPEED;
 			return dirToBall.Dot(normVel);
@@ -886,7 +942,7 @@ namespace RLGC {
 	// The bot can do this slowly (putting) or quickly (shooting)
 	class TouchAccelReward : public Reward {
 	public:
-		constexpr static float MAX_REWARDED_BALL_SPEED = RLGC::Math::KPHToVel(110);
+		constexpr static float MAX_REWARDED_BALL_SPEED = RLGC::Math::KPHToVel(140);
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.prev)
@@ -968,6 +1024,53 @@ namespace RLGC {
 		mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
 	};
 
+	// Attacks the problem: "Accelerate the ball smartly"
+	// Combines: impulse-awareness (from NEW) + directional intent (novel)
+	// Anti-farms naturally: dribbles are lateral/evasive, not goal-directed
+	class DirectionalAccelerationReward : public Reward {
+	public:
+		float maxRewardedBallSpeed;
+		float maxRewardedImpulse;
+
+		DirectionalAccelerationReward(
+			float maxBallSpeed = RLGC::Math::KPHToVel(140),
+			float maxImpulse = RLGC::Math::KPHToVel(83)
+		) : maxRewardedBallSpeed(maxBallSpeed),
+			maxRewardedImpulse(maxImpulse)
+		{
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!state.prev) return 0.0f;
+			if (!player.ballTouchedStep) return 0.0f;
+
+			// Gate 1: Did we speed up the ball?
+			const float prevSpeed = state.prev->ball.vel.Length();
+			const float curSpeed = state.ball.vel.Length();
+			float speedDelta = curSpeed - prevSpeed;
+			if (speedDelta <= 0.0f) return 0.0f;
+
+			// Gate 2: How much force did we apply?
+			Vec impulseVec = state.ball.vel - state.prev->ball.vel;
+			float impulse = impulseVec.Length();
+			float impulseFrac = RS_CLAMP(impulse / maxRewardedImpulse, 0.0f, 1.0f);
+
+			// Gate 3: Is the new velocity pointed toward the opponent goal?
+			Vec toGoal = (player.team == Team::BLUE) ? Vec(0, 5120, 0) : Vec(0, -5120, 0);
+			Vec ballVelDir = state.ball.vel.Normalized();
+			float goalAlignment = RS_CLAMP(ballVelDir.Dot(toGoal.Normalized()), 0.0f, 1.0f);
+
+			// Base speed reward (like classic)
+			float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+			float curSpeedFrac = RS_CLAMP(curSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
+			float speedReward = curSpeedFrac - prevSpeedFrac;
+
+			// Combined: speed × effort × direction
+			// Only reward if we're both accelerating AND pointing toward goal
+			float reward = speedReward * impulseFrac * goalAlignment;
+			return (reward > 0.0f) ? reward : 0.0f;
+		}
+	};
 
 	class StrongTouchReward : public Reward {
 	public:
@@ -1334,42 +1437,65 @@ namespace RLGC {
 
 	// ============================================================================
 	// KickoffDoubleCommitPenalty
-	// Penalizes multiple teammates touching the ball at the same time during kickoff
-	// Double commits are bad - one player should commit, not two simultaneous touches
+	// Penalizes multiple teammates approaching the ball at the same speed during kickoff.
+	// Returns 0 in 1v1 (only 1 player per team).
+	// Returns 0 when teammates have meaningfully different approach speeds — one player
+	// is clearly the kicker and others are hanging back (no double commit).
+	// Fires only when 2+ teammates are converging on the ball at similar speed.
 	// ============================================================================
 	class KickoffDoubleCommitPenalty : public Reward {
 	private:
-		static constexpr float KICKOFF_BALL_RADIUS = 500.0f;
-		static constexpr float PENALTY_PER_COMMIT = -2.0f;  // Penalty for each extra simultaneous touch
+		static constexpr float KICKOFF_BALL_RADIUS   = 500.0f;
+		static constexpr float MIN_APPROACH_SPEED    = 200.0f;  // UU/s — must be actively approaching
+		static constexpr float SPEED_DIFF_THRESHOLD  = 0.20f;   // fraction — within 20% = "same speed"
+		static constexpr float PENALTY_PER_COMMIT    = -2.0f;
 
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-			// Gate: only active during kickoff (ball near center)
+			// Gate: only during kickoff
 			if (state.ball.pos.Length() >= KICKOFF_BALL_RADIUS)
 				return 0.0f;
 
-			// If this player didn't touch the ball, no penalty
-			if (!player.ballTouchedStep)
+			// Count teammates on this team (including self)
+			int teamSize = 0;
+			for (const auto& p : state.players)
+				if (p.team == player.team && !p.isDemoed) teamSize++;
+
+			// 1v1: only 1 player per team — no double commit possible
+			if (teamSize <= 1)
 				return 0.0f;
 
-			// Count how many teammates also touched the ball this frame
-			int committedCount = 0;
-			for (const auto& teammate : state.players) {
-				// Only count teammates (same team as player)
-				if (teammate.team == player.team && teammate.ballTouchedStep) {
-					committedCount++;
-				}
+			// Compute this player's approach speed toward the ball
+			Vec toBall = (state.ball.pos - player.pos);
+			float dist = toBall.Length();
+			if (dist < 1.0f) return 0.0f;
+			Vec toBallN = toBall / dist;
+			float myApproach = player.vel.Dot(toBallN);
+
+			// Not approaching the ball — can't be part of a double commit
+			if (myApproach < MIN_APPROACH_SPEED)
+				return 0.0f;
+
+			// Count teammates also approaching at a similar speed
+			int similarCount = 0;
+			for (const auto& p : state.players) {
+				if (p.team != player.team || p.isDemoed || p.carId == player.carId) continue;
+				Vec tBallN = (state.ball.pos - p.pos).Normalized();
+				float theirApproach = p.vel.Dot(tBallN);
+				if (theirApproach < MIN_APPROACH_SPEED) continue;
+
+				// Are they going at a similar speed? — within SPEED_DIFF_THRESHOLD fraction
+				float faster = RS_MAX(myApproach, theirApproach);
+				float diff   = fabsf(myApproach - theirApproach) / faster;
+				if (diff < SPEED_DIFF_THRESHOLD)
+					similarCount++;
 			}
 
-			// No penalty if only this player committed (or no one)
-			if (committedCount <= 1)
+			// If all teammates have meaningfully different speeds, no double commit
+			if (similarCount == 0)
 				return 0.0f;
 
-			// Penalty scales with how many extra commits there are
-			// committedCount = 2 → 1 extra (penalty -2.0)
-			// committedCount = 3 → 2 extra (penalty -4.0)
-			// committedCount = 4 → 3 extra (penalty -6.0)
-			return PENALTY_PER_COMMIT * (committedCount - 1);
+			return PENALTY_PER_COMMIT * similarCount;
 		}
 	};
 

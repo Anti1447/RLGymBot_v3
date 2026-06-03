@@ -127,6 +127,7 @@ void RewardFactory::Initialize() {
     Register("SoloDefenderBumpReward", []() { return new SoloDefenderBumpReward(); });
     Register("DemoedPenalty", []() { return new DemoedPenalty(); });
     Register("BumpedPenalty", []() { return new BumpedPenalty(); });
+    Register("DemoLeadApproachReward", []() { return new DemoLeadApproachReward(); });
 
     // Movement & Control
     Register("PowerSlideControlReward", []() { return new PowerSlideControlReward(); });

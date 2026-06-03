@@ -15,6 +15,7 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 |---|---|---|---|---|---|
 | GoalReward | CommonRewards.h | Goal scored | 250–450 | All | Active |
 | VelocityPlayerToBallReward | CommonRewards.h | Car moving toward ball | 0.5–2.0 | 1–3 | Active |
+| RolvDemoReward | RolvDemoReward.h | eventState.demo/bump (attacker path) + eventState.demoed (victim path). Demo: +attackerReward when victim transitions to isDemoed this frame; -victimPunishment to victim. Bump-only (non-demo): +bumpAccelerationReward × \|ΔvVictim\| / CAR_MAX_SPEED. Victim found via bumped/demoed flag + proximity (<350 UU). Credit: Rolv Arild (rlgym-tools). | Not yet in config | — | Available |
 | RolvVelocityPlayerToBallReward | RolvVelocityPlayerToBallRewards.h | Car vel toward ball, dt-normalized (1.0/s at max speed). Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
 | DotQuotientVPBReward | RolvVelocityPlayerToBallRewards.h | Inverse-time-to-ball accounting for ball velocity (vd/dd). Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
 | TrajectoryComparisonVPBReward | RolvVelocityPlayerToBallRewards.h | Linear trajectory comparison; most accurate closing-speed estimate. Source: Rolv-Arild/rlgym-tools | TBD | TBD | Available — not yet in RewardConfig |
@@ -41,6 +42,7 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 | PowerShotMassAlignmentReward | PowerShotRewards.h | ballTouchedStep + ballHitInfo.isValid; front-corner contact (lateral × forward offset) = 1.0, nose = 0.7; multiplied by center-drive alignment (fwd·toBall ≥ 0.5) | 3.0–4.0 (per context gate) | 3+ | Active |
 | PowerShotDodgeTimingReward | PowerShotRewards.h | ballTouchedStep; isFlipping at contact = +1.0, flip ended frame before contact (whiff) = -0.3, no flip = 0 | 1.5 (per context gate) | 3+ | Active |
 | PowerShotContextGate | PowerShotRewards.h | Wrapper: gates inner reward to GROUND (on-ground, ball z ≤ 260) / HALF_VOLLEY (airborne, ball z ≤ 260, ball.vel.z > 0) / VOLLEY (airborne, ball z > 260) / AERIAL_NODODGE (airborne, !HasFlipOrJump, ball z > 260) | N/A (wrapper) | 3+ | Active |
+| KickoffMassAlignmentReward | PowerShotRewards.h | ballTouchedStep during kickoff (ball within 280 UU of center, ball.vel < 200 UU/s); MULTIPLY of: lateral x-alignment (|pos.x| ≤ 500 UU falloff), y-direction fraction (correct-team vel.y / speed), speed / CAR_MAX_SPEED, equatorial z-alignment (1 - |relZ| / BALL_RADIUS via ballHitInfo). Min speed 1000 UU/s. One-shot per player per kickoff via PreStep state machine. | 5.0 | 3+ | Active |
 | AirReward | CommonRewards.h | Car airborne | 0.25 | 1 | Active |
 | FaceBallReward | CommonRewards.h | Car facing ball | 0.3 | 1 | Active |
 | VelocityReward | CommonRewards.h | Car speed | 0.4 | 1 | Active |
@@ -72,8 +74,10 @@ Update Status and Weight columns whenever a reward ships, is retired, or changes
 | EmergencySaveCommitReward | PreemptiveSaveRewards.h | Emergency save commit | 4 | 5+ | Active |
 | DoubleCommitPenalty | PossessionRewards.h | Both teammates commit | 5 | 6+ | Active |
 | PossessionControlReward | PossessionRewards.h | Ball possession maintenance | 15 | 6+ | Active (ZeroSum) |
-| ShadowDefenseVsPossessionReward | PossessionRewards.h | Shadow vs possession tradeoff | 1.9 | 6+ | Active (ZeroSum) |
+| ShadowDefenseVsPossessionReward | CompleteMechanicsRewards.h | Shadow vs possession tradeoff | 1.9 | 6+ | Active (ZeroSum) |
 | DefensivePositioningChallengeReward | PositioningRewards.h | Defensive challenge positioning | 2.5 | 6+ | Active |
+| BallSideNumericalAdvantageReward | BallSideNumericalAdvantageReward.h | Y-only behind-ball count: myBehind - oppBehind > 0. Returns advantageDiff * 0.05f. Gates: contested ball within 1500 UU, skip kickoff. Phase 3+. | 0.5 | 3+ | Active (ZeroSum) |
+| ChallengeAngleQualityReward | ChallengeAngleQualityReward.h | dot(playerToBall, ballToOppGoal) while closing on contested ball — rewards approaching from own-goal side (threat vector). Requires opponent also closing >150 UU/s within 2000 UU. | 1.5 | 6+ | Active (ZeroSum) |
 | PassingSetupReward | PassingRewards.h | Setup for teammate pass | 40 | 5+ | Active (ZeroSum) |
 | ReceivingPassReward | PassingRewards.h | Receive pass from teammate | 40 | 5+ | Active (ZeroSum) |
 | HighPassReward | PassingRewards.h | High pass to teammate | 10 | 5+ | Active (ZeroSum) |
@@ -108,6 +112,8 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 | TouchAccelReward | 90.0f | MECHANICS | Touch with acceleration | Yes | High weight for quality contact |
 | PowerSlideControlReward | 0.55f | MECHANICS | Powerslide with control | No | Technique shaping |
 | EnhancedVelocityBallToGoalReward | 25.0f | OFFENSE | Ball toward goal (improved formula) | Yes | Replaces legacy VelocityBallToGoal |
+| GoalViewReward | 5.0f | OFFENSE | Potential shaping: Δ(solid-angle goal prob) per step | No | Port of rlgym-tools GoalViewReward by Rolv. Unfarmable by construction (Ng et al. 1999). gamma=0.99f must match training discount. Do NOT wrap in ZeroSumReward — team sign is handled internally. Phase 5+. |
+| PoorWallReboundPenalty | 30.0f | DEFENSE/POSSESSION | Side-wall touch → bounce → opponent wins TimeToReach | No | 3-stage: qualifying touch near/toward side wall → x-vel sign flip → opponent ≥15% faster. Fires once per touch event on the toucher. Phase 4+. Cannot be farmed (penalty). |
 
 ## Aerial & Advanced Mechanics
 
@@ -215,6 +221,8 @@ Complete reward list for Phase 6 Champion training. This is the authoritative so
 
 | Reward | Weight | Category | Trigger | ZeroSum? | Notes |
 |---|---|---|---|---|---|
+| DemoLeadApproachReward | 25.0f | DEMO | Active | Continuous: high-speed approach aimed at opponent's predicted pos (0.25s ahead); fires when leading better than chasing; Phase 3+. ZeroSum 0.3f. |
+| DemoInterceptLeadReward | 15.0f | DEMO | Active | Continuous: ball approaching opp net; finds closest intercepting opponent; rewards closest friendly flying at any of 3 physics-predicted intercept points at speed; Phase 3+. ZeroSum 0.3f. |
 | BumpReward | 100.0f | OFFENSE | Opponent bump (non-ZeroSum) | No | Offensive impact |
 | DemoReward | 350.0f | OFFENSE | Opponent demo (non-ZeroSum) | No | Aggressive play |
 | DemoReward (ZeroSum) | 500.0f | OFFENSE | Opponent demo (ZeroSum) | Yes | Defensive value |
@@ -256,7 +264,7 @@ All 7 classes are in `PredictiveDemoRewards.h`. All registered with `shadowMode=
 | RetreatAfterTouchReward | 2.5f | POSITIONING | Retreat after touch | No | Rotation prep |
 | ActiveSupportingPositionReward | 10.0f | POSITIONING | 3-slot pass-to-score: far post / penalty spot / wide diagonal | No | 2nd-man scoring position |
 | GoalpostPositioningReward | 8.0f | POSITIONING | Goalpost coverage | No | Defensive coverage |
-| ShadowDefenseVsPossessionReward | 3.0f | POSITIONING | Shadow vs possession trade | Yes | Tactical balance |
+| ShadowDefenseVsPossessionReward | 3.0f | POSITIONING | Rev 2.0: dynamic shadow distance (500-1700 UU scaled by play speed) + velocity mirroring + facing; soft goal-side & anti-blitz multipliers | Yes | Tactical balance |
 
 ## Teamwork & Passing
 
@@ -304,7 +312,7 @@ All 7 classes are in `PredictiveDemoRewards.h`. All registered with `shadowMode=
 | FlipResetApproachReward | (Phase 5 focus) | MECHANICS | Phase 6: replaced by SimpleFlipReset | See Phase 6 for current flip reset approach |
 | UnifiedAirDribbleReward | 50.0f | MECHANICS | Deprecated | Replaced by setup+bump combo |
 | VelocityBallToGoalReward | 30.0f | OFFENSE | Deprecated | Replaced by EnhancedVelocityBallToGoal |
-| AirRollShotReward | 6.0f | SHOOTING | Deprecated | Low activation |
+| AirRollShotReward | 20.0f Ph3 / 8.0f Ph5 / 10.0f Ph7-8 | SHOOTING | Active | Rev 2.0: airborne + 20-80° roll + underside ball contact + flip within 0.35s |
 | HookShotReward | 5.0f | SHOOTING | Deprecated | Niche mechanic |
 | DirectionChangeReward | 15.0f | OFFENSE | Deprecated | Low priority |
 | CutOutplayReward | 15.0f | OFFENSE | Deprecated | Context unclear |

@@ -1,6 +1,6 @@
 #pragma once
 #include "Reward.h"
-#include <map>
+#include <unordered_map>
 #include <cmath>
 #include "RewardMath.h"
 
@@ -11,42 +11,35 @@ namespace RLGC {
 	//
 	// Merges the following flick rewards into a single comprehensive system:
 	// 1. FlickExplorationReward - Rewards non-standard, exploration-focused flicks
-	// 2. MustyFlickReward - Back flip flicks with specific pitch validation
-	// 3. BackFlipFlickReward - Simple back flip flick detection
-	// 4. AdvancedFlickReward - High-speed flicks with directional emphasis
-	// 5. FlickOnGoalReward - Flicks directed toward the opponent goal
-	// 6. FlickReward - Basic flick detection with acceleration-based rewards
+	// 2. BackFlipFlickReward - Simple back flip flick detection
+	// 3. AdvancedFlickReward - High-speed flicks with directional emphasis
+	// 4. FlickOnGoalReward - Flicks directed toward the opponent goal
+	// 5. FlickReward - Basic flick detection with acceleration-based rewards
 	//
 	// 2026-02-16 | Rev 1.0 | Composite Design
+	// 2026-05-30 | Rev 2.0 | Removed musty flick channel (Channel 1 + exploration
+	//                         isMusty branch). Musty attempts now fall to default
+	//                         exploration branch (~33% lower reward, not a blind spot).
+	//                         std::map -> std::unordered_map for O(1) key lookups.
 	// ============================================================================
 	class CompositeFlickReward : public Reward {
 	private:
 		// ====================================================================
 		// STATE TRACKING
 		// ====================================================================
-		mutable std::map<uint32_t, float> ballOnCarTime;
-		mutable std::map<uint32_t, bool> ballWasOnCar;
-		mutable std::map<uint32_t, Vec> lastCarForward;
-		mutable std::map<uint32_t, Vec> lastCarUp;
-		mutable std::map<uint32_t, float> lastCarPitch;
-		mutable std::map<uint32_t, float> lastCarYaw;
-
-		// Musty-specific tracking
-		struct MustyTracker {
-			enum State { WAITING, FLIP_DETECTED, BALL_CONTACT, COMPLETED };
-			State state = WAITING;
-			float flipStartTime = -1.0f;
-			float minPitchDuringFlip = 0.0f;
-			bool ballTouchedDuringFlip = false;
-		};
-		mutable std::map<uint32_t, MustyTracker> mustyTrackers;
+		mutable std::unordered_map<uint32_t, float> ballOnCarTime;
+		mutable std::unordered_map<uint32_t, bool>  ballWasOnCar;
+		mutable std::unordered_map<uint32_t, Vec>   lastCarForward;
+		mutable std::unordered_map<uint32_t, Vec>   lastCarUp;
+		mutable std::unordered_map<uint32_t, float> lastCarPitch;
+		mutable std::unordered_map<uint32_t, float> lastCarYaw;
 
 		// FlickOnGoal tracking
 		struct FlickOnGoalPending {
 			float timeLeft = 0.0f;
 			bool armed = false;
 		};
-		mutable std::map<uint32_t, FlickOnGoalPending> flickOnGoalPending;
+		mutable std::unordered_map<uint32_t, FlickOnGoalPending> flickOnGoalPending;
 
 		// ====================================================================
 		// GEOMETRY GATES (shared across all flick types)
@@ -86,22 +79,8 @@ namespace RLGC {
 		static constexpr float MIN_BACKFLIP_SPEED = 1500.0f;
 		static constexpr float BACKFLIP_BASE_REWARD = 6.0f;
 		static constexpr float MIN_PITCH_DEGREES = -15.0f;  // Negative pitch for back flip
-
-		// ====================================================================
-		// MUSTY FLICK PARAMETERS
-		// ====================================================================
-		static constexpr float PITCH_BAND_1_CENTER = 90.0f;
-		static constexpr float PITCH_BAND_2_CENTER = 270.0f;
-		static constexpr float PITCH_TOLERANCE = 20.0f;
-		static constexpr float MUSTY_MIN_FLICK_SPEED = 1500.0f;
-		static constexpr float MUSTY_MAX_FLICK_SPEED = 2500.0f;
-		static constexpr float MUSTY_BASE_REWARD = 7.0f;
-		static constexpr float MUSTY_GOAL_DIRECTION_SCALE = 0.3f;
-		static constexpr float MUSTY_BALL_FORWARD_MIN = 100.0f;
-		static constexpr float MUSTY_BALL_FORWARD_MAX = 1500.0f;
-		static constexpr float MUSTY_BALL_HEIGHT_MIN = 50.0f;
-		static constexpr float MUSTY_BALL_HEIGHT_MAX = 400.0f;
-		static constexpr float MUSTY_BALL_HORIZONTAL_MAX = 200.0f;
+		// Note: backflip pitch gate (< -15°) is mutually exclusive with the former
+		// musty pitch range (~90-270°), so no false positives after musty removal.
 
 		// ====================================================================
 		// FLICK ON GOAL PARAMETERS
@@ -124,7 +103,6 @@ namespace RLGC {
 			lastCarUp.clear();
 			lastCarPitch.clear();
 			lastCarYaw.clear();
-			mustyTrackers.clear();
 			flickOnGoalPending.clear();
 		}
 
@@ -154,7 +132,7 @@ namespace RLGC {
 				tOnCar = 0.0f;
 			}
 
-			// Update orientation tracking for exploration/musty flicks
+			// Update orientation tracking for exploration flicks
 			auto& wasOnCar = ballWasOnCar[id];
 			lastCarForward[id] = player.rotMat.forward;
 			lastCarUp[id] = player.rotMat.up;
@@ -164,18 +142,10 @@ namespace RLGC {
 			wasOnCar = ballOnCar;
 
 			// ====================================================================
-			// CHANNEL 1: MUSTY FLICK DETECTION
-			// ====================================================================
-			const Player& prevPlayer = state.prev->players[player.index];
-			float mustyReward = EvaluateMustyFlick(player, prevPlayer, state, dt, id, tOnCar);
-			if (mustyReward > 0.0f) {
-				tOnCar = 0.0f;
-				return mustyReward;
-			}
-
-			// ====================================================================
 			// CHANNEL 2: FLICK TRIGGER (ball leaves car after dribble)
 			// ====================================================================
+			const Player& prevPlayer = state.prev->players[player.index];
+
 			if (player.ballTouchedStep && !ballOnCar && tOnCar >= MIN_ON_CAR_TIME) {
 				float ballSpeed = state.ball.vel.Length();
 
@@ -264,128 +234,6 @@ namespace RLGC {
 
 	private:
 		// ====================================================================
-		// CHANNEL 1: MUSTY FLICK EVALUATION
-		// ====================================================================
-		float EvaluateMustyFlick(const Player& player, const Player& prevPlayer,
-			const GameState& state, float dt, uint32_t id, float tOnCar) const {
-
-			auto& tracker = mustyTrackers[id];
-
-			// Phase 1: Flip Input Detection
-			if (player.isFlipping && !prevPlayer.isFlipping) {
-				float pitchDegrees = asin(RS_CLAMP(-player.rotMat.up.z, -1.0f, 1.0f)) * 57.2958f;
-
-				if (IsValidMustyPitch(pitchDegrees)) {
-					tracker.state = MustyTracker::FLIP_DETECTED;
-					tracker.flipStartTime = 0.0f;
-					tracker.minPitchDuringFlip = pitchDegrees;
-				} else {
-					tracker.state = MustyTracker::WAITING;
-					return 0.0f;
-				}
-			}
-
-			// Timeout: if flipping for > 1.5 seconds, reset
-			if (tracker.state != MustyTracker::WAITING) {
-				tracker.flipStartTime += dt;
-				if (tracker.flipStartTime > 1.5f) {
-					tracker.state = MustyTracker::WAITING;
-					return 0.0f;
-				}
-			}
-
-			// Track minimum pitch during flip
-			if (tracker.state == MustyTracker::FLIP_DETECTED && player.isFlipping) {
-				float pitchDegrees = asin(RS_CLAMP(-player.rotMat.up.z, -1.0f, 1.0f)) * 57.2958f;
-				if (IsValidMustyPitch(pitchDegrees)) {
-					tracker.minPitchDuringFlip = RS_MIN(tracker.minPitchDuringFlip, fabs(pitchDegrees));
-				}
-			}
-
-			// Phase 2: Ball Contact Validation
-			if (tracker.state == MustyTracker::FLIP_DETECTED && player.ballTouchedStep) {
-				if (IsBallInMustyZone(player, state)) {
-					tracker.state = MustyTracker::BALL_CONTACT;
-					tracker.ballTouchedDuringFlip = true;
-				}
-			}
-
-			// Phase 3: Reward Trigger
-			if (tracker.state == MustyTracker::BALL_CONTACT && tracker.ballTouchedDuringFlip) {
-				float ballSpeed = state.ball.vel.Length();
-
-				if (ballSpeed < MUSTY_MIN_FLICK_SPEED) {
-					tracker.state = MustyTracker::WAITING;
-					return 0.0f;
-				}
-
-				if (!HasForwardDominantAccel(state)) {
-					tracker.state = MustyTracker::WAITING;
-					return 0.0f;
-				}
-
-				float reward = CalculateMustyReward(ballSpeed, player, state);
-				tracker.state = MustyTracker::WAITING;
-				tracker.ballTouchedDuringFlip = false;
-
-				return reward;
-			}
-
-			return 0.0f;
-		}
-
-		bool IsValidMustyPitch(float pitchDegrees) const {
-			float band1Min = PITCH_BAND_1_CENTER - PITCH_TOLERANCE;
-			float band1Max = PITCH_BAND_1_CENTER + PITCH_TOLERANCE;
-			float band2Min = PITCH_BAND_2_CENTER - PITCH_TOLERANCE;
-			float band2Max = PITCH_BAND_2_CENTER + PITCH_TOLERANCE;
-
-			float normalizedPitch = pitchDegrees;
-			if (normalizedPitch < 0.0f) {
-				normalizedPitch += 360.0f;
-			}
-
-			bool inBand1 = (normalizedPitch >= band1Min && normalizedPitch <= band1Max);
-			bool inBand2 = (normalizedPitch >= band2Min && normalizedPitch <= band2Max);
-
-			return inBand1 || inBand2;
-		}
-
-		bool IsBallInMustyZone(const Player& player, const GameState& state) const {
-			Vec relPos = state.ball.pos - player.pos;
-
-			float height = relPos.z;
-			float forward = relPos.Dot(player.rotMat.forward);
-			float horizontal = fabs(relPos.Dot(player.rotMat.right));
-
-			bool validForward = (forward > MUSTY_BALL_FORWARD_MIN && forward < MUSTY_BALL_FORWARD_MAX);
-			bool validHeight = (height > MUSTY_BALL_HEIGHT_MIN && height < MUSTY_BALL_HEIGHT_MAX);
-			bool validHorizontal = (horizontal < MUSTY_BALL_HORIZONTAL_MAX);
-
-			return validForward && validHeight && validHorizontal;
-		}
-
-		bool HasForwardDominantAccel(const GameState& state) const {
-			Vec ballVel = state.ball.vel;
-			float horizontalSpeed = Vec(ballVel.x, ballVel.y, 0).Length();
-			float verticalSpeed = fabs(ballVel.z);
-
-			return horizontalSpeed > verticalSpeed;
-		}
-
-		float CalculateMustyReward(float ballSpeed, const Player& player, const GameState& state) const {
-			float speedScore = RS_CLAMP(ballSpeed / MUSTY_MAX_FLICK_SPEED, 0.0f, 1.0f);
-
-			Vec opponentGoal = (player.team == Team::BLUE) ?
-				CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-			Vec toGoal = (opponentGoal - state.ball.pos).Normalized();
-			float goalAlignment = state.ball.vel.Normalized().Dot(toGoal);
-			float directionBonus = RS_MAX(0.0f, goalAlignment);
-
-			return MUSTY_BASE_REWARD * speedScore * (1.0f + MUSTY_GOAL_DIRECTION_SCALE * directionBonus);
-		}
-
-		// ====================================================================
 		// CHANNEL 2A: BACK FLIP FLICK EVALUATION
 		// ====================================================================
 		float EvaluateBackFlipFlick(const Player& player, const GameState& state, const Player& prevPlayer) const {
@@ -429,15 +277,12 @@ namespace RLGC {
 
 			float reward = 0.0f;
 
-			// Check for standard front flip flick
+			// Check for standard front flip flick (intentionally suppressed at 0.5f)
 			bool isFrontFlip = (forwardAlignment > 0.85f && yawChange < 1.5f && pitchChange > 2.0f);
 
-			// Check for standard diagonal flick
+			// Check for standard diagonal flick (intentionally suppressed at 0.5f)
 			bool isDiagonalFlip = (forwardAlignment > 0.6f && forwardAlignment <= 0.85f &&
 				yawChange > 1.5f && yawChange < 3.5f);
-
-			// Musty flick: backward flip
-			bool isMusty = (forwardAlignment < -0.3f && pitchChange > 2.5f);
 
 			// Side flick: mostly yaw rotation
 			bool isSideFlick = (std::abs(forwardAlignment) < 0.5f && yawChange > 3.0f);
@@ -451,9 +296,6 @@ namespace RLGC {
 			// Reward structure
 			if (isFrontFlip || isDiagonalFlip) {
 				reward = 0.5f;
-			}
-			else if (isMusty) {
-				reward = 30.0f * (ballSpeed / 2000.0f);
 			}
 			else if (isSideFlick) {
 				reward = 25.0f * (ballSpeed / 2000.0f);
@@ -616,7 +458,7 @@ namespace RLGC {
 				sauceMultiplier += 0.3f;
 			}
 
-			// Perpendicular sauce: component of dv perpendicular to the ball’s previous trajectory.
+			// Perpendicular sauce: component of dv perpendicular to the ball's previous trajectory.
 			// Maximum (0.5 bonus) for a pure 90-degree side-flick redirect; 0 for a straight push.
 			// This is the core "saucy" metric — how dramatically the flick redirects the ball.
 			Vec prevBallVel = state.prev->ball.vel;

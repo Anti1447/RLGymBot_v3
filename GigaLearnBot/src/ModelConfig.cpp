@@ -30,12 +30,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_3_GOLD:
-        cfg.entropyScale = 0.028f;
-        cfg.policyLR = 1.8e-4f;
-        cfg.criticLR = 1.8e-4f;
+        cfg.entropyScale = 0.025f;
+		cfg.policyLR = 1.4e-4f; // start at 1.8e-4f but reduce faster if overfitting occurs
+        cfg.criticLR = 1.4e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.4f;
+        cfg.randomStateChance = 0.6f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         cfg.enableProfiling = false;  // CHANGE THIS TO true/false TO ENABLE/DISABLE PROFILING
@@ -135,7 +135,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.maxOldVersions = 64;
 
     cfg.trainAgainstOldVersions = true;
-    cfg.trainAgainstOldChance = 0.2f;
+    cfg.trainAgainstOldChance = 0.4f;
 
     // === SKILL TRACKER ===
     // Skill tracker evaluates the agent across mixed game modes (1v1, 2v2, 3v3)
@@ -143,10 +143,10 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // with distribution: 1v1 (1/6), 2v2 (2/6), 3v3 (3/6)
     // This ensures the skill rating reflects performance across all modes
     cfg.skillTracker.enabled = true;
-    cfg.skillTracker.numArenas = 32;       // Sufficient for mixed-mode evaluation
-    cfg.skillTracker.simTime = 90.f;       // Per-arena sim time
-    cfg.skillTracker.maxSimTime = 240.f;
-    cfg.skillTracker.updateInterval = 32;
+    cfg.skillTracker.numArenas = 64;       // Sufficient for mixed-mode evaluation
+    cfg.skillTracker.simTime = 60.f;       // Per-arena sim time
+    cfg.skillTracker.maxSimTime = 240.0f;
+    cfg.skillTracker.updateInterval = 16;
     cfg.skillTracker.ratingInc = 5.f;
     cfg.skillTracker.initialRating = 0.f;
     cfg.skillTracker.deterministic = false;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9951;
+    cfg.ppo.gaeGamma = 0.9958;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

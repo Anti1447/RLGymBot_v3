@@ -59,6 +59,7 @@
 #include "Reward.h"
 #include "../Math.h"
 #include <cmath>
+#include <map>
 #include "../CommonValues.h"
 
 namespace RLGC {
@@ -301,6 +302,104 @@ namespace RLGC {
 
             if (!match) return 0.0f;
             return inner ? inner->GetReward(player, state, isFinal) : 0.0f;
+        }
+    };
+
+    // =========================================================================
+    // 5. KICKOFF MASS ALIGNMENT REWARD
+    //
+    // Kickoff-specific reward measuring HOW the car approached the ball, not
+    // where on the ball it made contact. The ideal kickoff approach tracks the
+    // field's central y-axis (x ≈ 0) so the car's full mass+momentum transfers
+    // into a clean straight-ahead push. Diagonal approaches leak momentum into
+    // the x-direction and produce off-center hits.
+    //
+    // Three components, all multiplied so a high score requires all three:
+    //   lateralScore  — how close car.pos.x is to 0 at contact (centerline)
+    //   yAlignment    — fraction of car velocity in the correct ±y direction
+    //   speedScore    — total car speed normalized to CAR_MAX_SPEED
+    //
+    // Fires once per player per kickoff on ballTouchedStep.
+    // Kickoff detection: ball within 280 UU of center AND ball speed < 200 UU/s.
+    // Min car speed 1000 UU/s — prevents rewarding slow tap-ins.
+    //
+    // No ZeroSum: consistent with every other kickoff reward in this codebase.
+    // =========================================================================
+    class KickoffMassAlignmentReward : public Reward {
+    private:
+        // Standard kickoff detection thresholds (matches KickoffFormReward).
+        static constexpr float BALL_AT_CENTER_DIST = 280.0f;
+        static constexpr float BALL_MAX_VEL        = 200.0f;
+
+        // Maximum x-offset that still scores (linear falloff, zero at edge).
+        static constexpr float MAX_LATERAL_OFFSET  = 500.0f;
+
+        // Minimum car speed to qualify — slow tap-ins don't count.
+        static constexpr float MIN_SPEED           = 1000.0f;
+
+        mutable bool kickoffActive = false;
+        mutable std::map<uint32_t, bool> kickoffContacted;
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            kickoffActive = false;
+            kickoffContacted.clear();
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            bool isKickoff = state.ball.pos.Length() < BALL_AT_CENTER_DIST &&
+                             state.ball.vel.Length() < BALL_MAX_VEL;
+            if (isKickoff && !kickoffActive) {
+                // New kickoff started — reset contact tracking.
+                kickoffActive = true;
+                kickoffContacted.clear();
+            } else if (!isKickoff) {
+                kickoffActive = false;
+            }
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (!kickoffActive) return 0.0f;
+            if (!player.ballTouchedStep) return 0.0f;
+
+            // One-shot per player per kickoff.
+            auto& contacted = kickoffContacted[player.carId];
+            if (contacted) return 0.0f;
+            contacted = true;
+
+            float speed = player.vel.Length();
+            if (speed < MIN_SPEED) return 0.0f;
+
+            // Signal 1: Lateral alignment — car should be near x = 0 at contact.
+            float lateralOffset = std::abs(player.pos.x);
+            float lateralScore  = RS_CLAMP(
+                1.0f - lateralOffset / MAX_LATERAL_OFFSET, 0.0f, 1.0f);
+
+            // Signal 2: Approach direction — velocity should be primarily in the
+            // correct y direction (Blue approaches from y < 0, needs +y velocity;
+            // Orange approaches from y > 0, needs -y velocity).
+            float correctYVel = (player.team == Team::BLUE)
+                                    ?  player.vel.y
+                                    : -player.vel.y;
+            float yAlignment  = RS_CLAMP(correctYVel / speed, 0.0f, 1.0f);
+
+            // Signal 3: Speed — more momentum delivers more power.
+            float speedScore  = RS_CLAMP(speed / CommonValues::CAR_MAX_SPEED, 0.0f, 1.0f);
+
+            // Signal 4: Vertical contact height — hitting the ball's equator (z ≈ 0
+            // on the ball surface) keeps the ball on a flat, hard-to-intercept
+            // trajectory. Hitting too high pops it up; too low sends it into the
+            // ground. relativePosOnBall is a world-space Vec from ball center to
+            // contact point; its z component tells us how far above/below center we
+            // hit. Magnitude ≈ BALL_RADIUS (92.75), so |relZ| / BALL_RADIUS → [0, 1]
+            // with 0 = equator (best) and 1 = pole (worst).
+            float zScore = 1.0f;  // neutral fallback when hit info unavailable
+            if (player.prev && player.prev->ballHitInfo.isValid) {
+                float relZ = player.prev->ballHitInfo.relativePosOnBall.z;
+                zScore = RS_CLAMP(1.0f - std::abs(relZ) / BALL_RADIUS, 0.0f, 1.0f);
+            }
+
+            return lateralScore * yAlignment * speedScore * zScore;  // [0, 1]
         }
     };
 

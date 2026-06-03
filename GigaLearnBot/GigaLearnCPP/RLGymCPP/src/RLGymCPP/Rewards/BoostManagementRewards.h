@@ -600,7 +600,7 @@ namespace RLGC {
     class SaveBoostReward : public Reward {
     public:
         float exponent;
-        SaveBoostReward(float exponent = 1.0f) : exponent(exponent) {}
+        SaveBoostReward(float exponent = 0.5f) : exponent(exponent) {}
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             float boostFraction = player.boost / 100.0f;

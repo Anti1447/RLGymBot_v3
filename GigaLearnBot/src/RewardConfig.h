@@ -56,8 +56,15 @@
 #include <RLGymCPP/Rewards/AdvancedKickoffRewards.h>
 #include <RLGymCPP/Rewards/SoloPlayRewards.h>
 #include <RLGymCPP/Rewards/RolvVelocityPlayerToBallRewards.h>
+#include <RLGymCPP/Rewards/RolvDemoReward.h>
+#include <RLGymCPP/Rewards/DemoLeadApproachReward.h>
+#include <RLGymCPP/Rewards/DemoInterceptLeadReward.h>
 #include <RLGymCPP/Rewards/PowerslideTurnRewards.h>
 #include <RLGymCPP/Rewards/PowerShotRewards.h>
+#include <RLGymCPP/Rewards/ChallengeAngleQualityReward.h>
+#include <RLGymCPP/Rewards/BallSideNumericalAdvantageReward.h>
+#include <RLGymCPP/Rewards/GoalViewReward.h>
+#include <RLGymCPP/Rewards/WallReboundPenalty.h>
 using namespace RLGC;
 
 enum class TrainingPhase {

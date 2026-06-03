@@ -7,7 +7,7 @@
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
 #include <RLGymCPP/TerminalConditions/DemoCountCondition.h>
 #include <RLGymCPP/OBSBuilders/AdvancedObsPaddedV2.h>
-#include <RLGymCPP/StateSetters/KickoffState.h>
+#include <RLGymCPP/StateSetters/FuzzedKickoffState.h>
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/StateSetters/AerialTrainingState.h>
@@ -98,7 +98,7 @@ EnvCreateResult EnvCreateFunc(int index) {
         kickoffWeight *= (1.0f - phaseCfg.aerialTrainingChance);
     }
 
-    stateSetters.push_back({ new KickoffState(), kickoffWeight });
+    stateSetters.push_back({ new FuzzedKickoffState(), kickoffWeight });
 
     // Add random state if enabled
     if (phaseCfg.useRandomState) {
@@ -151,6 +151,17 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         report.AddAvg("AirDribble/On Target", airDribbleMetrics.onTarget);
         report.AddAvg("AirDribble/Overshot Count", airDribbleMetrics.overshotCount);
         report.AddAvg("AirDribble/Total Reward", airDribbleMetrics.rewardSum);
+    }
+
+    // ========================================================================
+    // SHADOW DEFENSE METRICS (collected every step)
+    // ========================================================================
+    auto shadowMetrics = ShadowDefenseVsPossessionReward::GetAndResetMetrics();
+    if (shadowMetrics.fireCount > 0) {
+        report.AddAvg("ShadowDefense/Attempts",      (float)shadowMetrics.fireCount);
+        report.AddAvg("ShadowDefense/AvgReward",     shadowMetrics.avgReward);
+        report.AddAvg("ShadowDefense/AvgTargetDist", shadowMetrics.avgTargetDist);
+        report.AddAvg("ShadowDefense/AvgVelMatch",   shadowMetrics.avgVelMatch);
     }
 
     // ========================================================================
