@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "7777", "--directory", "ClaudeFiles"],
       "port": 7777
+    },
+    {
+      "name": "mmr-tracker",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765"],
+      "port": 8765
     }
   ]
 }

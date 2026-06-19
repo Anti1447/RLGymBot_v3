@@ -35,19 +35,19 @@ PhaseConfig GetPhaseConfig() {
         cfg.criticLR = 1.4e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.6f;
+        cfg.randomStateChance = 0.3f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;
         cfg.enableProfiling = false;  // CHANGE THIS TO true/false TO ENABLE/DISABLE PROFILING
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
-        cfg.entropyScale = 0.032f;
-        cfg.policyLR = 1.3e-4f;
-        cfg.criticLR = 1.3e-4f;
+        cfg.entropyScale = 0.0215f;
+        cfg.policyLR = 1.1e-4f;
+        cfg.criticLR = 1.1e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.6f;
+        cfg.randomStateChance = 0.7f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
         break;
@@ -173,7 +173,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 123;
 
     // === PPO CONFIG ===
-    int tsPerItr = 200'000;
+    int tsPerItr = 250'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9958;
+    cfg.ppo.gaeGamma = 0.9971f;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

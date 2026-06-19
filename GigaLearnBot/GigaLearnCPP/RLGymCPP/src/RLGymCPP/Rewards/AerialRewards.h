@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include <map>
+#include <atomic>
 #include <cmath>
 
 namespace RLGC {
@@ -117,46 +118,51 @@ namespace RLGC {
 	// ============================================================================
 	// PitchControlAerialReward - Reward fast aerial technique with pitch control
 	// Detects and rewards jump → pitch up → jump sequence for quick aerial boost
-	// 2026-02-08 | Rev 1.0 | NJH
+	// 2026-02-08 | Rev 2.0 | NJH
 	//
-	// Key features:
-	// - First jump off ground
-	// - Pitch car nose upward (>15°) during first jump
-	// - Second jump input within 2 seconds
-	// - Higher reward than DoubleJumpAerial for executing full technique
-	// - Bonus for optimal pitch angle (closer to 45° is better)
-	// - Can include boost usage but not required
+	// Rev 2.0 fixes (6 bugs, 2 critical):
+	// [CRITICAL] Boost gate zeroed all rewards — removed sequenceStartBoost/boostMultiplier
+	// [CRITICAL] Height computed on same tick as 2nd jump (always 0) — deferred to next tick
+	// [minor] COMPLETED state was unreachable — removed from enum
+	// [minor] DOUBLE_JUMP_WINDOW 0.4s too tight for humans — widened to 0.55s
+	// [minor] GetPitchAccuracyScore clamped to 90° instead of MAX_PITCH_DEGREES — fixed
+	// [minor] No boost-during-ascent signal — added 1.5x multiplier for boost use in Phase 2
 	// ============================================================================
 	class PitchControlAerialReward : public Reward {
 	private:
 		struct FastAerialTracker {
-			enum State { WAITING, FIRST_JUMP, PITCHED_UP, SECOND_JUMP, COMPLETED };
+			enum State { WAITING, FIRST_JUMP, PITCHED_UP, SECOND_JUMP };
 
 			State state = WAITING;
-			float jumpStartTime = -1.0f;
+			float jumpStartTime = 0.0f;
 			float firstJumpHeight = 0.0f;
 			float maxPitchDuringFirstJump = 0.0f;
 			bool isPitchedUpEnough = false;
 			bool secondJumpDetected = false;
 			float maxHeightAfterSecondJump = 0.0f;
-			float sequenceStartBoost = -1.0f;  // NEW: Boost when sequence started (for linear scaling 0-30)
+			bool rewardPending = false;        // deferred payout — pay on the tick AFTER 2nd jump
+			bool boostedDuringAscent = false;  // tracks boost use in Phase 2 (FIRST_JUMP → PITCHED_UP)
 		};
 
 		mutable std::map<uint32_t, FastAerialTracker> trackers;
 
+		// Metrics
+		mutable std::atomic<uint64_t> s_totalAwardedCount{0};
+		mutable std::atomic<uint64_t> s_boostBonusCount{0};
+		mutable std::atomic<int64_t>  s_totalRewardSum{0};  // stored as reward * 1000 (milliunits)
+
 		// Configuration
-		static constexpr float DOUBLE_JUMP_WINDOW = 0.4f;         // Max time between jumps (0.25-0.5s window, now 0.4s)
-		static constexpr float MIN_PITCH_DEGREES = 25.0f;         // Minimum pitch requirement (was 15.0f, now 25.0f for 45±20° range)
-		static constexpr float MAX_PITCH_DEGREES = 65.0f;         // Maximum pitch requirement (NEW: enforce upper bound of 45±20° range)
-		static constexpr float OPTIMAL_PITCH_DEGREES = 45.0f;     // Sweet spot for pitch
-		static constexpr float PITCH_TOLERANCE = 15.0f;           // Tolerance around optimal
-		static constexpr float BASE_REWARD = 2.0f;                // Base reward for fast aerial
-		static constexpr float HEIGHT_BONUS_SCALE = 0.005f;       // Higher bonus per unit height
-		static constexpr float MAX_HEIGHT_BONUS = 3.0f;           // Cap on height bonus
-		static constexpr float PITCH_BONUS_SCALE = 0.02f;         // Bonus for good pitch angle
-		static constexpr float MAX_PITCH_BONUS = 1.0f;            // Cap on pitch bonus
-		static constexpr float MIN_BOOST_FOR_REWARD = 0.0f;       // NEW: Minimum boost gate (0.0f allows linear scaling from 0)
-		static constexpr float BOOST_SCALE_THRESHOLD = 30.0f;     // NEW: Boost scaling: 0-30 maps to 0.0-1.0x multiplier
+		static constexpr float DOUBLE_JUMP_WINDOW    = 0.55f;   // widened from 0.4s — gives humans more headroom
+		static constexpr float MIN_PITCH_DEGREES     = 25.0f;
+		static constexpr float MAX_PITCH_DEGREES     = 65.0f;
+		static constexpr float OPTIMAL_PITCH_DEGREES = 45.0f;
+		static constexpr float PITCH_TOLERANCE       = 15.0f;
+		static constexpr float BASE_REWARD           = 2.0f;
+		static constexpr float HEIGHT_BONUS_SCALE    = 0.005f;
+		static constexpr float MAX_HEIGHT_BONUS      = 3.0f;
+		static constexpr float PITCH_BONUS_SCALE     = 0.02f;
+		static constexpr float MAX_PITCH_BONUS       = 1.0f;
+		static constexpr float BOOST_ASCENT_MULTIPLIER = 1.5f;  // applied when boost used during ascent
 
 	public:
 		virtual void Reset(const GameState& initialState) override {
@@ -168,25 +174,54 @@ namespace RLGC {
 
 			auto& tracker = trackers[player.carId];
 			const Player& prevPlayer = state.prev->players[player.index];
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
+			// ====================================================================
+			// Deferred payout: pay the reward the tick AFTER second jump so that
+			// maxHeightAfterSecondJump has had at least one frame to accumulate.
+			// ====================================================================
+			if (tracker.rewardPending) {
+				tracker.rewardPending = false;
+
+				float heightGained = RS_MAX(0.0f, tracker.maxHeightAfterSecondJump - tracker.firstJumpHeight);
+				float heightBonus  = RS_MIN(MAX_HEIGHT_BONUS, heightGained * HEIGHT_BONUS_SCALE);
+
+				float pitchAccuracy = GetPitchAccuracyScore(tracker.maxPitchDuringFirstJump);
+				float pitchBonus    = RS_MIN(MAX_PITCH_BONUS, pitchAccuracy * PITCH_BONUS_SCALE * 100.0f);
+
+				float reward = BASE_REWARD + heightBonus + pitchBonus;
+
+				if (tracker.boostedDuringAscent) {
+					reward *= BOOST_ASCENT_MULTIPLIER;
+					s_boostBonusCount.fetch_add(1);
+				}
+
+				tracker.state = FastAerialTracker::WAITING;
+				tracker.secondJumpDetected = false;
+
+				s_totalAwardedCount.fetch_add(1);
+				s_totalRewardSum.fetch_add(static_cast<int64_t>(reward * 1000.0f));
+				return reward;
+			}
 
 			// ====================================================================
 			// Phase 1: First Jump Detection
-			// Detect transition from ground to air
 			// ====================================================================
 			if (prevPlayer.isOnGround && !player.isOnGround) {
-				tracker.state = FastAerialTracker::FIRST_JUMP;
-				tracker.jumpStartTime = 0.0f;
-				tracker.firstJumpHeight = player.pos.z;
+				tracker.state                  = FastAerialTracker::FIRST_JUMP;
+				tracker.jumpStartTime          = 0.0f;
+				tracker.firstJumpHeight        = player.pos.z;
 				tracker.maxPitchDuringFirstJump = 0.0f;
-				tracker.isPitchedUpEnough = false;
-				tracker.secondJumpDetected = false;
-				tracker.sequenceStartBoost = player.boost;  // NEW: Capture boost at sequence start
+				tracker.isPitchedUpEnough      = false;
+				tracker.secondJumpDetected     = false;
+				tracker.boostedDuringAscent    = false;
+				tracker.rewardPending          = false;
 				return 0.0f;
 			}
 
-			// Timeout: if in air for > 2.5 seconds without second jump, reset
+			// Global timeout: reset if airborne > 2.5s without completing sequence
 			if (tracker.state != FastAerialTracker::WAITING) {
-				tracker.jumpStartTime += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+				tracker.jumpStartTime += dt;
 				if (tracker.jumpStartTime > 2.5f) {
 					tracker.state = FastAerialTracker::WAITING;
 					return 0.0f;
@@ -194,23 +229,17 @@ namespace RLGC {
 			}
 
 			// ====================================================================
-			// Phase 2: Pitch Validation
-			// Track pitch angle during first jump to validate upward pitch
+			// Phase 2: Pitch Validation (FIRST_JUMP state)
 			// ====================================================================
 			if (tracker.state == FastAerialTracker::FIRST_JUMP) {
-				// Calculate pitch: positive = nose up, negative = nose down
-				// Using: atan2(forward.z, (forward.x^2 + forward.y^2)^0.5)
 				float pitchRadians = atan2(player.rotMat.forward.z,
 					sqrt(player.rotMat.forward.x * player.rotMat.forward.x +
-						 player.rotMat.forward.y * player.rotMat.forward.y));
-				float pitchDegrees = pitchRadians * 57.2958f;  // Convert to degrees
+					     player.rotMat.forward.y * player.rotMat.forward.y));
+				float pitchDegrees = pitchRadians * 57.2958f;
 
-				// Track maximum pitch achieved
-				if (pitchDegrees > tracker.maxPitchDuringFirstJump) {
+				if (pitchDegrees > tracker.maxPitchDuringFirstJump)
 					tracker.maxPitchDuringFirstJump = pitchDegrees;
-				}
 
-				// Check if pitch is in proper range (25-65° for 45±20°)
 				if (pitchDegrees >= MIN_PITCH_DEGREES && pitchDegrees <= MAX_PITCH_DEGREES) {
 					tracker.isPitchedUpEnough = true;
 					tracker.state = FastAerialTracker::PITCHED_UP;
@@ -218,73 +247,63 @@ namespace RLGC {
 			}
 
 			// ====================================================================
-			// Phase 3: Second Jump Detection
-			// Detect second jump after proper pitch has been achieved
+			// Phase 3b: Boost-during-ascent tracking (FIRST_JUMP or PITCHED_UP)
+			// ====================================================================
+			if ((tracker.state == FastAerialTracker::FIRST_JUMP ||
+			     tracker.state == FastAerialTracker::PITCHED_UP)
+			    && player.prevAction.boost > 0.5f)
+			{
+				tracker.boostedDuringAscent = true;
+			}
+
+			// ====================================================================
+			// Phase 3: Second Jump Detection (PITCHED_UP state)
 			// ====================================================================
 			if (tracker.state == FastAerialTracker::PITCHED_UP &&
-				tracker.jumpStartTime > 0.0f && tracker.jumpStartTime <= DOUBLE_JUMP_WINDOW) {
-
-				// Second jump triggered (flip input while airborne)
+			    tracker.jumpStartTime > 0.0f && tracker.jumpStartTime <= DOUBLE_JUMP_WINDOW)
+			{
 				if (player.isFlipping && !prevPlayer.isFlipping) {
-					tracker.state = FastAerialTracker::SECOND_JUMP;
+					tracker.state              = FastAerialTracker::SECOND_JUMP;
 					tracker.secondJumpDetected = true;
 					tracker.maxHeightAfterSecondJump = player.pos.z;
+					// Don't pay yet — defer to next tick so height can accumulate
+					tracker.rewardPending = true;
+					return 0.0f;
 				}
 			}
 
-			// Track maximum height after second jump
-			if (tracker.state == FastAerialTracker::SECOND_JUMP && player.pos.z > tracker.maxHeightAfterSecondJump) {
+			// Track max height while in SECOND_JUMP (during deferred window)
+			if (tracker.state == FastAerialTracker::SECOND_JUMP &&
+			    player.pos.z > tracker.maxHeightAfterSecondJump)
+			{
 				tracker.maxHeightAfterSecondJump = player.pos.z;
-			}
-
-			// ====================================================================
-			// Phase 4: Reward Trigger
-			// Award reward for successful fast aerial with proper pitch
-			// ====================================================================
-			if (tracker.state == FastAerialTracker::SECOND_JUMP && tracker.secondJumpDetected && tracker.isPitchedUpEnough) {
-				// Calculate height gained from second jump
-				float heightGained = RS_MAX(0.0f, tracker.maxHeightAfterSecondJump - tracker.firstJumpHeight);
-
-				// Height bonus: scales with altitude gained
-				float heightBonus = RS_MIN(MAX_HEIGHT_BONUS, heightGained * HEIGHT_BONUS_SCALE);
-
-				// Pitch accuracy bonus: reward angles close to 45° but accept 15-90°
-				float pitchAccuracy = GetPitchAccuracyScore(tracker.maxPitchDuringFirstJump);
-				float pitchBonus = RS_MIN(MAX_PITCH_BONUS, pitchAccuracy * PITCH_BONUS_SCALE * 100.0f);
-
-				float reward = BASE_REWARD + heightBonus + pitchBonus;
-
-				// NEW: Apply boost multiplier (linear scaling 0-30 boost)
-				// Formula: 0 boost = 0.0x, 30 boost = 1.0x, 100+ boost = 1.0x
-				float boostMultiplier = RS_CLAMP(tracker.sequenceStartBoost / BOOST_SCALE_THRESHOLD, 0.0f, 1.0f);
-				reward *= boostMultiplier;
-
-				// Reset for next aerial
-				tracker.state = FastAerialTracker::WAITING;
-				tracker.secondJumpDetected = false;
-
-				return reward;
 			}
 
 			return 0.0f;
 		}
 
+		struct Metrics {
+			uint64_t totalAwarded;
+			uint64_t boostBonus;
+			double   rewardSum;
+			double   boostBonusRate;
+		};
+		Metrics CollectMetrics() {
+			Metrics m{};
+			m.totalAwarded   = s_totalAwardedCount.exchange(0);
+			m.boostBonus     = s_boostBonusCount.exchange(0);
+			m.rewardSum      = double(s_totalRewardSum.exchange(0)) / 1000.0;
+			m.boostBonusRate = (m.totalAwarded > 0) ? double(m.boostBonus) / m.totalAwarded : 0.0;
+			return m;
+		}
+
 	protected:
-		// Helper: Calculate pitch accuracy score (0-1.0)
-		// Higher score near OPTIMAL_PITCH_DEGREES, still good score in MIN_PITCH_DEGREES to 90°
+		// Pitch accuracy score [0, 1]: peak at OPTIMAL_PITCH_DEGREES, zero outside [MIN, MAX].
 		float GetPitchAccuracyScore(float pitchDegrees) const {
-			// Clamp to valid range (15-90°)
-			float clampedPitch = RS_CLAMP(pitchDegrees, MIN_PITCH_DEGREES, 90.0f);
-
-			// Calculate distance from optimal (45°)
+			float clampedPitch   = RS_CLAMP(pitchDegrees, MIN_PITCH_DEGREES, MAX_PITCH_DEGREES);
 			float diffFromOptimal = fabs(clampedPitch - OPTIMAL_PITCH_DEGREES);
-
-			// Gaussian-like scoring: peak at 45°, still good at 15° and 90°
-			// Using simple formula: 1.0 - (diff / range)^2
-			float normalized = diffFromOptimal / (OPTIMAL_PITCH_DEGREES - MIN_PITCH_DEGREES);
-			float score = 1.0f - (normalized * normalized);
-
-			return RS_CLAMP(score, 0.0f, 1.0f);
+			float normalized     = diffFromOptimal / (OPTIMAL_PITCH_DEGREES - MIN_PITCH_DEGREES);
+			return RS_CLAMP(1.0f - (normalized * normalized), 0.0f, 1.0f);
 		}
 	};
 

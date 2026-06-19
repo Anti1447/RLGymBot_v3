@@ -296,6 +296,44 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     }
 
     // ========================================================================
+    // WALL/CEILING REDIRECT REWARD — Shadow Mode Metrics
+    // ========================================================================
+    {
+        auto m = WallCeilingRedirectReward::GetAndResetMetrics();
+        if (m.bouncesDetected > 0 || m.predSequences > 0) {
+            report.AddAvg("WallCeilingRedirect/PredSequences",     (float)m.predSequences);
+            report.AddAvg("WallCeilingRedirect/BouncesDetected",   (float)m.bouncesDetected);
+            report.AddAvg("WallCeilingRedirect/AerialIntercepts",  (float)m.aerialIntercepts);
+            report.AddAvg("WallCeilingRedirect/GroundedIntercepts",(float)m.groundedIntercepts);
+            report.AddAvg("WallCeilingRedirect/ShotRedirects",     (float)m.shotRedirects);
+            report.AddAvg("WallCeilingRedirect/Continuations",     (float)m.continuations);
+            report.AddAvg("WallCeilingRedirect/OwnGoalRedirects",  (float)m.ownGoalRedirects);
+            report.AddAvg("WallCeilingRedirect/AvgShotAlign",      (float)m.avgShotAlign);
+            report.AddAvg("WallCeilingRedirect/AvgPowerRestore",   (float)m.avgPowerRestore);
+            report.AddAvg("WallCeilingRedirect/AvgEnergyRetained", (float)m.avgEnergyRetained);
+            report.AddAvg("WallCeilingRedirect/RewardSum",         (float)m.rewardSum);
+            report.AddAvg("WallCeilingRedirect/ShapingSum",        (float)m.shapingSum);
+        }
+    }
+
+    // ========================================================================
+    // THIRD-MAN TACTICS — Shadow Mode Metrics
+    // ========================================================================
+    {
+        std::unordered_map<std::string, float> m;
+        ThirdManStallReward::CollectMetrics(m);
+        if (m["ThirdManStall/frames_active"] > 0.0f)
+            for (auto& [k, v] : m) report.AddAvg(k, v);
+    }
+    {
+        std::unordered_map<std::string, float> m;
+        CounterLaunchDiagonalReward::CollectMetrics(m);
+        if (m["CounterLaunch/launches_fired"] > 0.0f
+            || m["CounterLaunch/teammate_upfield_gate_failures"] > 0.0f)
+            for (auto& [k, v] : m) report.AddAvg(k, v);
+    }
+
+    // ========================================================================
     // DOUBLE COMMIT PENALTY METRICS
     // ========================================================================
     {
@@ -416,6 +454,15 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         if (m.demoFired > 0) {
             report.AddAvg("Kickoff/SpanishDemo/DemoFired",     (float)m.demoFired);
             report.AddAvg("Kickoff/SpanishDemo/PayoffSuccess", (float)m.payoffSuccess);
+        }
+    }
+    {
+        auto m = KickoffCounterHitReward::GetAndResetMetrics();
+        if (m.oppFirstTouch > 0) {
+            report.AddAvg("Kickoff/Counter/OppFirstTouch", (float)m.oppFirstTouch);
+            report.AddAvg("Kickoff/Counter/Won",           (float)m.won);
+            report.AddAvg("Kickoff/Counter/AvgAlign",      (float)m.avgAlign);
+            report.AddAvg("Kickoff/Counter/AvgBallSpeed",  (float)m.avgBallSpeed);
         }
     }
 

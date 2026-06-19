@@ -2,6 +2,7 @@
 #include "Reward.h"
 #include "../Math.h"
 #include "PositionAnalysis.h"
+#include "RewardMath.h"
 #include <unordered_map>
 
 namespace RLGC {
@@ -223,6 +224,14 @@ namespace RLGC {
 		static constexpr float TOUCH_BONUS = 0.25f;             // +25% for active touches
 		static constexpr float MIN_ALIGNMENT = 0.15f;           // ~82° angle min
 
+		// 2026-06-16 | NJH/Claude | Off-target scale-down
+		// MIN_ALIGNMENT alone (~82° cone to goal center) lets a ball curling wide past
+		// either post keep earning near-full reward all the way to the goal line. Scale
+		// (not zero) the offensive reward when the current trajectory won't actually
+		// cross between the posts, so this stays directional shaping rather than a hard
+		// shot-quality gate (that's ShotPlacementReward's job).
+		static constexpr float OFF_TARGET_SCALE = 0.3f;         // multiplier when trajectory misses goal mouth
+
 		// NEW: Proximity-based alignment weighting (direction-prioritizing near goal)
 		static constexpr float CLOSE_RANGE = 1500.0f;           // < 1500 UU: boost zone
 		static constexpr float MID_RANGE = 3500.0f;             // 1500-3500 UU: balanced zone
@@ -324,6 +333,12 @@ namespace RLGC {
 				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.5f);
 			}
 
+			// Scale down (don't zero) when the current trajectory won't cross between the posts
+			bool onTarget = RewardMath::BallIntersectsOpponentGoalMouth(player, state, 2.0f, false, true);
+			if (!onTarget) {
+				reward *= OFF_TARGET_SCALE;
+			}
+
 			return reward * GoalProximityScale2D(state.ball.pos, player.team);
 		}
 	};
@@ -340,13 +355,20 @@ namespace RLGC {
 	// Only the x-component toward center is rewarded — the existing
 	// VelocityBallToGoalReward handles the y-component (toward goal) separately.
 	// Wrap in ZeroSumReward so both teams compete for center lane possession.
+	//
+	// Deep-corner zone (|y| > 4500, |x| > GOAL_WIDTH_FROM_CENTER): when the ball
+	// is already near the goal line but outside the posts, switch to full 3D
+	// alignment toward the opponent goal center. This prevents the bot from blasting
+	// the ball into the back wall/corner when VelocityBallToGoalReward's y-push
+	// bias would otherwise overshoot the narrow goal opening.
 	// ============================================================================
 	class CornerToLaneReward : public Reward {
 	private:
-		// Ball must be past this |x| to be considered "in the corner"
-		static constexpr float CORNER_X = 2000.0f;
-		// Ball must be in the opponent's half (past this |y| toward their goal)
-		static constexpr float CORNER_Y = 1500.0f;
+		static constexpr float CORNER_X          = 2000.0f;
+		static constexpr float CORNER_Y          = 1500.0f;
+		// Deep-corner zone thresholds
+		static constexpr float DEEP_CORNER_Y     = 4500.0f;
+		static constexpr float DEEP_CORNER_SCALE = 2.5f;
 
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -359,7 +381,19 @@ namespace RLGC {
 				: (bpos.y < -CORNER_Y);
 			if (!inOpponentHalf) return 0.0f;
 
-			// Ball must be in the corner (near side wall)
+			// Deep-corner zone: ball near the goal line but outside the posts.
+			// Full 3D alignment toward goal center — supercedes the CORNER_X gate
+			// so it also catches narrower-corner positions (892 < |x| < 2000).
+			if (fabsf(bpos.y) > DEEP_CORNER_Y && fabsf(bpos.x) > CommonValues::GOAL_WIDTH_FROM_CENTER) {
+				Vec goalCenter = (player.team == Team::BLUE)
+					? CommonValues::ORANGE_GOAL_CENTER
+					: CommonValues::BLUE_GOAL_CENTER;
+				Vec toGoal = (goalCenter - bpos).Normalized();
+				float alignment = RS_CLAMP(toGoal.Dot(bvel / CommonValues::BALL_MAX_SPEED), 0.0f, 1.0f);
+				return alignment * DEEP_CORNER_SCALE;
+			}
+
+			// Standard zone: ball must be well into the corner (near side wall)
 			if (fabsf(bpos.x) < CORNER_X) return 0.0f;
 
 			// Reward x-velocity directed toward the center lane.

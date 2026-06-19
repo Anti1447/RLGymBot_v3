@@ -117,11 +117,11 @@ namespace RLGC {
     // ============================================================================
     class ShadowDefenseReward : public Reward {
     private:
-        static constexpr float OPTIMAL_SHADOW_DISTANCE = 1200.0f;  // Ideal distance from ball
-        static constexpr float MIN_SHADOW_DISTANCE = 400.0f;       // Too close (challenging)
-        static constexpr float MAX_SHADOW_DISTANCE = 2500.0f;      // Too far
+        static constexpr float OPTIMAL_SHADOW_DISTANCE = 1100.0f;  // Ideal distance from ball
+        static constexpr float MIN_SHADOW_DISTANCE = 500.0f;       // Too close (challenging)
+        static constexpr float MAX_SHADOW_DISTANCE = 2000.0f;      // Too far
         static constexpr float BASE_REWARD = 0.3f;
-        static constexpr float VELOCITY_MATCH_BONUS = 0.2f;
+        static constexpr float VELOCITY_MATCH_BONUS = 0.3f;
 
         // Calculate how well positioned player is between ball and goal
         float CalculateShadowQuality(const Player& player, const GameState& state, const Vec& goalPos) const {
@@ -571,18 +571,18 @@ namespace RLGC {
 
         static constexpr float BALL_GROUND_THRESHOLD = 150.0f;  // Height considered "on ground"
         static constexpr float MIN_TOUCH_HEIGHT = 300.0f;       // Only count touches above this height
-        static constexpr float TOUCH_TIMEOUT_STEPS = 240;        // Reset if no touch for 1 sec (at 120 ticks/sec)
-        static constexpr float MIN_TOUCH_DELAY_STEPS = 30;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
+        static constexpr float TOUCH_TIMEOUT_STEPS = 1200;        // Reset if no touch for 1 sec (at 120 ticks/sec)
+        static constexpr float MIN_TOUCH_DELAY_STEPS = 24;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
         static constexpr float SINGLE_TOUCH_REWARD = 0.1f;
-        static constexpr float DOUBLE_TOUCH_REWARD = 0.3f;
-        static constexpr float TRIPLE_PLUS_REWARD = 0.5f;
-        static constexpr float CONSISTENCY_BONUS = 0.2f;         // For spacing touches well
-        static constexpr float HEIGHT_BONUS = 0.15f;             // For high aerial touches
+        static constexpr float DOUBLE_TOUCH_REWARD = 0.4f;
+        static constexpr float TRIPLE_PLUS_REWARD = 0.7f;
+        static constexpr float CONSISTENCY_BONUS = 0.3f;         // For spacing touches well
+        static constexpr float HEIGHT_BONUS = 0.2f;             // For high aerial touches
 
         // NEW: Enhanced touch quality bonuses
-        static constexpr float CONTACT_ANGLE_BONUS = 0.1f;       // Bonus for bottom-of-ball contacts
+        static constexpr float CONTACT_ANGLE_BONUS = 0.25f;       // Bonus for bottom-of-ball contacts
         static constexpr float SOFTNESS_BONUS = 0.15f;           // Bonus for soft first touch
-        static constexpr float Z_VELOCITY_BONUS = 0.12f;         // Bonus for increasing ball height
+        static constexpr float Z_VELOCITY_BONUS = 0.25f;         // Bonus for increasing ball height
         static constexpr float MAX_VELOCITY_DIFF_SOFT = 500.0f;  // Velocity diff threshold for "soft" contact
         static constexpr float ANGLE_TOLERANCE = 0.4f;           // Radians (~23°) tolerance for optimal angle
 

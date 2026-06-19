@@ -33,6 +33,8 @@
 #include <RLGymCPP/Rewards/DoomseeDisshShotReward.h>
 #include <RLGymCPP/Rewards/DefensiveClearingRewards.h>
 #include <RLGymCPP/Rewards/SpecializedFlickRewards.h>
+#include <RLGymCPP/Rewards/DribbleFlickRewards.h>
+#include <RLGymCPP/Rewards/OpenNetPushReward.h>
 #include <RLGymCPP/Rewards/AerialRewards.h>
 #include <RLGymCPP/Rewards/AerialOutplayReward.h>
 #include <RLGymCPP/Rewards/IntelligentWavedashReward.h>
@@ -54,6 +56,7 @@
 #include <RLGymCPP/Rewards/OutplayExplorationReward.h>
 #include <RLGymCPP/Rewards/PredictiveDemoRewards.h>
 #include <RLGymCPP/Rewards/AdvancedKickoffRewards.h>
+#include <RLGymCPP/Rewards/KickoffCounterReward.h>
 #include <RLGymCPP/Rewards/SoloPlayRewards.h>
 #include <RLGymCPP/Rewards/RolvVelocityPlayerToBallRewards.h>
 #include <RLGymCPP/Rewards/RolvDemoReward.h>
@@ -63,8 +66,15 @@
 #include <RLGymCPP/Rewards/PowerShotRewards.h>
 #include <RLGymCPP/Rewards/ChallengeAngleQualityReward.h>
 #include <RLGymCPP/Rewards/BallSideNumericalAdvantageReward.h>
+#include <RLGymCPP/Rewards/GoalsideReward.h>
 #include <RLGymCPP/Rewards/GoalViewReward.h>
 #include <RLGymCPP/Rewards/WallReboundPenalty.h>
+#include <RLGymCPP/Rewards/InvertedAirDribbleReward.h>
+#include <RLGymCPP/Rewards/TornadoSpinTakeoffReward.h>
+#include <RLGymCPP/Rewards/WallCeilingRedirectReward.h>
+#include <RLGymCPP/Rewards/BallGoalProximityReward.h>
+#include <RLGymCPP/Rewards/ThirdManStallReward.h>
+#include <RLGymCPP/Rewards/CounterLaunchDiagonalReward.h>
 using namespace RLGC;
 
 enum class TrainingPhase {
@@ -80,7 +90,7 @@ enum class TrainingPhase {
 };
 
 // >>> SET YOUR CURRENT PHASE HERE <<<
-constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_3_GOLD;
+constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_4_PLATINUM;
 
 /// <summary>
 /// Get the reward configuration for the current training phase

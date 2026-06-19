@@ -962,7 +962,7 @@ namespace RLGC {
 // DribbleSetupReward - ELITE TIER (Rev 2.0)
 // Rewards executing dribble catch mechanics: rolling ball, matching speed,
 // cutting at DIAGONAL angle, popping ball up (+50z), then catching
-// 2025-01-04 | Rev 2.0 | NJH
+// 2026-01-04 | Rev 2.0 | NJH
 // ============================================================================
 
     class DribbleSetupReward : public Reward {

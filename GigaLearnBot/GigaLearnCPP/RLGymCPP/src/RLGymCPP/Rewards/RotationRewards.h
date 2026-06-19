@@ -124,13 +124,13 @@ struct RotationConfig {
 
 		case RotationPhase::CHAMPION_PLUS:
 			// Focus: Perfect rotation, high-speed flow
-			cfg.minTeammateSpacing = 1800.0f;
-			cfg.maxTeammateSpacing = 4000.0f;
-			cfg.clusterPenaltyWeight = 2.0f;
-			cfg.backPostProximity = 1200.0f;
+			cfg.minTeammateSpacing = 2000.0f;
+			cfg.maxTeammateSpacing = 4500.0f;
+			cfg.clusterPenaltyWeight = 1.75f;
+			cfg.backPostProximity = 1100.0f;
 			cfg.rotationEventReward = 1.2f;
-			cfg.rotationShapingWeight = 0.9f;
-			cfg.minRoleTime = 1.0f;
+			cfg.rotationShapingWeight = 0.8f;
+			cfg.minRoleTime = 0.5f;
 			cfg.maxRoleTime = 12.0f;
 			cfg.enableRoleCycling = true;
 			cfg.enableAdaptiveRotation = true;
