@@ -42,12 +42,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
-        cfg.entropyScale = 0.0215f;
-        cfg.policyLR = 1.1e-4f;
-        cfg.criticLR = 1.1e-4f;
+        cfg.entropyScale = 0.03f;
+        cfg.policyLR = 1.00e-4f;
+        cfg.criticLR = 1.00e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.7f;
+        cfg.randomStateChance = 0.6f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
         break;
@@ -127,15 +127,15 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // === CHECKPOINTS ===
     // Use absolute path to ensure it works regardless of working directory
     cfg.checkpointFolder = "C:\\Projects\\RLGymBot_v3\\GigaLearnBot\\build\\checkpoints";
-    cfg.tsPerSave = 50'000'000ULL;      // Save every 50M steps
+    cfg.tsPerSave = 100'000'000ULL;      // Save every 100M steps
     cfg.checkpointsToKeep = 128;
 
     // === POLICY VERSIONS ===
-    cfg.tsPerVersion = 100'000'000ULL;   // New version every 100M steps
+    cfg.tsPerVersion = 200'000'000ULL;   // New version every 100M steps
     cfg.maxOldVersions = 64;
 
     cfg.trainAgainstOldVersions = true;
-    cfg.trainAgainstOldChance = 0.4f;
+    cfg.trainAgainstOldChance = 0.2f;
 
     // === SKILL TRACKER ===
     // Skill tracker evaluates the agent across mixed game modes (1v1, 2v2, 3v3)
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9971f;
+    cfg.ppo.gaeGamma = 0.99715f;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

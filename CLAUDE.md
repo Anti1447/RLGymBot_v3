@@ -57,9 +57,7 @@ misalignment caught in training costs days.
 6. Overlapping rewards: check RewardCatalog.md before writing anything
 
 **Direct implementation by default:**
-New rewards go live immediately — no shadow wrapper unless Nathan explicitly requests it.
-Shadow mode (`ShadowReward`) is available for high-risk rewards where zero policy impact
-during validation is needed, but it is opt-in, not the default workflow.
+New rewards go live immediately. Never use `ShadowReward` or shadow mode.
 
 **Log every change:**
 After any reward add/edit/weight change, add a one-line entry to
@@ -165,10 +163,6 @@ The full loop is:
 Spec → Read RewardCatalog → Code → Deploy live →
 Train → W&B alerts → Behavior check → Log result
 
-Shadow mode is available but opt-in. Use it only when you need activation stats
-before any policy impact (e.g. replacing a high-weight reward, adding to a stable
-checkpoint that's expensive to retrain from).
-
 **One variable per iteration.** Before each adjustment write one sentence:
 "I think the problem is X and I expect changing Y to produce Z in W&B."
 Change only that one thing. This is how you build intuition instead of noise.
@@ -182,11 +176,6 @@ Change only that one thing. This is how you build intuition instead of noise.
 **Weight estimation heuristic:**
 Activation rate × desired contribution to total = starting weight guess.
 Never jump more than ±50% of current weight in one change.
-
-**Shadow mode (opt-in only):**
-Only use `ShadowReward` when explicitly requested. It returns 0.0f to the optimizer
-while still logging W&B metrics — useful for high-risk replacements where you need
-activation data before any policy impact. Default is direct implementation.
 
 **Log every change:**
 After any reward add/edit/weight change, add one line to Reward_Change_Log.md.
@@ -490,7 +479,7 @@ ZeroSum: [ ] Yes  [ ] No
 Productive use window: [N/A | Xs]
 
 ### Expected Activation Rate
-[% of steps this should fire in shadow mode — your estimate before running it]
+[% of steps this should fire — your estimate before running it]
 
 ### W&B Metric Name
 [Name of the custom metric you'll log, e.g. "flip_reset_acquisition_rate"]

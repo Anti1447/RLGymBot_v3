@@ -171,21 +171,20 @@ namespace RLGC {
     class AerialFirstTouchReward : public Reward {
     private:
         // Aerial session state — updated in PreStep, read in GetReward
-        bool  aerialActive      = false;
-        float aerialTime        = 0.0f;
+        bool     aerialActive       = false;
+        float    aerialTime         = 0.0f;
         bool     firstTouchRecorded = false;
-        uint32_t firstTouchCarId   = 0;
-        float    firstTouchTime    = 0.0f;
-        float    firstTouchHeight  = 0.0f;
-        std::map<uint32_t, bool> paidThisAerial;
-        // 2026-04-19: track which players were close enough at aerial session start
-        // to be eligible for the first-touch reward. Players > maxAerialLaunchDist UU
-        // from the ball when the aerial begins are excluded — this removes the incentive
-        // to race from the wall/far positions just because the ball went high.
-        std::map<uint32_t, bool> eligibleThisAerial;
+        uint32_t firstTouchCarId    = 0;
+        float    firstTouchTime     = 0.0f;
+        float    firstTouchHeight   = 0.0f;
+        std::unordered_map<uint32_t, bool> paidThisAerial;
+        // Track which players were close enough at aerial session start to be eligible.
+        // Players > maxAerialLaunchDist UU from the ball when the aerial begins are excluded.
+        std::unordered_map<uint32_t, bool> eligibleThisAerial;
 
         // Tunables
-        float aerialZ              = 250.0f;   // ball must be above this to count as "aerial"
+        float aerialZ              = 400.0f;   // ball must be above this to count as "aerial" (raised from 250: filters casual bounces)
+        float minPayoutHeight      = 500.0f;   // first touch must occur above this height to pay out
         float kickoffPos           = 200.0f;
         float kickoffVel           = 150.0f;
         float maxAerialTrackSec    = 5.0f;     // don't keep state forever
@@ -196,12 +195,12 @@ namespace RLGC {
 
     public:
         virtual void Reset(const GameState& initialState) override {
-            aerialActive      = false;
-            aerialTime        = 0.0f;
+            aerialActive       = false;
+            aerialTime         = 0.0f;
             firstTouchRecorded = false;
-            firstTouchCarId   = 0;
-            firstTouchTime    = 0.0f;
-            firstTouchHeight  = 0.0f;
+            firstTouchCarId    = 0;
+            firstTouchTime     = 0.0f;
+            firstTouchHeight   = 0.0f;
             paidThisAerial.clear();
             eligibleThisAerial.clear();
         }
@@ -235,10 +234,12 @@ namespace RLGC {
             if (aerialActive) {
                 aerialTime += dt;  // ticks exactly once per step
 
-                // Detect first touch across all players this step
+                // Detect first AERIAL touch: player must be airborne via jump (not grounded).
+                // hasJumped guards against cars that were launched without actively jumping.
                 if (!firstTouchRecorded) {
                     for (const auto& p : state.players) {
-                        if (p.ballTouchedStep && state.ball.pos.z > aerialZ) {
+                        if (p.ballTouchedStep && state.ball.pos.z > aerialZ
+                            && !p.isOnGround && p.hasJumped) {
                             firstTouchRecorded = true;
                             firstTouchCarId    = p.carId;
                             firstTouchTime     = aerialTime;
@@ -256,29 +257,31 @@ namespace RLGC {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            // No work during an active aerial — payout fires the step after it ends.
+            // Payout fires on the same step PreStep sets aerialActive = false.
             if (aerialActive) return 0.0f;
             if (!firstTouchRecorded) return 0.0f;
-            if (paidThisAerial[player.carId]) return 0.0f;
+            if (firstTouchHeight < minPayoutHeight) return 0.0f;
+
+            auto pit = paidThisAerial.find(player.carId);
+            if (pit != paidThisAerial.end() && pit->second) return 0.0f;
+
             // Only reward players who were within maxAerialLaunchDist of the ball
             // when the aerial session started. Skip players who committed from far away.
-            if (!eligibleThisAerial[player.carId]) return 0.0f;
-
-            float r = 0.0f;
-            if (player.carId == firstTouchCarId) {
-                // Height score — cap at 1600 uu for a better gradient across
-                // typical aerial heights (600-1500 uu); ceiling shots still max out.
-                float hFrac = RS_CLAMP((firstTouchHeight - aerialZ) / (1600.0f - aerialZ), 0.0f, 1.0f);
-
-                // Time score — earlier touch = higher score
-                float tFrac = RS_CLAMP(1.0f - (firstTouchTime / timeScoreWindow), 0.0f, 1.0f);
-
-                float frac = 0.55f * hFrac + 0.45f * tFrac;
-                r = minReward + (maxReward - minReward) * frac;
-            }
+            auto eit = eligibleThisAerial.find(player.carId);
+            if (eit == eligibleThisAerial.end() || !eit->second) return 0.0f;
 
             paidThisAerial[player.carId] = true;
-            return r;
+
+            if (player.carId != firstTouchCarId) return 0.0f;
+
+            // Height score — cap at 2000 UU (near field ceiling ~2044) for full gradient
+            float hFrac = RS_CLAMP((firstTouchHeight - aerialZ) / (2000.0f - aerialZ), 0.0f, 1.0f);
+
+            // Time score — earlier touch = higher score
+            float tFrac = RS_CLAMP(1.0f - (firstTouchTime / timeScoreWindow), 0.0f, 1.0f);
+
+            float frac = 0.55f * hFrac + 0.45f * tFrac;
+            return minReward + (maxReward - minReward) * frac;
         }
     };
 

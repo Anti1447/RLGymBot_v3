@@ -126,12 +126,12 @@ struct RotationConfig {
 			// Focus: Perfect rotation, high-speed flow
 			cfg.minTeammateSpacing = 2000.0f;
 			cfg.maxTeammateSpacing = 4500.0f;
-			cfg.clusterPenaltyWeight = 1.75f;
+			cfg.clusterPenaltyWeight = 1.5f;
 			cfg.backPostProximity = 1100.0f;
-			cfg.rotationEventReward = 1.2f;
-			cfg.rotationShapingWeight = 0.8f;
-			cfg.minRoleTime = 0.5f;
-			cfg.maxRoleTime = 12.0f;
+			cfg.rotationEventReward = 1.3f;
+			cfg.rotationShapingWeight = 1.0f;
+			cfg.minRoleTime = 1.0f;
+			cfg.maxRoleTime = 9.0f;
 			cfg.enableRoleCycling = true;
 			cfg.enableAdaptiveRotation = true;
 			cfg.enableMaxSpacing = true;

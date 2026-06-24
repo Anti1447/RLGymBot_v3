@@ -56,8 +56,8 @@ namespace RLGC {
         //   - Example: X_MARGIN = 0, Z_MARGIN = 0
         //
         // BALL_RADIUS is always subtracted (ball center must be inside posts)
-        constexpr float GOAL_MOUTH_X_MARGIN = 0.0f;   // additional X shrink beyond ball radius
-        constexpr float GOAL_MOUTH_Z_MARGIN = 0.0f;   // additional Z shrink beyond ball radius
+        constexpr float GOAL_MOUTH_X_MARGIN = CommonValues::BALL_RADIUS / 2.0f;   // additional X shrink beyond ball radius
+        constexpr float GOAL_MOUTH_Z_MARGIN = CommonValues::BALL_RADIUS / 4.0f;   // additional Z shrink beyond ball radius
 
         // Precomputed goal mouth AABBs (world coordinates)
         // These represent where the BALL CENTER must be to score
@@ -211,7 +211,7 @@ namespace RLGC {
             if (ballX > CommonValues::GOAL_WIDTH_FROM_CENTER) return false;
 
             // Check vertical bounds
-            if (ballZ < 0.0f) return false;
+            if (ballZ < CommonValues::BALL_RADIUS) return false;
             if (ballZ > CommonValues::GOAL_HEIGHT) return false;
 
             return true;
@@ -228,6 +228,8 @@ namespace RLGC {
 
         // Get 2D angle between ball velocity and direction to opponent goal
         // Returns angle in radians (0 = directly toward goal, PI = directly away)
+        // NOTE: Z is ignored — this cannot distinguish on-target from over-the-crossbar.
+        // Use BallIntersectsOpponentGoalMouth for accuracy-sensitive checks.
         inline float AngleToOpponentGoal(const Player& player, const GameState& state) {
             const Vec goalCenter = (player.team == Team::BLUE)
                 ? CommonValues::ORANGE_GOAL_CENTER
@@ -248,19 +250,33 @@ namespace RLGC {
             return acosf(dotProd);
         }
 
-        // Check if player is closer to ball than all opponents
-        inline bool IsClosestToBall(const Player& player, const GameState& state) {
+        // True if player is closer to the ball than every living opponent.
+        // Does NOT check teammates — a teammate may be closer and this still returns true.
+        inline bool IsCloserToBallThanAllOpponents(const Player& player, const GameState& state) {
             const float myDist = (player.pos - state.ball.pos).Length();
-
             for (const Player& other : state.players) {
-                if (other.carId == player.carId) continue;  // skip self
-                if (other.team == player.team) continue;    // skip teammates
-
-                const float otherDist = (other.pos - state.ball.pos).Length();
-                if (otherDist < myDist) return false;
+                if (other.carId == player.carId) continue;
+                if (other.team == player.team) continue;
+                if (other.isDemoed) continue;
+                if ((other.pos - state.ball.pos).Length() < myDist) return false;
             }
-
             return true;
+        }
+
+        // True if player is the closest living player to the ball (any team).
+        inline bool IsClosestPlayerToBall(const Player& player, const GameState& state) {
+            const float myDist = (player.pos - state.ball.pos).Length();
+            for (const Player& other : state.players) {
+                if (other.carId == player.carId) continue;
+                if (other.isDemoed) continue;
+                if ((other.pos - state.ball.pos).Length() < myDist) return false;
+            }
+            return true;
+        }
+
+        // Deprecated: only checks opponents, not teammates. Use IsCloserToBallThanAllOpponents.
+        inline bool IsClosestToBall(const Player& player, const GameState& state) {
+            return IsCloserToBallThanAllOpponents(player, state);
         }
 
         // Check if player is in opponent's half of the field

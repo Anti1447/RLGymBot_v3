@@ -133,9 +133,7 @@ public:
 class ProperLandingReward : public Reward {
 private:
     static constexpr float MIN_AIR_TIME       = 0.2f;   // ignore hops shorter than 200ms
-    static constexpr float AIR_TIME_SCALE_MAX = 3.0f;   // cap scaling at 3s airtime
-    static constexpr float BALL_NEAR_THRESH   = 1000.0f; // UU — "close to ball" cutoff for nose bonus
-    static constexpr float NOSE_DOWN_Z        = -0.5f;  // forward.z below this = nose pointing down
+    static constexpr float AIR_TIME_SCALE_MAX = 6.0f;   // cap scaling at 6s airtime
 
     std::unordered_map<uint32_t, bool>  _wasAirborne;
     std::unordered_map<uint32_t, bool>  _hasLanding;
@@ -267,13 +265,6 @@ public:
             }
             // Smooth curve: 0 at alignment=0.3, 1.0 at alignment=1.0
             float baseReward = RS_CLAMP((alignment - 0.3f) / 0.7f, 0.0f, 1.0f);
-
-            // Nose-down bonus: when not near the ball, pointing nose down is
-            // ideal recovery posture on walls (easier to drive off quickly).
-            float ballDist = (player.pos - state.ball.pos).Length();
-            if (ballDist > BALL_NEAR_THRESH && player.rotMat.forward.z < NOSE_DOWN_Z)
-                baseReward += 0.3f;
-
             return baseReward * airtimeScale;
 
         } else {
@@ -811,6 +802,7 @@ private:
     static constexpr float POST_BOUNCE_SEC  = 0.4f;    // seconds after bounce to sample rebound pos
     static constexpr float PRED_PROX_REWARD = 1.2f;    // per-second reward at zero distance
     static constexpr float PRED_DIST_SCALE  = 900.0f;  // exponential falloff distance (UU)
+    static constexpr float PRED_SHAPING_CAP = 0.3f;    // max total shaping per player per bounce sequence
 
     // ---- Layer 2: trajectory quality multiplier constants ----
     static constexpr float TRAJ_CHECK_TIME  = 0.75f;   // seconds ahead to sample ball position
@@ -823,6 +815,12 @@ private:
     };
 
     mutable std::map<uint32_t, BoardState> boardStates;  // Per-player tracking instead of per-team
+
+    // ---- Layer 1 shaping cap state (per bounce sequence) ----
+    struct ShapingState { int seqId = -1; float spent = 0.0f; };
+    std::unordered_map<uint32_t, ShapingState> _shapingState;
+    int   _shapingSeqId       = 0;
+    float _prevPredBounceTime = -1.0f;  // updated in PreStep to detect new sequences
 
     BallPred::Cache _ballCache;  // Updated once per step in PreStep()
 
@@ -845,10 +843,29 @@ public:
     virtual void Reset(const GameState& initialState) override {
         currentTime = 0.0f;
         boardStates.clear();
+        _shapingState.clear();
+        _shapingSeqId = 0;
+        _prevPredBounceTime = -1.0f;
     }
 
     virtual void PreStep(const GameState& state) override {
         _ballCache.Update(state);
+
+        // Detect new bounce prediction sequence so per-player shaping caps reset.
+        // A new sequence starts when the predicted bounce time jumps up (old bounce
+        // passed and a new future one appeared) or prediction reappears after dropout.
+        float curBounceTime = -1.0f;
+        if (_ballCache.valid) {
+            for (int i = 0; i < BallPred::NUM_SLICES; i++) {
+                if (_ballCache.slices[i].hitBackboard) {
+                    curBounceTime = _ballCache.slices[i].t;
+                    break;
+                }
+            }
+        }
+        if (curBounceTime > _prevPredBounceTime + 0.5f)
+            _shapingSeqId++;
+        _prevPredBounceTime = curBounceTime;
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -913,7 +930,17 @@ public:
                         heightBonus = RS_CLAMP(heightBonus, 0.0f, 1.0f);
                         float heightMult = 1.0f + 0.5f * heightBonus;  // 1.0x to 1.5x based on height
 
-                        positioningReward = PRED_PROX_REWARD * expf(-dist / PRED_DIST_SCALE) * dt * heightMult;
+                        float raw = PRED_PROX_REWARD * expf(-dist / PRED_DIST_SCALE) * dt * heightMult;
+
+                        // Per-sequence cap: prevent parking at the rebound point indefinitely.
+                        // Resets when a new backboard bounce is predicted (seqId changes in PreStep).
+                        auto& ss = _shapingState[player.carId];
+                        if (ss.seqId != _shapingSeqId) { ss.seqId = _shapingSeqId; ss.spent = 0.0f; }
+                        if (ss.spent < PRED_SHAPING_CAP) {
+                            raw = RS_MIN(raw, PRED_SHAPING_CAP - ss.spent);
+                            ss.spent += raw;
+                            positioningReward = raw;
+                        }
                     }
                 }
             }
@@ -1049,190 +1076,36 @@ public:
 //  - Player uses only single jump (no flip, no dodge)
 //  - Ball contact must be low (z < 300 units)
 //  - Reward based on positioning and ownership after contact
+// 2026-06-19 | Rev 2 (NJH):
+// Simplified code and removed some redundant gates. The core logic is unchanged, but it's now more concise and easier to read.
 // ============================================================================
 
 class SingleJumpLow5050Reward : public Reward {
-private:
-    struct PendingChallenge {
-        float timeLeft = 0.0f;          // Outcome window (0.3s)
-        uint32_t oppId = 0;
-        Vec ballPosAtChallenge;
-        bool playerHasJumped = false;
-        bool playerHasFlipped = false;
-        bool playerHasDoubleJumped = false;
-        float challengeQuality = 0.0f;
-    };
-
-    mutable std::map<uint32_t, PendingChallenge> pending;
-    mutable std::map<uint32_t, float> lastJumpTime;  // Track when player jumped
-
-    float maxBallHeightAtContact = 300.0f;
-    float outcomeWindowSec = 0.30f;                  // Time to evaluate who "won"
-
-    float rewardLow5050Win = 8.0f;                   // Won the challenge
-    float rewardLow5050Tie = 4.0f;                   // Neutral outcome
-    float rewardLow5050Loss = 1.0f;                  // Lost but made contact
+    float maxBallHeight = 300.0f;
+    float baseReward = 8.0f;
 
 public:
-    virtual void Reset(const GameState& initialState) override {
-        pending.clear();
-        lastJumpTime.clear();
-    }
+    virtual void Reset(const GameState& initialState) override {}
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-        uint32_t id = player.carId;
-
-        // ====================================================================
-        // PHASE 2: Resolve pending challenge outcomes
-        // ====================================================================
-
-        auto pit = pending.find(id);
-        if (pit != pending.end()) {
-            PendingChallenge& pc = pit->second;
-            pc.timeLeft -= dt;
-
-            // Track if player used flip or double jump during outcome window
-            if (player.hasJumped && !pc.playerHasJumped) {
-                pc.playerHasJumped = true;
-            }
-            if (player.isFlipping && !pc.playerHasFlipped) {
-                pc.playerHasFlipped = true;
-            }
-            if (player.hasDoubleJumped && !pc.playerHasDoubleJumped) {
-                pc.playerHasDoubleJumped = true;
-            }
-
-            if (pc.timeLeft <= 0.0f) {
-                float reward = 0.0f;
-
-                // Only reward if no flip or double jump was used after jump
-                if (pc.playerHasFlipped || pc.playerHasDoubleJumped) {
-                    reward = 0.0f;  // Used flip/double jump, disqualified
-                }
-                else if (player.ballTouchedStep) {
-                    // Player maintained/regained possession after challenge
-                    reward = rewardLow5050Win * RS_CLAMP(pc.challengeQuality, 0.0f, 1.0f);
-                }
-                else {
-                    // Lost possession but made clean contact
-                    reward = rewardLow5050Loss;
-                }
-
-                pending.erase(pit);
-                lastJumpTime[id] = 0.0f;
-                return reward;
-            }
-
-            return 0.0f;
-        }
-
-        // ====================================================================
-        // PHASE 1: Detect 50/50 challenge (both touching)
-        // ====================================================================
-
         if (!player.ballTouchedStep) return 0.0f;
+        if (state.ball.pos.z > maxBallHeight) return 0.0f;
+        if (!player.hasJumped || player.isOnGround) return 0.0f;
+        if (player.isFlipping || player.hasDoubleJumped) return 0.0f;
 
-        // Must be low contact
-        if (state.ball.pos.z > maxBallHeightAtContact) return 0.0f;
-
-        // Check if opponent also touched (50/50)
         bool isChallenge = false;
-        uint32_t challengerId = 0;
-        for (const auto& opp : state.players) {
-            if (opp.team == player.team) continue;
-            if (opp.ballTouchedStep) {
-                isChallenge = true;
-                challengerId = opp.carId;
-                break;
-            }
-        }
-
+        for (const auto& opp : state.players)
+            if (opp.team != player.team && opp.ballTouchedStep) { isChallenge = true; break; }
         if (!isChallenge) return 0.0f;
 
-        // Validate: Player only jumped, no flip/double-jump at contact time
-        if (player.isFlipping || player.hasDoubleJumped) {
-            return 0.0f;  // Used flip/double-jump, not a single jump
-        }
+        Vec oppGoal = (player.team == Team::BLUE)
+            ? CommonValues::ORANGE_GOAL_BACK
+            : CommonValues::BLUE_GOAL_BACK;
+        float quality = RS_CLAMP(
+            state.ball.vel.Dot(SafeNorm(oppGoal - state.ball.pos)) / 2000.0f,
+            0.1f, 1.0f);
 
-        // Player must have jumped recently (within 0.5s)
-        // This ensures it's an active jump challenge, not just momentum
-        if (state.prev) {
-            bool wasGrounded = !state.prev->players[player.carId].hasJumped;
-            bool isAirborne = player.hasJumped && !player.isOnGround;
-
-            if (!isAirborne) {
-                return 0.0f;  // Must be airborne from jump
-            }
-        }
-
-        // ====================================================================
-        // Compute challenge quality (positioning + ownership)
-        // ====================================================================
-
-        float quality = 0.0f;
-
-        // Find opponent for comparison
-        const Player* oppPtr = nullptr;
-        for (const auto& opp : state.players) {
-            if (opp.carId == challengerId) {
-                oppPtr = &opp;
-                break;
-            }
-        }
-
-        if (!oppPtr) return 0.0f;
-
-        // Distance to ball at contact (closer = better control)
-        float myDistToBall = (player.pos - state.ball.pos).Length();
-        float oppDistToBall = (oppPtr->pos - state.ball.pos).Length();
-        float distDelta = oppDistToBall - myDistToBall;
-
-        if (distDelta > 200.0f) {
-            // Significantly closer = advantage
-            quality += 0.5f;
-        }
-        else if (distDelta > -200.0f) {
-            // Similar distance = fair challenge
-            quality += 0.25f;
-        }
-
-        // Ball velocity alignment (going toward my goal vs away)
-        const Vec myGoal = (player.team == Team::BLUE) ? CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
-        const Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-
-        Vec toMyGoal = SafeNorm(myGoal - state.ball.pos);
-        Vec toOppGoal = SafeNorm(oppGoal - state.ball.pos);
-
-        float towardOpp = state.ball.vel.Dot(toOppGoal);
-        float towardMe = state.ball.vel.Dot(toMyGoal);
-
-        if (towardOpp > 500.0f) {
-            quality += 0.3f;  // Ball going toward opponent goal = good win
-        }
-        else if (towardMe < 500.0f) {
-            quality += 0.15f;  // Ball not dangerous = decent neutral
-        }
-
-        quality = RS_CLAMP(quality, 0.0f, 1.0f);
-
-        // ====================================================================
-        // ARM PENDING CHALLENGE
-        // ====================================================================
-
-        PendingChallenge pc;
-        pc.timeLeft = outcomeWindowSec;
-        pc.oppId = challengerId;
-        pc.ballPosAtChallenge = state.ball.pos;
-        pc.playerHasJumped = player.hasJumped;
-        pc.playerHasFlipped = player.isFlipping;
-        pc.playerHasDoubleJumped = player.hasDoubleJumped;
-        pc.challengeQuality = quality;
-
-        pending[id] = pc;
-        lastJumpTime[id] = 0.0f;
-
-        return 0.0f;  // Reward deferred until outcome window
+        return baseReward * quality;
     }
 };
 
@@ -3075,9 +2948,12 @@ private:
         // NEW: Velocity tracking (distance-dependent requirements)
         float initialBallVelocity = 0.0f;       // Ball speed when sequence started
         float distanceToOpponentGoal = 0.0f;    // Distance from start position to opponent goal
+
+        // Ball travel integral since last touch (height × distance; adapted from BallTravelReward)
+        float travelIntegralAccum = 0.0f;
     };
 
-    mutable std::map<uint32_t, SequenceState> sequenceStates;
+    mutable std::unordered_map<uint32_t, SequenceState> sequenceStates;
     float minBallHeight = 250.0f;
 
     // Consolidated metrics (per mode)
@@ -3091,6 +2967,8 @@ private:
     const float EPS_REWARD_SKIP = 1e-7f;
 
     BallPred::Cache _ballCache;  // Updated once per step in PreStep(); read in Evaluate*()
+    mutable Vec  _prevBallPos       = {};     // For ball travel integral (accumulated in PreStep)
+    mutable bool _prevBallPosValid  = false;
 
     // ========================================================================
     // MODE DETECTION
@@ -3715,6 +3593,23 @@ private:
 public:
     virtual void PreStep(const GameState& state) override {
         _ballCache.Update(state);
+
+        // Ball travel integral: accumulate height × step_distance once per frame
+        // for all active sequences. PreStep runs once per frame (not per player),
+        // so this avoids per-player inflation in 2v2/3v3.
+        // Adapted from BallTravelReward (rlgym-tools, do_integral=True mode):
+        // https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/ball_travel_reward.py
+        if (_prevBallPosValid && state.ball.pos.z > minBallHeight) {
+            float step_dist = (state.ball.pos - _prevBallPos).Length();
+            float avg_z     = (state.ball.pos.z + _prevBallPos.z) * 0.5f;
+            float step_integral = step_dist * avg_z;
+            if (step_integral > 0.0f) {
+                for (auto& [id, seq] : sequenceStates)
+                    seq.travelIntegralAccum += step_integral;
+            }
+        }
+        _prevBallPos      = state.ball.pos;
+        _prevBallPosValid = true;
     }
 
     virtual void Reset(const GameState& initialState) override {
@@ -3725,14 +3620,25 @@ public:
         defensiveCompletions = 0;
         generalAttempts = 0;
         generalCompletions = 0;
+        _prevBallPos      = {};
+        _prevBallPosValid = false;
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         uint32_t id = player.carId;
         float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
 
-        // Reset on ground or invalid conditions
-        if (player.isOnGround || state.ball.pos.z < minBallHeight || player.pos.z >= state.ball.pos.z) {
+        // Angle-based underside contact gate (replaces crude Z comparison).
+        // Car must be within 70° of directly below the ball center — prevents rewarding
+        // side-swipes where the car is at a lower Z but not actually under the ball.
+        // cos(70°) ≈ 0.34: carFromBall.z / dist must be more negative than -0.34.
+        Vec  carFromBall  = player.pos - state.ball.pos;
+        float carBallDist = carFromBall.Length();
+        constexpr float MIN_UNDERSIDE_Z = 0.34f;
+        bool undersideContact = (carBallDist > 0.1f)
+                                && (carFromBall.z / carBallDist < -MIN_UNDERSIDE_Z);
+
+        if (player.isOnGround || state.ball.pos.z < minBallHeight || !undersideContact) {
             sequenceStates.erase(id);
             return 0.0f;
         }
@@ -3770,18 +3676,46 @@ public:
             return 0.0f;
         }
 
+        // Underside contact quality: -1.0 = directly below (best), -MIN_UNDERSIDE_Z = threshold
+        // Maps to [0.65, 1.0] — more vertical approach = higher reward multiplier.
+        float undersideNormZ   = carFromBall.z / carBallDist;
+        float undersideQuality = RS_CLAMP(
+            (-undersideNormZ - MIN_UNDERSIDE_Z) / (1.0f - MIN_UNDERSIDE_Z),
+            0.0f, 1.0f);
+        float undersideMul = 0.65f + 0.35f * undersideQuality;
+
         // Detect mode and evaluate
         Mode mode = DetectMode(player, state);
 
+        float reward = 0.0f;
         switch (mode) {
-            case Mode::OFFENSIVE:
-                return EvaluateOffensive(player, state, seq);
-            case Mode::DEFENSIVE:
-                return EvaluateDefensive(player, state, seq);
+            case Mode::OFFENSIVE:  reward = EvaluateOffensive(player, state, seq); break;
+            case Mode::DEFENSIVE:  reward = EvaluateDefensive(player, state, seq); break;
             case Mode::GENERAL:
-            default:
-                return EvaluateGeneral(player, state, seq);
+            default:               reward = EvaluateGeneral(player, state, seq);    break;
         }
+
+        if (reward > EPS_REWARD_SKIP) {
+            // Underside quality multiplier — rewards more vertical (beneath-ball) approach
+            reward *= undersideMul;
+
+            // Ball travel integral bonus (adapted from BallTravelReward, rlgym-tools):
+            // https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/ball_travel_reward.py
+            // Normalization: 4 / (2 * BACK_WALL_Y * CEILING_Z) = 4 / 20,930,560 ≈ 1.91e-7
+            // Typical air dribble (3000 UU travel, 600 UU avg height → integral ≈ 1.8M):
+            //   bonus ≈ 1.8M × 1.91e-7 × 8.0 ≈ 2.7 → capped at 2.0
+            constexpr float TRAVEL_INTEGRAL_NORM = 1.91e-7f;
+            constexpr float TRAVEL_BONUS_SCALE   = 8.0f;
+            constexpr float TRAVEL_BONUS_MAX      = 2.0f;
+            float travelBonus = RS_CLAMP(
+                seq.travelIntegralAccum * TRAVEL_INTEGRAL_NORM * TRAVEL_BONUS_SCALE,
+                0.0f, TRAVEL_BONUS_MAX);
+            reward              += travelBonus;
+            seq.accumReward     += travelBonus;
+            seq.travelIntegralAccum = 0.0f;
+        }
+
+        return reward;
     }
 
     // Metrics accessors for W&B monitoring

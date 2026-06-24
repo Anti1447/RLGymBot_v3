@@ -1,6 +1,7 @@
 #pragma once
 #include "Reward.h"
 #include <map>
+#include <unordered_map>
 #include <atomic>
 #include <cmath>
 
@@ -77,9 +78,9 @@ namespace RLGC {
 			if (tracker.state == AerialTracker::FIRST_JUMP &&
 				tracker.jumpStartTime > 0.0f && tracker.jumpStartTime <= DOUBLE_JUMP_WINDOW) {
 
-				// Check if car has flip available (hasFlipped = false means flip still available)
-				// Flip activation means second jump is being performed
-				if (player.isFlipping && !prevPlayer.isFlipping) {
+				// Pure double jump (no directional flip) — hasDoubleJumped transitions false→true.
+				// Flips do NOT set hasDoubleJumped (RocketSim guarantee), so this is exclusive.
+				if (player.hasDoubleJumped && !prevPlayer.hasDoubleJumped) {
 					tracker.state = AerialTracker::SECOND_JUMP_READY;
 					tracker.secondJumpDetected = true;
 					tracker.maxHeightAfterSecondJump = player.pos.z;
@@ -262,7 +263,8 @@ namespace RLGC {
 			if (tracker.state == FastAerialTracker::PITCHED_UP &&
 			    tracker.jumpStartTime > 0.0f && tracker.jumpStartTime <= DOUBLE_JUMP_WINDOW)
 			{
-				if (player.isFlipping && !prevPlayer.isFlipping) {
+				// Pure double jump only — flips do NOT set hasDoubleJumped (RocketSim guarantee)
+				if (player.hasDoubleJumped && !prevPlayer.hasDoubleJumped) {
 					tracker.state              = FastAerialTracker::SECOND_JUMP;
 					tracker.secondJumpDetected = true;
 					tracker.maxHeightAfterSecondJump = player.pos.z;
@@ -307,6 +309,11 @@ namespace RLGC {
 		}
 	};
 
+	/* RETIRED 2026-06-23: AirDribbleSetupReward Rev 1.0
+	   Replaced by Rev 2.1 event-gated implementation below.
+	   Rev 1.0 was a continuous frame-by-frame co-presence reward (player z>400, ball z>300).
+	   Caused hover farming, anti-rotation gradient, teammate crowding, boost-penalized aerials.
+
 	// ============================================================================
 	// AIR DRIBBLE SETUP REWARD - Generic soft-touch setup detection
 	// Rewards soft touch sequences that establish air dribble positioning
@@ -314,195 +321,266 @@ namespace RLGC {
 	// 2026-02-10 | Rev 1.0 | NJH
 	// ============================================================================
 	class AirDribbleSetupReward : public Reward {
-	private:
-		struct SetupMemory {
-			// Phase tracking
-			bool isInSetupPhase = false;
-			int setupStepsCount = 0;
-			float setupStartHeight = 0.0f;
-			float maxHeightInSetup = 0.0f;
+	...
+	};
+	*/
 
-			// Touch quality tracking
-			bool firstTouchWasSoft = false;
-			float accumulatedSoftness = 0.0f;
-			int softTouchCount = 0;
-
-			// Position tracking
-			float lastProximityToball = 999999.0f;
-
-			// Boost tracking
-			float setupStartBoost = 0.0f;  // Boost level when setup started
-
-			// Velocity tracking (NEW - distance-dependent velocity requirements)
-			float setupStartBallVelocity = 0.0f;   // Ball speed when setup initiated
-			float distanceToOpponentGoal = 0.0f;   // Distance from setup position to opponent goal
-			bool velocityBonusApplied = false;     // Track if velocity bonus already applied
+	// ============================================================================
+	// AirDribbleSetupReward Rev 2.1 — 9-gate event-gated setup touch detector
+	// Entry event for air dribble: the touch that pops ball into carry position.
+	// 2026-06-23 | Rev 2.1 | NJH
+	//
+	// Rev 1.0 (commented out above) was frame-by-frame co-presence — retired.
+	// 9 gates at touch moment → reward stored → step +12 pursuit alignment check.
+	// 5 cancellation conditions + hard timeout. No continuous firing.
+	// ============================================================================
+	class AirDribbleSetupReward : public Reward {
+	public:
+		struct Config {
+			// Gate thresholds — cheapest first (matches evaluation order in GetReward)
+			float minBallHeightAtTouch     = 140.0f;   // ball z at touch (UU)
+			float minBoost                 = 20.0f;    // min boost to pass gate
+			float minBallVelZ              = 150.0f;   // min upward ball vel post-touch (UU/s)
+			float minTouchImpulse          = 100.0f;   // min ball speed delta from touch (UU/s)
+			float ballSpeedMin             = 900.0f;   // post-touch ball speed lower bound (UU/s)
+			float ballSpeedMax             = 1600.0f;  // post-touch ball speed upper bound (UU/s)
+			float carSpeedMin              = 900.0f;   // car speed lower bound — airborne only (UU/s)
+			float carSpeedMax              = 1600.0f;  // car speed upper bound — all setups (UU/s)
+			float ceilingClearance         = 1800.0f;  // max predicted ball apex Z (UU)
+			float opponentMinTTR           = 0.5f;     // min opponent closing TTR to ball (sec)
+			float minOpponentApproachSpeed = 800.0f;   // floor for opponent closing speed in TTR calc
+			// Confirmation window
+			int   confirmationSteps        = 12;       // steps before pursuit check (~0.4s at tickSkip=4)
+			float minPursuitAlignment      = 0.6f;     // min dot(playerVel, toBall) at confirmation
+			float ballGroundCancelZ        = 150.0f;   // ball z below this → cancel pending
+			float ceilingCancelZ           = 1900.0f;  // ball z above this → cancel pending
+			// Reward magnitudes
+			float baseSetupReward          = 0.4f;     // base before quality multipliers
+			float boostFullQualityThresh   = 60.0f;    // boost level for full boostQuality (1.0)
+			float ballVelZFull             = 500.0f;   // ball vel.z for full upwardQuality (1.0)
 		};
 
-		mutable std::map<uint32_t, SetupMemory> trackers;
+	private:
+		struct SetupMemory {
+			bool  pendingConfirm    = false;
+			float pendingReward     = 0.0f;
+			int   confirmTimer      = 0;
+			float lastSpeedQuality  = 0.0f;
+			float lastBoostQuality  = 0.0f;
+			float lastUpwardQuality = 0.0f;
+		};
 
-		// Configuration
-		static constexpr float BALL_ELEVATION_THRESHOLD = 300.0f;  // Ball must be elevated
-		static constexpr float PLAYER_ELEVATION_THRESHOLD = 400.0f; // Player must be in air
-		static constexpr float SETUP_MAX_VELOCITY_DIFF = 400.0f;   // Max velocity diff for "soft" touch
-		static constexpr float PROXIMITY_MIN = 50.0f;              // Minimum proximity to ball
-		static constexpr float PROXIMITY_MAX = 300.0f;             // Maximum proximity for good spacing
-		static constexpr float SETUP_BASE_REWARD = 0.2f;           // Base reward per frame in setup
-		static constexpr float SOFTNESS_BONUS_PER_TOUCH = 0.3f;    // Per soft touch bonus
-		static constexpr float POSITION_QUALITY_BONUS = 0.15f;     // For optimal positioning
-		static constexpr float PERSISTENCE_BONUS = 0.05f;          // Per 30 steps of setup
-		static constexpr int PERSISTENCE_STEP_INTERVAL = 30;       // Steps between persistence bonuses
+		Config config;
+		mutable std::unordered_map<uint32_t, SetupMemory> trackers;
+
+		// Metrics — atomic for thread safety across 310 parallel arenas
+		mutable std::atomic<int64_t> m_touchesGated{0};
+		mutable std::atomic<int64_t> m_confirmationsSucceeded{0};
+		mutable std::atomic<int64_t> m_cancelledDemoed{0};
+		mutable std::atomic<int64_t> m_cancelledLanded{0};
+		mutable std::atomic<int64_t> m_cancelledBallGround{0};
+		mutable std::atomic<int64_t> m_cancelledBallCeiling{0};
+		mutable std::atomic<int64_t> m_cancelledOpponentTouch{0};
+		mutable std::atomic<int64_t> m_cancelledTimeout{0};
+		mutable std::atomic<int64_t> m_cancelledNoPursuit{0};
+		mutable std::atomic<int64_t> m_speedQualitySum{0};
+		mutable std::atomic<int64_t> m_boostQualitySum{0};
+		mutable std::atomic<int64_t> m_upwardQualitySum{0};
+		mutable std::atomic<int64_t> m_rewardMilli{0};
+
+		float ComputeSpeedQuality(float ballSpeed) const {
+			float center    = (config.ballSpeedMin + config.ballSpeedMax) * 0.5f;
+			float halfRange = (config.ballSpeedMax - config.ballSpeedMin) * 0.5f;
+			float raw       = 1.0f - (fabsf(ballSpeed - center) / halfRange);
+			return RS_CLAMP(raw, 0.2f, 1.0f);
+		}
+
+		float ComputeBoostQuality(float boost) const {
+			float range = config.boostFullQualityThresh - config.minBoost;
+			return RS_CLAMP(0.5f + 0.5f * ((boost - config.minBoost) / range), 0.5f, 1.0f);
+		}
+
+		float ComputeUpwardQuality(float ballVelZ) const {
+			return RS_CLAMP(
+				(ballVelZ - config.minBallVelZ) / (config.ballVelZFull - config.minBallVelZ),
+				0.0f, 1.0f
+			);
+		}
 
 	public:
+		explicit AirDribbleSetupReward(Config cfg = Config{}) : config(cfg) {}
+
 		virtual void Reset(const GameState& initialState) override {
 			trackers.clear();
 		}
 
-		// ====================================================================
-		// Helper: Calculate distance to opponent goal
-		// ====================================================================
-		float GetDistanceToOpponentGoal(const Player& player, const GameState& state) const {
-			Vec oppGoal = (player.team == Team::BLUE) ?
-				CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
-			return (player.pos - oppGoal).Length();
-		}
-
-		// ====================================================================
-		// Helper: Get minimum required velocity for starting distance
-		// ====================================================================
-		float GetMinVelocityForDistance(float distanceToGoal) const {
-			// Distance-based minimum velocity requirements (scaled for 10240 UU field)
-			if (distanceToGoal >= 9000.0f) return 1800.0f;      // Very far (own corner ~9000+ UU)
-			if (distanceToGoal >= 7000.0f) return 1700.0f;      // Far
-			if (distanceToGoal >= 5000.0f) return 1500.0f;      // Medium
-			if (distanceToGoal >= 3000.0f) return 1200.0f;      // Close
-			return 0.0f;                                         // Very close - no minimum
-		}
-
-		// ====================================================================
-		// Helper: Get optimal velocity upper bound for bonuses
-		// ====================================================================
-		float GetMaxBonusVelocity(float distanceToGoal) const {
-			// Optimal velocity ranges for bonuses (scaled for 10240 UU field)
-			if (distanceToGoal >= 9000.0f) return 2300.0f;
-			if (distanceToGoal >= 7000.0f) return 2200.0f;
-			if (distanceToGoal >= 5000.0f) return 2000.0f;
-			if (distanceToGoal >= 3000.0f) return 1800.0f;
-			return 1500.0f;
-		}
-
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			auto& mem = trackers[player.carId];
-			float reward = 0.0f;
 
-			// Check if player and ball are in air at good heights
-			bool playerInAir = player.pos.z > PLAYER_ELEVATION_THRESHOLD;
-			bool ballElevated = state.ball.pos.z > BALL_ELEVATION_THRESHOLD;
-
-			// === PHASE 1: SETUP INITIATION ===
-			if (!mem.isInSetupPhase && playerInAir && ballElevated) {
-				// Starting setup phase
-				mem.isInSetupPhase = true;
-				mem.setupStartHeight = player.pos.z;
-				mem.setupStepsCount = 0;
-				mem.accumulatedSoftness = 0.0f;
-				mem.softTouchCount = 0;
-				mem.maxHeightInSetup = player.pos.z;
-				mem.setupStartBoost = player.boost;  // Capture boost at setup start
-
-				// NEW: Track initial ball velocity and distance to opponent goal
-				mem.setupStartBallVelocity = state.ball.vel.Length();
-				mem.distanceToOpponentGoal = GetDistanceToOpponentGoal(player, state);
-				mem.velocityBonusApplied = false;
-			}
-
-			// === PHASE 2: SETUP MAINTENANCE ===
-			if (mem.isInSetupPhase) {
-				if (!playerInAir || !ballElevated) {
-					// Setup phase ended (landed or ball fell)
-					mem.isInSetupPhase = false;
+			// ================================================================
+			// Confirmation window — runs every step while a touch is pending
+			// ================================================================
+			if (mem.pendingConfirm) {
+				// Hard timeout: cancel if window overran (e.g. skipped GetReward call)
+				if (mem.confirmTimer > config.confirmationSteps) {
+					mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+					m_cancelledTimeout.fetch_add(1);
 					return 0.0f;
 				}
-
-				mem.setupStepsCount++;
-				mem.maxHeightInSetup = RS_MAX(mem.maxHeightInSetup, player.pos.z);
-
-				// === PHASE 3: SOFT TOUCH DETECTION ===
-				if (player.ballTouchedStep) {
-					Vec velDiff = player.vel - state.ball.vel;
-					float velocityDifference = velDiff.Length();
-
-					if (velocityDifference < SETUP_MAX_VELOCITY_DIFF) {
-						// This is a soft touch!
-						mem.softTouchCount++;
-						mem.accumulatedSoftness += (1.0f - (velocityDifference / SETUP_MAX_VELOCITY_DIFF));
-
-						if (mem.softTouchCount == 1) {
-							mem.firstTouchWasSoft = true;
-						}
-
-						// Reward soft touches: stronger bonus on early touches
-						float softnessMultiplier = (mem.softTouchCount <= 2) ? 1.0f : 0.5f;
-						reward += SOFTNESS_BONUS_PER_TOUCH * softnessMultiplier;
+				if (player.isDemoed) {
+					mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+					m_cancelledDemoed.fetch_add(1);
+					return 0.0f;
+				}
+				// isOnGround covers walls in this build (empirical — monitor CancelledLanded
+				// for wall-chip false positives via W&B)
+				if (player.isOnGround) {
+					mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+					m_cancelledLanded.fetch_add(1);
+					return 0.0f;
+				}
+				if (state.ball.pos.z < config.ballGroundCancelZ) {
+					mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+					m_cancelledBallGround.fetch_add(1);
+					return 0.0f;
+				}
+				if (state.ball.pos.z > config.ceilingCancelZ) {
+					mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+					m_cancelledBallCeiling.fetch_add(1);
+					return 0.0f;
+				}
+				for (const auto& other : state.players) {
+					if (other.team != player.team && other.ballTouchedStep) {
+						mem.pendingConfirm = false; mem.pendingReward = 0.0f;
+						m_cancelledOpponentTouch.fetch_add(1);
+						return 0.0f;
 					}
 				}
 
-				// === PHASE 4: POSITION QUALITY ===
-				Vec toBall = state.ball.pos - player.pos;
-				float proximityToBall = toBall.Length();
-				mem.lastProximityToball = proximityToBall;
+				mem.confirmTimer++;
 
-				if (proximityToBall >= PROXIMITY_MIN && proximityToBall <= PROXIMITY_MAX) {
-					// Reward being in optimal spacing zone
-					float proximityScore = 1.0f - (fabs(proximityToBall - PROXIMITY_MIN) / (PROXIMITY_MAX - PROXIMITY_MIN));
-					reward += POSITION_QUALITY_BONUS * proximityScore;
-				}
+				if (mem.confirmTimer >= config.confirmationSteps) {
+					float playerSpeed = player.vel.Length();
+					float toBallDist  = (state.ball.pos - player.pos).Length();
+					Vec playerVelDir  = (playerSpeed > 1.0f) ? (player.vel / playerSpeed)
+					                                         : Vec(0.0f, 0.0f, 0.0f);
+					Vec toBallDir     = (toBallDist  > 1.0f)
+					                  ? ((state.ball.pos - player.pos) / toBallDist)
+					                  : Vec(0.0f, 0.0f, 1.0f);
+					float align = playerVelDir.Dot(toBallDir);
 
-				// === PHASE 5: BASE SETUP REWARD ===
-				reward += SETUP_BASE_REWARD;
-
-				// === PHASE 6: PERSISTENCE BONUS ===
-				if (mem.setupStepsCount % PERSISTENCE_STEP_INTERVAL == 0 && mem.setupStepsCount > 0) {
-					reward += PERSISTENCE_BONUS;
-				}
-
-				// === PHASE 7: VELOCITY QUALITY BONUS (NEW - Distance-dependent) ===
-				if (!mem.velocityBonusApplied && mem.setupStepsCount <= 5) {
-					// Only check velocity in first 5 frames of setup
-					float currBallSpeed = state.ball.vel.Length();
-					float minVelocity = GetMinVelocityForDistance(mem.distanceToOpponentGoal);
-					float maxVelocity = GetMaxBonusVelocity(mem.distanceToOpponentGoal);
-
-					if (currBallSpeed >= minVelocity && minVelocity > 0.0f) {
-						// Ball is moving fast enough for this distance
-						mem.velocityBonusApplied = true;
-
-						// Bonus scales from 0 (at minVelocity) to 1.0 (at maxVelocity)
-						float velocityBonus = 0.0f;
-						if (currBallSpeed <= maxVelocity) {
-							velocityBonus = (currBallSpeed - minVelocity) / (maxVelocity - minVelocity);
-						} else {
-							velocityBonus = 1.0f;  // Full bonus at or above max velocity
-						}
-
-						// Reward scales with how far you are (farther = higher reward for good velocity)
-						float distanceMultiplier = RS_CLAMP(mem.distanceToOpponentGoal / 9000.0f, 0.5f, 1.5f);
-						reward += 0.5f * velocityBonus * distanceMultiplier;
+					float fired = 0.0f;
+					if (align >= config.minPursuitAlignment && !player.isOnGround) {
+						fired = mem.pendingReward;
+						m_confirmationsSucceeded.fetch_add(1);
+						m_rewardMilli.fetch_add(static_cast<int64_t>(fired * 1000.0f));
+					} else {
+						m_cancelledNoPursuit.fetch_add(1);
 					}
+					mem.pendingConfirm = false;
+					mem.pendingReward  = 0.0f;
+					return fired;
+				}
+				return 0.0f;
+			}
+
+			// ================================================================
+			// Gate evaluation — only runs on touch frames
+			// ================================================================
+			if (!player.ballTouchedStep) return 0.0f;
+			if (!state.prev)             return 0.0f;
+
+			// Gate 1: ball height at touch
+			if (state.ball.pos.z < config.minBallHeightAtTouch) return 0.0f;
+			// Gate 2: minimum boost
+			if (player.boost < config.minBoost) return 0.0f;
+			// Gate 3: ball going upward
+			if (state.ball.vel.z < config.minBallVelZ) return 0.0f;
+			// Gate 4: touch impulse (ball speed delta vs prev frame)
+			if ((state.ball.vel.Length() - state.prev->ball.vel.Length()) < config.minTouchImpulse)
+				return 0.0f;
+			// Gate 5: post-touch ball speed in chaseable band
+			float ballSpeed = state.ball.vel.Length();
+			if (ballSpeed < config.ballSpeedMin || ballSpeed > config.ballSpeedMax) return 0.0f;
+			// Gate 6: car speed band; lower bound waived when isOnGround (wall-driving chip)
+			float carSpeed = player.vel.Length();
+			if (player.isOnGround) {
+				if (carSpeed > config.carSpeedMax) return 0.0f;
+			} else {
+				if (carSpeed < config.carSpeedMin || carSpeed > config.carSpeedMax) return 0.0f;
+			}
+			// Gate 7: ceiling clearance — analytic ballistic apex
+			float apexZ = (state.ball.vel.z > 0.0f)
+				? (state.ball.pos.z + (state.ball.vel.z * state.ball.vel.z) / (2.0f * 650.0f))
+				: state.ball.pos.z;
+			if (apexZ >= config.ceilingClearance) return 0.0f;
+
+			// Gates 8 & 9 combined — single player loop (most expensive, runs last)
+			float myDist = (player.pos - state.ball.pos).Length();
+			for (const auto& other : state.players) {
+				if (other.carId == player.carId || other.isDemoed) continue;
+				// Gate 9: must be closest player on field (teammates included)
+				if ((other.pos - state.ball.pos).Length() < myDist) return 0.0f;
+				// Gate 8: opponent closing TTR must exceed minimum
+				if (other.team != player.team) {
+					Vec toBall   = state.ball.pos - other.pos;
+					float dist   = toBall.Length();
+					Vec dir      = (dist > 1.0f) ? (toBall / dist) : Vec(0.0f, 0.0f, 0.0f);
+					float effSpd = RS_MAX(RS_MAX(other.vel.Dot(dir), 0.0f),
+					                     config.minOpponentApproachSpeed);
+					if ((dist / effSpd) < config.opponentMinTTR) return 0.0f;
 				}
 			}
 
-			// NEW: Apply boost multiplier to all setup phase rewards
-			if (mem.isInSetupPhase && reward > 0.0f) {
-				float boostMultiplier = RS_CLAMP(mem.setupStartBoost / 50.0f, 0.0f, 1.0f);
-				reward *= boostMultiplier;
-			}
+			// All 9 gates passed — compute quality composite and store pending reward
+			float speedQ  = ComputeSpeedQuality(ballSpeed);
+			float boostQ  = ComputeBoostQuality(player.boost);
+			float upwardQ = ComputeUpwardQuality(state.ball.vel.z);
 
-			return reward;
+			mem.pendingReward    = config.baseSetupReward * speedQ * boostQ * upwardQ;
+			mem.confirmTimer     = 0;
+			mem.pendingConfirm   = true;
+			mem.lastSpeedQuality = speedQ;
+			mem.lastBoostQuality = boostQ;
+			mem.lastUpwardQuality= upwardQ;
+
+			m_touchesGated.fetch_add(1);
+			m_speedQualitySum.fetch_add(static_cast<int64_t>(speedQ  * 1000.0f));
+			m_boostQualitySum.fetch_add(static_cast<int64_t>(boostQ  * 1000.0f));
+			m_upwardQualitySum.fetch_add(static_cast<int64_t>(upwardQ * 1000.0f));
+
+			return 0.0f;
 		}
 
-		void PreStep(const GameState& state) override {
-			// Cleanup opportunity (optional - could log metrics here)
+		struct Metrics {
+			int64_t touchesGated, confirmationsSucceeded;
+			int64_t cancelledDemoed, cancelledLanded, cancelledBallGround;
+			int64_t cancelledBallCeiling, cancelledOpponentTouch;
+			int64_t cancelledTimeout, cancelledNoPursuit;
+			int64_t avgSpeedQualityMilli, avgBoostQualityMilli, avgUpwardQualityMilli;
+			int64_t rewardMilli;
+		};
+
+		Metrics CollectMetrics() const {
+			int64_t gated    = m_touchesGated.exchange(0);
+			int64_t speedSum = m_speedQualitySum.exchange(0);
+			int64_t boostSum = m_boostQualitySum.exchange(0);
+			int64_t upSum    = m_upwardQualitySum.exchange(0);
+			Metrics m{};
+			m.touchesGated           = gated;
+			m.confirmationsSucceeded = m_confirmationsSucceeded.exchange(0);
+			m.cancelledDemoed        = m_cancelledDemoed.exchange(0);
+			m.cancelledLanded        = m_cancelledLanded.exchange(0);
+			m.cancelledBallGround    = m_cancelledBallGround.exchange(0);
+			m.cancelledBallCeiling   = m_cancelledBallCeiling.exchange(0);
+			m.cancelledOpponentTouch = m_cancelledOpponentTouch.exchange(0);
+			m.cancelledTimeout       = m_cancelledTimeout.exchange(0);
+			m.cancelledNoPursuit     = m_cancelledNoPursuit.exchange(0);
+			m.avgSpeedQualityMilli   = (gated > 0) ? (speedSum / gated) : 0;
+			m.avgBoostQualityMilli   = (gated > 0) ? (boostSum / gated) : 0;
+			m.avgUpwardQualityMilli  = (gated > 0) ? (upSum    / gated) : 0;
+			m.rewardMilli            = m_rewardMilli.exchange(0);
+			return m;
 		}
 	};
 

@@ -34,6 +34,7 @@
 #include <RLGymCPP/Rewards/DefensiveClearingRewards.h>
 #include <RLGymCPP/Rewards/SpecializedFlickRewards.h>
 #include <RLGymCPP/Rewards/DribbleFlickRewards.h>
+#include <RLGymCPP/Rewards/BallSteerReward.h>
 #include <RLGymCPP/Rewards/OpenNetPushReward.h>
 #include <RLGymCPP/Rewards/AerialRewards.h>
 #include <RLGymCPP/Rewards/AerialOutplayReward.h>
@@ -62,6 +63,12 @@
 #include <RLGymCPP/Rewards/RolvDemoReward.h>
 #include <RLGymCPP/Rewards/DemoLeadApproachReward.h>
 #include <RLGymCPP/Rewards/DemoInterceptLeadReward.h>
+#include <RLGymCPP/Rewards/DemoOpportunityReward.h>
+#include <RLGymCPP/Rewards/LastManOvercommitPenalty.h>
+#include <RLGymCPP/Rewards/BallRaceAwarenessReward.h>
+#include <RLGymCPP/Rewards/ImpendingShotDefenseReward.h>
+#include <RLGymCPP/Rewards/BackboardInterceptionReward.h>
+#include <RLGymCPP/Rewards/NonPrimaryAirPenalty.h>
 #include <RLGymCPP/Rewards/PowerslideTurnRewards.h>
 #include <RLGymCPP/Rewards/PowerShotRewards.h>
 #include <RLGymCPP/Rewards/ChallengeAngleQualityReward.h>
