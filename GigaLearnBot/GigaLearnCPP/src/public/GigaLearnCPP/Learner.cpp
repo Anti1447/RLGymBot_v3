@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <ctime>
+#include <algorithm>
 #include <pybind11/embed.h>
 
 #ifdef RG_CUDA_SUPPORT
@@ -267,6 +268,28 @@ void GGL::Learner::Save() {
 		);
 
 		// Run diagnostician
+		// NOTE: avgRatingDeltaTrend is a single aggregate (mean Elo delta across game modes since
+		// last checkpoint), applied uniformly to every reward below. It is NOT a per-reward
+		// correlation -- it only tells you whether the bot is trending better/worse overall this
+		// interval, not which reward is responsible. Real per-reward correlation needs rolling
+		// per-reward history and is a separate follow-up.
+		float avgRatingDeltaTrend = 0.0f;
+		if (!metricsCollector.ratingDeltas.empty()) {
+			float sum = 0.0f;
+			for (const auto& pair : metricsCollector.ratingDeltas)
+				sum += pair.second;
+			avgRatingDeltaTrend = sum / (float)metricsCollector.ratingDeltas.size();
+		}
+		// RewardMetrics::correlationWithWinRate is documented/used as a bounded [-1,1]
+		// correlation-coefficient-shaped signal (RewardDiagnostician's WIN_CORRELATION_THRESHOLD=0.15
+		// and CalculateCorrelationSeverity both assume that scale). Raw Elo points are a different
+		// scale (SkillTrackerConfig::ratingInc = 5 per goal), so normalize before assigning: a full
+		// +/-1 requires a ~2-goal net rating swing, and anything smaller than that (i.e. ordinary
+		// single-interval skill-match noise) stays proportionally small instead of reading as a
+		// maxed-out "this reward is anti-correlated with winning" signal.
+		constexpr float RATING_TREND_NORMALIZATION_SCALE = 10.0f;
+		float normalizedRatingTrend = std::max(-1.0f, std::min(1.0f, avgRatingDeltaTrend / RATING_TREND_NORMALIZATION_SCALE));
+
 		std::vector<RewardMetrics> allMetrics;
 		std::map<std::string, float> rewardWeights;
 		for (const auto& pair : metricsCollector.trackers) {
@@ -279,8 +302,8 @@ void GGL::Learner::Save() {
 			rm.baseWeight = tracker.weight;
 			rm.isActive = rm.activationRate > 0.01f;
 			rm.isStable = rm.varianceInActivation < 0.6f;
-			rm.isHelpful = false; // No per-reward win correlation yet
-			rm.correlationWithWinRate = 0.0f;
+			rm.correlationWithWinRate = normalizedRatingTrend;
+			rm.isHelpful = rm.isActive && rm.isStable && normalizedRatingTrend >= 0.0f;
 			allMetrics.push_back(rm);
 			rewardWeights[tracker.rewardName] = tracker.weight;
 		}

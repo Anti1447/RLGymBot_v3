@@ -23,14 +23,19 @@ namespace RLGC {
 	};
 
 
-	typedef PlayerDataEventReward<&PlayerEventState::goal, false> PlayerGoalReward; // NOTE: Given only to the player who last touched the ball on the opposing team
+	// NOTE: PlayerGoalReward is DEAD — not used in RewardConfig. Live goal reward flows through
+	// GoalReward / OwnGoalPenalty below. Do not wire this typedef up thinking it's the goal reward.
+	typedef PlayerDataEventReward<&PlayerEventState::goal, false> PlayerGoalReward;
 	typedef PlayerDataEventReward<&PlayerEventState::assist, false> AssistReward;
 	typedef PlayerDataEventReward<&PlayerEventState::shot, false> ShotReward;
 	typedef PlayerDataEventReward<&PlayerEventState::shotPass, false> ShotPassReward;
 	typedef PlayerDataEventReward<&PlayerEventState::save, false> SaveReward;
 	typedef PlayerDataEventReward<&PlayerEventState::bump, false> BumpReward;
-	typedef PlayerDataEventReward<&PlayerEventState::bumped, true> BumpedPenalty;
 	typedef PlayerDataEventReward<&PlayerEventState::demo, false> DemoReward;
+	// NOTE: BumpedPenalty / DemoedPenalty are intentionally left DISABLED in RewardConfig.
+	// BumpReward/DemoReward are wrapped in ZeroSumReward, which already subtracts the opponent's
+	// bump/demo reward from the victim's team — enabling these would double-penalize. Do not re-enable.
+	typedef PlayerDataEventReward<&PlayerEventState::bumped, true> BumpedPenalty;
 	typedef PlayerDataEventReward<&PlayerEventState::demoed, true> DemoedPenalty;
 
 	// Rewards a goal by anyone on the team
@@ -198,6 +203,15 @@ namespace RLGC {
 		VelocityBallToGoalReward(bool ownGoal = false) : ownGoal(ownGoal) {}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) {
+			// Possession gate: in our half, skip offensive signal if opponent last touched
+			bool inOurHalf = (player.team == Team::BLUE)
+				? (state.ball.pos.y < 0.0f) : (state.ball.pos.y > 0.0f);
+			if (inOurHalf && state.lastTouchCarID >= 0) {
+				for (const auto& p : state.players)
+					if (p.carId == (uint32_t)state.lastTouchCarID && p.team != player.team)
+						return 0.0f;
+			}
+
 			bool targetOrangeGoal = player.team == Team::BLUE;
 			if (ownGoal)
 				targetOrangeGoal = !targetOrangeGoal;
@@ -239,6 +253,30 @@ namespace RLGC {
 		static constexpr float CLOSE_BOOST = 1.5f;              // Max boost at close range
 		static constexpr float DEFENSIVE_ZONE = 2500.0f;        // Defensive reward triggers within this distance
 
+		// Returns true if our team made the most recent ball touch
+		bool OurTeamHasLastTouch(const Player& player, const GameState& state) const {
+			if (state.lastTouchCarID < 0) return false;
+			uint32_t toucherId = (uint32_t)state.lastTouchCarID;
+			for (const auto& p : state.players)
+				if (p.carId == toucherId)
+					return p.team == player.team;
+			return false;
+		}
+
+		// Returns true when every opponent is both far from their own goal (>3000 UU)
+		// and far from the ball (>2000 UU) — i.e. their net is genuinely open
+		bool OpponentOvercommitted(const Player& player, const GameState& state) const {
+			Vec oppGoal = (player.team == Team::BLUE)
+				? CommonValues::ORANGE_GOAL_BACK
+				: CommonValues::BLUE_GOAL_BACK;
+			for (const auto& p : state.players) {
+				if (p.team == player.team) continue;
+				if ((p.pos - oppGoal).Length() <= 3000.0f) return false;
+				if ((p.pos - state.ball.pos).Length() <= 2000.0f) return false;
+			}
+			return true;
+		}
+
 	public:
 		bool ownGoal = false;
 		EnhancedVelocityBallToGoalReward(bool ownGoal = false) : ownGoal(ownGoal) {}
@@ -266,78 +304,87 @@ namespace RLGC {
 		}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-			// NEW: Defensive component (check own goal threat first)
-			Vec ownGoalPos;
-			if (player.team == Team::BLUE) {
-				ownGoalPos = CommonValues::BLUE_GOAL_BACK;
-			} else {
-				ownGoalPos = CommonValues::ORANGE_GOAL_BACK;
-			}
+			Vec ownGoalPos = (player.team == Team::BLUE)
+				? CommonValues::BLUE_GOAL_BACK
+				: CommonValues::ORANGE_GOAL_BACK;
 
 			float distToOwnGoal = (state.ball.pos - ownGoalPos).Length();
 
-			if (distToOwnGoal < DEFENSIVE_ZONE) {  // Ball threatening own goal
+			if (distToOwnGoal < DEFENSIVE_ZONE) {
+				// Defensive component — always fires regardless of who last touched
 				Vec ballDirAwayFromOwn = (state.ball.pos - ownGoalPos).Normalized();
 				float defensiveAlignment = RS_CLAMP(
 					ballDirAwayFromOwn.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED),
-					0.0f,
-					1.0f
+					0.0f, 1.0f
 				);
 
+				float defensiveReward = 0.0f;
 				if (defensiveAlignment > MIN_ALIGNMENT) {
-					// Reward pushing ball away from own goal (0.5x priority vs. offense)
 					float defensiveWeight = GetAlignmentWeightByDistance(distToOwnGoal) * 0.5f;
-					float defensiveReward = defensiveAlignment * defensiveWeight;
-
-					// Apply touch bonus to defense too
-					if (player.ballTouchedStep) {
+					defensiveReward = defensiveAlignment * defensiveWeight;
+					if (player.ballTouchedStep)
 						defensiveReward = RS_CLAMP(defensiveReward + TOUCH_BONUS, 0.0f, 1.5f);
-					}
-					return defensiveReward;
 				}
+
+				// D3: opponent overcommit — we have possession and their net is open,
+				// so pointing the ball at their goal is now the correct call even from deep defense
+				if (!ownGoal && OurTeamHasLastTouch(player, state) && OpponentOvercommitted(player, state)) {
+					Vec oppGoalPos = (player.team == Team::BLUE)
+						? CommonValues::ORANGE_GOAL_BACK
+						: CommonValues::BLUE_GOAL_BACK;
+					Vec ballDirToOpp = (oppGoalPos - state.ball.pos).Normalized();
+					float offensiveAlignment = RS_CLAMP(
+						ballDirToOpp.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED),
+						0.0f, 1.0f
+					);
+					if (offensiveAlignment > MIN_ALIGNMENT) {
+						float distToOppGoal = (state.ball.pos - oppGoalPos).Length();
+						float offensiveReward = offensiveAlignment * GetAlignmentWeightByDistance(distToOppGoal);
+						if (player.ballTouchedStep)
+							offensiveReward = RS_CLAMP(offensiveReward + TOUCH_BONUS, 0.0f, 1.5f);
+						offensiveReward *= 1.4f;  // overcommit boost
+						return RS_MAX(defensiveReward, offensiveReward);
+					}
+				}
+
+				return defensiveReward;
 			}
 
-			// Standard offensive reward calculation
+			// Offensive component: possession gate when ball is still in our half
+			// (outside the DEFENSIVE_ZONE radius but Y-side still ours)
+			bool inOurHalf = (player.team == Team::BLUE)
+				? (state.ball.pos.y < 0.0f) : (state.ball.pos.y > 0.0f);
+			if (!ownGoal && inOurHalf && !OurTeamHasLastTouch(player, state))
+				return 0.0f;
+
+			// Standard offensive reward calculation (unchanged)
 			bool targetOrangeGoal = player.team == Team::BLUE;
 			if (ownGoal)
 				targetOrangeGoal = !targetOrangeGoal;
 
-			Vec targetPos;
-			if (targetOrangeGoal) {
-				targetPos = CommonValues::ORANGE_GOAL_BACK;
-			} else {
-				targetPos = CommonValues::BLUE_GOAL_BACK;
-			}
+			Vec targetPos = targetOrangeGoal
+				? CommonValues::ORANGE_GOAL_BACK
+				: CommonValues::BLUE_GOAL_BACK;
 
 			Vec ballDirToGoal = (targetPos - state.ball.pos).Normalized();
 			float goalAlignment = ballDirToGoal.Dot(state.ball.vel / CommonValues::BALL_MAX_SPEED);
 
-			// Must be at least somewhat aimed at goal
 			if (goalAlignment < MIN_ALIGNMENT) return 0.0f;
 
-			// Clamp to [0, 1] for conservative reward
 			float baseAlignment = RS_CLAMP(goalAlignment, 0.0f, 1.0f);
-
-			// NEW: Proximity-based alignment weighting (direction-prioritizing, not speed-limiting)
 			float distToGoal = (state.ball.pos - targetPos).Length();
 			float alignmentWeight = GetAlignmentWeightByDistance(distToGoal);
 
-			if (alignmentWeight <= 0.0f) {
-				return 0.0f;  // Too far, no reward
-			}
+			if (alignmentWeight <= 0.0f) return 0.0f;
 
 			float reward = baseAlignment * alignmentWeight;
 
-			// Intent bonus: reward active touches more heavily (increased cap to 1.5)
-			if (player.ballTouchedStep) {
+			if (player.ballTouchedStep)
 				reward = RS_CLAMP(reward + TOUCH_BONUS, 0.0f, 1.5f);
-			}
 
-			// Scale down (don't zero) when the current trajectory won't cross between the posts
 			bool onTarget = RewardMath::BallIntersectsOpponentGoalMouth(player, state, 2.0f, false, true);
-			if (!onTarget) {
+			if (!onTarget)
 				reward *= OFF_TARGET_SCALE;
-			}
 
 			return reward * GoalProximityScale2D(state.ball.pos, player.team);
 		}
@@ -543,6 +590,59 @@ namespace RLGC {
 				float t = RS_CLAMP(player.pos.z / CommonValues::CEILING_Z, 0.0f, 1.0f);
 				return HEIGHT_MULT_MIN + (HEIGHT_MULT_MAX - HEIGHT_MULT_MIN) * t;
 			}
+			return 0.0f;
+		}
+	};
+
+	// ============================================================================
+	// RolvWavedashReward — Rev 1.0 (2026-06-27, NJH)
+	// Ported from rolv's WavedashReward (rlgym-tools)
+	// Source: https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/wavedash_reward.py
+	//
+	// scaleByAcceleration=true (default):
+	//   Records velocity delta magnitude when flip starts.
+	//   At landing (wavedash), reward = stored_accel / CAR_MAX_SPEED → [0, ~1]
+	//   Rewards wavedashes that generated real speed gain.
+	// scaleByAcceleration=false:
+	//   Returns 1.0 on any wavedash landing (identical to WavedashBasicReward).
+	// ============================================================================
+	class RolvWavedashReward : public Reward {
+		bool scaleByAcceleration;
+		mutable std::unordered_map<uint32_t, float> prevAcceleration;
+
+	public:
+		RolvWavedashReward(bool scaleByAcceleration = true)
+			: scaleByAcceleration(scaleByAcceleration) {}
+
+		virtual void Reset(const GameState& initialState) override {
+			prevAcceleration.clear();
+		}
+
+		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+			if (!player.prev) return 0.0f;
+			const Player& prev = *player.prev;
+
+			bool landedThisFrame = player.isOnGround && !prev.isOnGround;
+			bool wavedash = landedThisFrame && (player.isFlipping || prev.isFlipping);
+
+			if (!scaleByAcceleration)
+				return wavedash ? 1.0f : 0.0f;
+
+			float& storedAcc = prevAcceleration[player.carId];
+
+			// Record velocity delta when flip starts
+			if (player.isFlipping && !prev.isFlipping)
+				storedAcc = (player.vel - prev.vel).Length();
+
+			if (wavedash) {
+				float acc = storedAcc;
+				storedAcc = 0.0f;
+				return acc / CommonValues::CAR_MAX_SPEED;
+			}
+
+			if (!player.isFlipping)
+				storedAcc = 0.0f;
+
 			return 0.0f;
 		}
 	};
@@ -889,15 +989,20 @@ namespace RLGC {
 
 	class PickupBoostReward : public Reward {
 	public:
+		// lossWeight defaults to 0 (no penalty on boost spend) to preserve existing
+		// behavior in every phase that doesn't explicitly opt in. See BoostManagementRewards.h
+		// for the paired PadCenterAccuracyReward.
+		float lossWeight;
+		PickupBoostReward(float lossWeight = 0.0f) : lossWeight(lossWeight) {}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!player.prev)
 				return 0;
 
-			if (player.boost > player.prev->boost) {
-				return sqrtf(player.boost / 100.f) - sqrtf(player.prev->boost / 100.f);
-			} else {
-				return 0;
-			}
+			float delta = sqrtf(player.boost / 100.f) - sqrtf(player.prev->boost / 100.f);
+			if (delta > 0) return delta;
+			if (delta < 0) return delta * lossWeight;
+			return 0;
 		}
 	};
 	// Replaced with better version in MovementAndKickoffRewards_Enhanced.h
@@ -974,20 +1079,38 @@ namespace RLGC {
 	// Mostly based on the classic Necto rewards
 	// Total reward output for speeding the ball up to MAX_REWARDED_BALL_SPEED is 1.0
 	// The bot can do this slowly (putting) or quickly (shooting)
+	// Rev 2.0 2026-07-07 NJH — added per-player cooldown (CLAUDE.md §7C pattern):
+	// previously fired every single step during a sustained dribble/carry, diluting
+	// the "discrete power touch" signal. See Reward_Change_Log.md.
 	class TouchAccelReward : public Reward {
 	public:
 		constexpr static float MAX_REWARDED_BALL_SPEED = RLGC::Math::KPHToVel(140);
 
+		TouchAccelReward(float cooldownMs = 500.0f) : cooldownSeconds(cooldownMs / 1000.0f) {}
+
+		virtual void Reset(const GameState&) override {
+			_cooldownRemaining.clear();
+		}
+
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if (!state.prev)
 				return 0;
+
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+			float& cd = _cooldownRemaining[player.carId];
+			if (cd > 0.0f) {
+				cd = RS_MAX(0.0f, cd - dt);
+				return 0;
+			}
 
 			if (player.ballTouchedStep) {
 				float prevSpeedFrac = RS_MIN(1, state.prev->ball.vel.Length() / MAX_REWARDED_BALL_SPEED);
 				float curSpeedFrac = RS_MIN(1, state.ball.vel.Length() / MAX_REWARDED_BALL_SPEED);
 
 				if (curSpeedFrac > prevSpeedFrac) {
-					return (curSpeedFrac - prevSpeedFrac);
+					float reward = curSpeedFrac - prevSpeedFrac;
+					cd = cooldownSeconds;
+					return reward;
 				}
 				else {
 					// Not speeding up the ball so we don't care
@@ -998,63 +1121,9 @@ namespace RLGC {
 				return 0;
 			}
 		}
-	};
-
-	// Rev 4 (2026-05-12): Discrete-touch-only, cooldown-gated, direction-agnostic
-	// - Rewards touches that increase raw ball speed (no goal-direction bonus)
-	// - Per-player cooldown prevents farming during air/ground dribbles
-	// - Cooldown counts down every step (not just when touching), so it expires correctly
-	class NEWTouchAccelReward : public Reward {
-	public:
-		float maxRewardedBallSpeed;
-		float maxRewardedImpulse;
-		float cooldownSeconds;
-
-		NEWTouchAccelReward(
-			float maxBallSpeed = RLGC::Math::KPHToVel(110),
-			float maxImpulse   = RLGC::Math::KPHToVel(80),
-			float cooldownMs   = 500.0f
-		) : maxRewardedBallSpeed(maxBallSpeed),
-			maxRewardedImpulse(maxImpulse),
-			cooldownSeconds(cooldownMs / 1000.0f)
-		{}
-
-		virtual void Reset(const GameState& initialState) override {
-			_cooldownRemaining.clear();
-		}
-
-		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-			if (!state.prev) return 0.0f;
-
-			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
-			float& cd = _cooldownRemaining[player.carId];
-			if (cd > 0.0f) {
-				cd = RS_MAX(0.0f, cd - dt);
-				return 0.0f;
-			}
-
-			if (!player.ballTouchedStep) return 0.0f;
-
-			const float prevSpeed = state.prev->ball.vel.Length();
-			const float curSpeed  = state.ball.vel.Length();
-			float speedDelta = curSpeed - prevSpeed;
-			if (speedDelta <= 0.0f) return 0.0f;
-
-			float impulse     = (state.ball.vel - state.prev->ball.vel).Length();
-			float impulseFrac = RS_CLAMP(impulse / maxRewardedImpulse, 0.0f, 1.0f);
-
-			float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
-			float curSpeedFrac  = RS_CLAMP(curSpeed  / maxRewardedBallSpeed, 0.0f, 1.0f);
-			float baseReward    = curSpeedFrac - prevSpeedFrac;
-
-			float reward = (baseReward * impulseFrac) * 2.0f;
-			if (reward <= 0.0f) return 0.0f;
-
-			cd = cooldownSeconds;
-			return reward;
-		}
 
 	private:
+		float cooldownSeconds;
 		mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
 	};
 
@@ -1090,9 +1159,18 @@ namespace RLGC {
 			float impulseFrac = RS_CLAMP(impulse / maxRewardedImpulse, 0.0f, 1.0f);
 
 			// Gate 3: Is the new velocity pointed toward the opponent goal?
-			Vec toGoal = (player.team == Team::BLUE) ? Vec(0, 5120, 0) : Vec(0, -5120, 0);
+			// FIX 2026-07-07: was a fixed world axis (pure +Y/-Y), which let a bot near
+			// the sideline/corner get full credit for blasting the ball at the back wall,
+			// nowhere near the goal mouth. Now uses the ball-relative goal vector, matching
+			// FlipIntoContactReward's established pattern (this file).
+			const Vec& oppGoal = (player.team == Team::BLUE)
+				? RLGC::CommonValues::ORANGE_GOAL_CENTER
+				: RLGC::CommonValues::BLUE_GOAL_CENTER;
 			Vec ballVelDir = state.ball.vel.Normalized();
-			float goalAlignment = RS_CLAMP(ballVelDir.Dot(toGoal.Normalized()), 0.0f, 1.0f);
+			float goalAlignment = RS_CLAMP(
+				ballVelDir.Dot((oppGoal - state.ball.pos).Normalized()),
+				0.0f, 1.0f
+			);
 
 			// Base speed reward (like classic)
 			float prevSpeedFrac = RS_CLAMP(prevSpeed / maxRewardedBallSpeed, 0.0f, 1.0f);
@@ -1268,37 +1346,33 @@ namespace RLGC {
 	};
 
 	// ClosestPlayerSpeedReward (2025-02-17)
-	// Rewards ONLY the closest player on the team to the ball with velocity toward ball
-	// If two players are equidistant, rewards the leftmost player (smallest x)
-	// Fires every step regardless of game phase — see ClosestPlayerKickoffSpeedReward
-	// for the kickoff-only variant.
-	// minPlayers (default 4): skip entirely if fewer total players are in the game.
-	//   4 = 2v2 and 3v3 only (skips 1v1); 2 = all game modes.
+	// Rewards ONLY the closest non-demoed teammate to the ball for moving toward it.
+	// Fires every step in open play and kickoffs (use ClosestPlayerKickoffSpeedReward
+	// for a kickoff-only variant).
+	// minPlayers: 4 = 2v2+ (default), 6 = 3v3 only, 2 = all modes.
 	class ClosestPlayerSpeedReward : public Reward {
 	private:
 		int _minPlayers;
 	public:
-		ClosestPlayerSpeedReward(int minPlayers = 6) : _minPlayers(minPlayers) {}
+		ClosestPlayerSpeedReward(int minPlayers = 4) : _minPlayers(minPlayers) {}
 
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
 			if ((int)state.players.size() < _minPlayers)
 				return 0.0f;
 
-			// Find the closest teammate to the ball
+			// Find the closest non-demoed teammate to the ball
 			float closestDist = std::numeric_limits<float>::max();
 			int closestIdx = -1;
 
 			for (size_t i = 0; i < state.players.size(); i++) {
 				const Player& teammate = state.players[i];
 
-				// Only consider teammates
-				if (teammate.team != player.team)
+				if (teammate.team != player.team || teammate.isDemoed)
 					continue;
 
 				float dist = (teammate.pos - state.ball.pos).Length();
 
-				// Update if closer, or same distance but more to the left (smaller x)
-				if (dist < closestDist || (dist == closestDist && closestIdx != -1 && teammate.pos.x < state.players[closestIdx].pos.x)) {
+				if (dist < closestDist) {
 					closestDist = dist;
 					closestIdx = (int)i;
 				}
@@ -1471,18 +1545,27 @@ namespace RLGC {
 
 	// ============================================================================
 	// KickoffDoubleCommitPenalty
-	// Penalizes multiple teammates approaching the ball at the same speed during kickoff.
+	// Penalizes multiple teammates converging on the ball at the same TIME during kickoff.
 	// Returns 0 in 1v1 (only 1 player per team).
-	// Returns 0 when teammates have meaningfully different approach speeds — one player
-	// is clearly the kicker and others are hanging back (no double commit).
-	// Fires only when 2+ teammates are converging on the ball at similar speed.
+	// Returns 0 when teammates have meaningfully different estimated arrival times — one
+	// player is clearly the kicker and others are hanging back (no double commit).
+	// Fires only when 2+ teammates are on track to reach the ball at a similar moment.
+	//
+	// Rev 1.1 (2026-07-19, NJH + Claude): was gated on raw approach-SPEED similarity,
+	// which a policy could dodge by holding one teammate's speed >20% off the other's
+	// while both still substantively raced for the ball — and speed similarity is the
+	// wrong proxy anyway (same speed from very different distances doesn't mean a
+	// simultaneous arrival, and different speeds from different distances can still
+	// collide at the ball at the same moment). Switched to estimated time-to-reach-ball
+	// similarity, which is what actually determines whether two cars are converging on
+	// the ball together and can't be dodged by speed alone.
 	// ============================================================================
 	class KickoffDoubleCommitPenalty : public Reward {
 	private:
-		static constexpr float KICKOFF_BALL_RADIUS   = 500.0f;
-		static constexpr float MIN_APPROACH_SPEED    = 200.0f;  // UU/s — must be actively approaching
-		static constexpr float SPEED_DIFF_THRESHOLD  = 0.20f;   // fraction — within 20% = "same speed"
-		static constexpr float PENALTY_PER_COMMIT    = -2.0f;
+		static constexpr float KICKOFF_BALL_RADIUS  = 500.0f;
+		static constexpr float MIN_APPROACH_SPEED   = 200.0f;  // UU/s — must be actively approaching
+		static constexpr float TIME_DIFF_THRESHOLD  = 0.20f;   // fraction — within 20% arrival time = "converging together"
+		static constexpr float PENALTY_PER_COMMIT   = -2.0f;
 
 	public:
 		virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -1510,22 +1593,29 @@ namespace RLGC {
 			if (myApproach < MIN_APPROACH_SPEED)
 				return 0.0f;
 
-			// Count teammates also approaching at a similar speed
+			float myTimeToReach = dist / RS_MAX(myApproach, 1.0f);
+
+			// Count teammates on track to reach the ball at a similar time
 			int similarCount = 0;
 			for (const auto& p : state.players) {
 				if (p.team != player.team || p.isDemoed || p.carId == player.carId) continue;
-				Vec tBallN = (state.ball.pos - p.pos).Normalized();
-				float theirApproach = p.vel.Dot(tBallN);
+
+				Vec theirToBall = state.ball.pos - p.pos;
+				float theirDist = theirToBall.Length();
+				if (theirDist < 1.0f) continue;
+				float theirApproach = p.vel.Dot(theirToBall / theirDist);
 				if (theirApproach < MIN_APPROACH_SPEED) continue;
 
-				// Are they going at a similar speed? — within SPEED_DIFF_THRESHOLD fraction
-				float faster = RS_MAX(myApproach, theirApproach);
-				float diff   = fabsf(myApproach - theirApproach) / faster;
-				if (diff < SPEED_DIFF_THRESHOLD)
+				float theirTimeToReach = theirDist / RS_MAX(theirApproach, 1.0f);
+
+				// Are they on track to arrive at a similar time? — within TIME_DIFF_THRESHOLD fraction
+				float fasterTime = RS_MIN(myTimeToReach, theirTimeToReach);
+				float diff       = fabsf(myTimeToReach - theirTimeToReach) / RS_MAX(fasterTime, 0.01f);
+				if (diff < TIME_DIFF_THRESHOLD)
 					similarCount++;
 			}
 
-			// If all teammates have meaningfully different speeds, no double commit
+			// If all teammates arrive at meaningfully different times, no double commit
 			if (similarCount == 0)
 				return 0.0f;
 

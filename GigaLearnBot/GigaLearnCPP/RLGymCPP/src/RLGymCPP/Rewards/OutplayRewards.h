@@ -14,6 +14,7 @@
 #include <map>
 #include <cstdint>
 #include <cmath>
+#include <atomic>
 #include "RewardMath.h"
 #include "../Math.h"
 #include <algorithm>
@@ -1010,11 +1011,17 @@ namespace RLGC {
 
     // ============================================================================
     // 3) FakeChallengeOffenseReward
-    // Replace your old fake reward with something that requires:
+    // Rev 2.0 - 2026-07-07 (NJH/Claude): strict "convincing sell" trigger.
+    // Requires:
     // - soft possession
-    // - “threaten touch” then “abort” without touching
-    // - opponent COMMIT (hasJumped OR isFlipping)
-    // - after window, we’re closer to ball than opponent (kept possession / gained space)
+    // - sell sustained >= 0.25s: near-supersonic approach (speed >= 1900),
+    //   vTow > 900, shot-line alignment (forward toward opp goal, dot >= 0.4)
+    // - abort without touching, via an observable action (brake / hard steer / handbrake)
+    // - opponent close at abort (< 1100)
+    // - opponent COMMIT (hasJumped OR isFlipping) within 0.45s
+    // - after window, we're closer to ball than opponent (kept possession / gained space)
+    // - 3.0s re-arm cooldown after a fired reward
+    // W&B: GetAndResetMetrics() — Sells, Aborts, OppCommits, Fires, RewardSum
     // ============================================================================
     class FakeChallengeOffenseReward : public Reward {
     private:
@@ -1025,18 +1032,51 @@ namespace RLGC {
             float startSep = 0.0f; // (oppDist - myDist) at start
         };
 
-        mutable std::map<uint32_t, bool> wasThreatening;
+        mutable std::map<uint32_t, float> sellTime;   // continuous qualified-sell duration
         mutable std::map<uint32_t, PendingFake> pending;
+        mutable std::map<uint32_t, float> cooldown;   // re-arm cooldown, ticked every step
+
+        static constexpr float SELL_MIN_SPEED = 1900.0f;
+        static constexpr float SELL_MIN_VTOW = 900.0f;
+        static constexpr float SELL_MIN_ALIGN = 0.4f;
+        static constexpr float SELL_MIN_DURATION = 0.25f;
+        static constexpr float ABORT_OPP_DIST = 1100.0f;
+        static constexpr float RESOLVE_WINDOW = 0.45f;
+        static constexpr float REARM_COOLDOWN = 3.0f;
 
     public:
+        struct Metrics {
+            uint32_t sells = 0;       // qualified sell phases started
+            uint32_t aborts = 0;      // aborts that opened a resolution window
+            uint32_t oppCommits = 0;  // windows where the opponent committed
+            uint32_t fires = 0;       // rewards actually paid
+            double rewardSum = 0.0;
+        };
+
+        // Static: all parallel envs share the counters; call on the class to drain.
+        static Metrics GetAndResetMetrics() {
+            Metrics m;
+            m.sells = (uint32_t)s_sells.exchange(0);
+            m.aborts = (uint32_t)s_aborts.exchange(0);
+            m.oppCommits = (uint32_t)s_oppCommits.exchange(0);
+            m.fires = (uint32_t)s_fires.exchange(0);
+            m.rewardSum = double(s_rewardMilli.exchange(0)) / 1000.0;
+            return m;
+        }
+
         virtual void Reset(const GameState& initialState) override {
-            wasThreatening.clear();
+            sellTime.clear();
             pending.clear();
+            cooldown.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
             uint32_t id = player.carId;
+
+            // Tick re-arm cooldown every step regardless of conditions
+            float& cd = cooldown[id];
+            if (cd > 0.0f) cd = RS_MAX(0.0f, cd - dt);
 
             // Resolve pending
             auto pit = pending.find(id);
@@ -1046,7 +1086,7 @@ namespace RLGC {
                 // detect commit
                 for (const auto& opp : state.players) {
                     if (opp.carId != pf.oppId) continue;
-                    if (opp.hasJumped || opp.isFlipping) pf.oppCommitted = true; // CarState flags :contentReference[oaicite:5]{index=5}
+                    if (opp.hasJumped || opp.isFlipping) pf.oppCommitted = true; // CarState flags
                     break;
                 }
 
@@ -1063,42 +1103,67 @@ namespace RLGC {
                     }
 
                     float out = 0.0f;
+                    if (pf.oppCommitted) s_oppCommits++;
                     if (pf.oppCommitted && myDist + 120.0f < oppDist) {
                         float sepEnd = (oppDist - myDist);
                         float sepGain01 = RS_CLAMP((sepEnd - pf.startSep) / 600.0f, 0.0f, 1.0f);
                         out = 8.0f + 6.0f * sepGain01;
+                        s_fires++;
+                        s_rewardMilli += (long long)(out * 1000.0f);
+                        cd = REARM_COOLDOWN;
                     }
 
                     pending.erase(pit);
                     return out;
                 }
+                return 0.0f; // no re-arm while a window is open
             }
 
+            if (cd > 0.0f) { sellTime[id] = 0.0f; return 0.0f; }
+
             ChallengeInfo ci = GetChallengeInfo(player, state);
-            if (ci.oppCarId == 0) return 0.0f;
+            if (ci.oppCarId == 0) { sellTime[id] = 0.0f; return 0.0f; }
 
             float myDist = (player.pos - state.ball.pos).Length();
             float oppDist = ci.oppDistToBall;
 
-            // soft possession: we’re close and not clearly beaten
+            // soft possession: we're close and not clearly beaten
             bool haveSoftPossession = (myDist < 900.0f) && (myDist <= oppDist + 80.0f);
-            if (!haveSoftPossession) return 0.0f;
 
-            // threaten touch: strong approach toward ball (but not necessarily touching)
+            // convincing sell: near-supersonic approach on the shot line to their net
             Vec dirToBall = SafeNorm(state.ball.pos - player.pos);
             float vTow = player.vel.Dot(dirToBall);
+            Vec oppGoal = (player.team == Team::BLUE) ? CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
+            float shotAlign = player.rotMat.forward.Dot(SafeNorm(oppGoal - player.pos));
 
-            bool threatening = (vTow > 650.0f) && (myDist < 1100.0f);
-            bool prevThreat = wasThreatening[id];
-            wasThreatening[id] = threatening;
+            bool selling = haveSoftPossession
+                && (player.vel.Length() >= SELL_MIN_SPEED)
+                && (vTow > SELL_MIN_VTOW)
+                && (shotAlign >= SELL_MIN_ALIGN);
 
-            // abort: stop threatening without touching
-            bool abort = prevThreat && !threatening && !player.ballTouchedStep;
+            float& tSell = sellTime[id];
+            bool wasSelling = (tSell > 0.0f);
+            bool sellQualified = (tSell >= SELL_MIN_DURATION);
 
-            // only if opponent is actually near
-            if (abort && oppDist < 900.0f) {
+            if (selling) {
+                if (!wasSelling) s_sells++;
+                tSell += dt;
+                return 0.0f;
+            }
+
+            // abort: sustained sell ended without touching, with an observable abort action
+            bool abortAction =
+                (player.prevAction.throttle <= 0.0f) ||
+                (std::abs(player.prevAction.steer) >= 0.5f) ||
+                (player.prevAction.handbrake >= 0.5f);
+
+            bool abort = wasSelling && sellQualified && !player.ballTouchedStep && abortAction;
+            tSell = 0.0f;
+
+            if (abort && oppDist < ABORT_OPP_DIST) {
+                s_aborts++;
                 PendingFake pf;
-                pf.timeLeft = 0.45f;
+                pf.timeLeft = RESOLVE_WINDOW;
                 pf.oppId = ci.oppCarId;
                 pf.oppCommitted = false;
                 pf.startSep = (oppDist - myDist);
@@ -1107,16 +1172,30 @@ namespace RLGC {
 
             return 0.0f;
         }
+
+    private:
+        inline static std::atomic<int> s_sells{ 0 };
+        inline static std::atomic<int> s_aborts{ 0 };
+        inline static std::atomic<int> s_oppCommits{ 0 };
+        inline static std::atomic<int> s_fires{ 0 };
+        inline static std::atomic<long long> s_rewardMilli{ 0 };
     };
 
     // ============================================================================
     // 4) FakeChallengeDefenseReward
+    // Rev 2.0 - 2026-07-07 (NJH/Claude):
     // Context:
-    // - opponent has possession (they’re clearly closer)
+    // - opponent has possession (they're clearly closer)
     // - we are goal-side (between ball and our goal)
+    // - ZONE GATE: ball must be >= 3400 UU (Y) from our goal line. No fakes near
+    //   our own net (no room to recover) — opponent half / top third of ours only.
     // Behavior:
-    // - we “sell” a challenge (fast approach), then abort without touching
-    // - opponent commits (jump/flip), AND ball threat decreases (less toward our goal)
+    // - we "sell" a challenge (fast approach sustained >= 0.25s), then abort w/o touch
+    // - opponent commits (jump/flip) within 0.75s AND ball threat decreases
+    //   (less toward our goal); +3 bonus if possession flips to our team
+    // - +25% quality when the abort is a powerslide (handbrake) or flip-away (half flip)
+    // - 3.0s re-arm cooldown after a fired reward
+    // W&B: GetAndResetMetrics() — Sells, Aborts, OppCommits, Fires, RewardSum, ZoneRejects
     // ============================================================================
     class FakeChallengeDefenseReward : public Reward {
     private:
@@ -1125,10 +1204,19 @@ namespace RLGC {
             uint32_t oppId = 0;
             bool oppCommitted = false;
             float startThreat = 0.0f;
+            float qualityMult = 1.0f;
         };
 
-        mutable std::map<uint32_t, bool> wasSelling;
+        mutable std::map<uint32_t, float> sellTime;   // continuous sell duration
         mutable std::map<uint32_t, PendingDefFake> pending;
+        mutable std::map<uint32_t, float> cooldown;   // re-arm cooldown, ticked every step
+
+        static constexpr float ZONE_MIN_Y_FROM_OWN_GOAL = 3400.0f;
+        static constexpr float SELL_MIN_VTOW = 900.0f;
+        static constexpr float SELL_MAX_DIST = 1600.0f;
+        static constexpr float SELL_MIN_DURATION = 0.25f;
+        static constexpr float RESOLVE_WINDOW = 0.75f;
+        static constexpr float REARM_COOLDOWN = 3.0f;
 
         static inline Vec MyGoalBack(const Player& player) {
             return (player.team == Team::BLUE) ? CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
@@ -1141,14 +1229,40 @@ namespace RLGC {
         }
 
     public:
+        struct Metrics {
+            uint32_t sells = 0;       // sell phases started
+            uint32_t aborts = 0;      // aborts that opened a resolution window
+            uint32_t oppCommits = 0;  // windows where the opponent committed
+            uint32_t fires = 0;       // rewards actually paid
+            double rewardSum = 0.0;
+            uint32_t zoneRejects = 0; // sells killed by the own-net zone gate
+        };
+
+        // Static: all parallel envs share the counters; call on the class to drain.
+        static Metrics GetAndResetMetrics() {
+            Metrics m;
+            m.sells = (uint32_t)s_sells.exchange(0);
+            m.aborts = (uint32_t)s_aborts.exchange(0);
+            m.oppCommits = (uint32_t)s_oppCommits.exchange(0);
+            m.fires = (uint32_t)s_fires.exchange(0);
+            m.rewardSum = double(s_rewardMilli.exchange(0)) / 1000.0;
+            m.zoneRejects = (uint32_t)s_zoneRejects.exchange(0);
+            return m;
+        }
+
         virtual void Reset(const GameState& initialState) override {
-            wasSelling.clear();
+            sellTime.clear();
             pending.clear();
+            cooldown.clear();
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
             uint32_t id = player.carId;
+
+            // Tick re-arm cooldown every step regardless of conditions
+            float& cd = cooldown[id];
+            if (cd > 0.0f) cd = RS_MAX(0.0f, cd - dt);
 
             // Resolve pending
             auto pit = pending.find(id);
@@ -1157,16 +1271,17 @@ namespace RLGC {
 
                 for (const auto& opp : state.players) {
                     if (opp.carId != pf.oppId) continue;
-                    if (opp.hasJumped || opp.isFlipping) pf.oppCommitted = true; // CarState flags :contentReference[oaicite:6]{index=6}
+                    if (opp.hasJumped || opp.isFlipping) pf.oppCommitted = true; // CarState flags
                     break;
                 }
 
                 pf.timeLeft -= dt;
                 if (pf.timeLeft <= 0.0f) {
-                    float threatNow = ThreatTowardMyGoal(player, state);
-
                     float out = 0.0f;
                     if (pf.oppCommitted) {
+                        s_oppCommits++;
+
+                        float threatNow = ThreatTowardMyGoal(player, state);
                         float dThreat = pf.startThreat - threatNow; // positive is good
                         float red01 = RS_CLAMP(dThreat / 1200.0f, 0.0f, 1.0f);
 
@@ -1176,50 +1291,109 @@ namespace RLGC {
                         float goalSide01 = (myDistGoal < ballDistGoal) ? 1.0f : 0.0f;
 
                         out = (6.0f * red01) + (2.0f * goalSide01);
+
+                        // possession flip: our team's nearest car beats the baited opponent
+                        float oppDistNow = 1e9f;
+                        for (const auto& opp : state.players) {
+                            if (opp.carId == pf.oppId) {
+                                oppDistNow = (opp.pos - state.ball.pos).Length();
+                                break;
+                            }
+                        }
+                        float bestTeamDist = 1e9f;
+                        for (const auto& p : state.players) {
+                            if (p.team != player.team) continue;
+                            float d = (p.pos - state.ball.pos).Length();
+                            if (d < bestTeamDist) bestTeamDist = d;
+                        }
+                        if (bestTeamDist + 120.0f < oppDistNow) out += 3.0f;
+
+                        out *= pf.qualityMult;
+                    }
+
+                    if (out > 0.0f) {
+                        s_fires++;
+                        s_rewardMilli += (long long)(out * 1000.0f);
+                        cd = REARM_COOLDOWN;
                     }
 
                     pending.erase(pit);
                     return out;
                 }
+                return 0.0f; // no re-arm while a window is open
             }
 
+            if (cd > 0.0f) { sellTime[id] = 0.0f; return 0.0f; }
+
             ChallengeInfo ci = GetChallengeInfo(player, state);
-            if (ci.oppCarId == 0) return 0.0f;
+            if (ci.oppCarId == 0) { sellTime[id] = 0.0f; return 0.0f; }
 
             float myDist = (player.pos - state.ball.pos).Length();
             float oppDist = ci.oppDistToBall;
 
             // opponent has possession
             bool oppHasPossession = (oppDist + 120.0f < myDist);
-            if (!oppHasPossession) return 0.0f;
+            if (!oppHasPossession) { sellTime[id] = 0.0f; return 0.0f; }
 
             // goal-side (shadow)
             Vec myGoal = MyGoalBack(player);
             float myDistGoal = (player.pos - myGoal).Length();
             float ballDistGoal = (state.ball.pos - myGoal).Length();
             bool goalSide = (myDistGoal < ballDistGoal);
-            if (!goalSide) return 0.0f;
+            if (!goalSide) { sellTime[id] = 0.0f; return 0.0f; }
+
+            // ZONE GATE: never fake near our own net — no room to recover
+            float ownGoalY = (player.team == Team::BLUE) ? -CommonValues::BACK_WALL_Y : CommonValues::BACK_WALL_Y;
+            if (std::abs(state.ball.pos.y - ownGoalY) < ZONE_MIN_Y_FROM_OWN_GOAL) {
+                if (sellTime[id] > 0.0f) s_zoneRejects++;
+                sellTime[id] = 0.0f;
+                return 0.0f;
+            }
 
             // sell challenge: fast approach
             Vec dirToBall = SafeNorm(state.ball.pos - player.pos);
             float vTow = player.vel.Dot(dirToBall);
 
-            bool selling = (vTow > 900.0f) && (myDist < 1600.0f);
-            bool prevSelling = wasSelling[id];
-            wasSelling[id] = selling;
+            bool selling = (vTow > SELL_MIN_VTOW) && (myDist < SELL_MAX_DIST);
 
-            bool abort = prevSelling && !selling && !player.ballTouchedStep;
+            float& tSell = sellTime[id];
+            bool wasSelling = (tSell > 0.0f);
+            bool sellQualified = (tSell >= SELL_MIN_DURATION);
+
+            if (selling) {
+                if (!wasSelling) s_sells++;
+                tSell += dt;
+                return 0.0f;
+            }
+
+            bool abort = wasSelling && sellQualified && !player.ballTouchedStep;
+            tSell = 0.0f;
+
             if (abort) {
+                // Powerslide-180 or flip-away aborts read as a stronger sell
+                bool slideAbort = (player.prevAction.handbrake >= 0.5f);
+                bool flipAway = player.isFlipping && (player.vel.Dot(dirToBall) < 0.0f);
+
+                s_aborts++;
                 PendingDefFake pf;
-                pf.timeLeft = 0.60f;
+                pf.timeLeft = RESOLVE_WINDOW;
                 pf.oppId = ci.oppCarId;
                 pf.oppCommitted = false;
                 pf.startThreat = ThreatTowardMyGoal(player, state);
+                pf.qualityMult = (slideAbort || flipAway) ? 1.25f : 1.0f;
                 pending[id] = pf;
             }
 
             return 0.0f;
         }
+
+    private:
+        inline static std::atomic<int> s_sells{ 0 };
+        inline static std::atomic<int> s_aborts{ 0 };
+        inline static std::atomic<int> s_oppCommits{ 0 };
+        inline static std::atomic<int> s_fires{ 0 };
+        inline static std::atomic<long long> s_rewardMilli{ 0 };
+        inline static std::atomic<int> s_zoneRejects{ 0 };
     };
 
     // ============================================================================

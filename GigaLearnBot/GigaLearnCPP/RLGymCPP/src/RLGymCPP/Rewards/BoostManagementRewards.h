@@ -85,8 +85,8 @@ namespace RLGC {
     class SmallPadCollectionReward : public Reward {
     private:
         mutable std::map<uint32_t, std::deque<float>> recentBoostPickups;
-        static constexpr float SEQUENCE_WINDOW = 3.0f;  // seconds
-        static constexpr float SMALL_PAD_MAX = 13.0f;   // 12 boost pads + margin for detection
+        static constexpr float SEQUENCE_WINDOW = 5.0f;  // seconds
+        static constexpr float SMALL_PAD_MAX = 9.0f;   // 12 boost pads + margin for detection
 
     public:
         virtual void Reset(const GameState& initialState) override {
@@ -112,13 +112,13 @@ namespace RLGC {
 
                 // Escalating reward for sequences
                 if (pickups.size() >= 3) {
-                    return 0.2f * pickups.size();  // 0.6f for 3 pads, 0.8f for 4, etc.
+                    return 0.3f * pickups.size();  // 0.6f for 3 pads, 0.8f for 4, etc.
                 }
                 else if (pickups.size() >= 2) {
-                    return 0.15f;  // 2 pads in sequence
+                    return 0.2f;  // 2 pads in sequence
                 }
 
-                return 0.05f;  // Single small pad
+                return 0.075f;  // Single small pad
             }
 
             return 0.0f;
@@ -186,77 +186,131 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // BIG BOOST PAD CENTER ACCURACY REWARD
-    // High reward for driving over pad center (100 boost pad pickup).
-    // Scales down with distance from center.
+    // PAD CENTER ACCURACY REWARD
+    // Rewards driving through the exact center of a boost pad's collection
+    // hitbox, for both small and large pads. Detected via state.boostPads[i]
+    // flipping true -> false (the pad was available, now it's gone) rather
+    // than a boost-amount threshold, so it works uniformly across pad sizes
+    // and inherently only fires when the pad was actually present beforehand.
+    // Gated on this player's own boost increasing this step so a pad taken
+    // by another player nearby isn't credited to us.
+    // Replaces the big-pad-only BigBoostPadCenterReward.
     // ============================================================================
-    class BigBoostPadCenterReward : public Reward {
+    class PadCenterAccuracyReward : public Reward {
     private:
-        const std::vector<Vec> bigBoostPads = {
-            Vec(-3072.0f, -4096.0f, 73.0f),
-            Vec(3072.0f, -4096.0f, 73.0f),
-            Vec(-3584.0f, 0.0f, 73.0f),
-            Vec(3584.0f, 0.0f, 73.0f),
-            Vec(-3072.0f, 4096.0f, 73.0f),
-            Vec(3072.0f, 4096.0f, 73.0f)
-        };
+        static constexpr float BIG_CENTER_RADIUS   = 28.0f;   // XY distance for perfect center hit
+        static constexpr float BIG_BOX_WIDTH       = 208.0f;  // XY collection boundary (big pad hitbox radius)
+        static constexpr float SMALL_CENTER_RADIUS = 15.0f;   // XY distance for perfect center hit
+        static constexpr float SMALL_BOX_WIDTH     = 144.0f;  // XY collection boundary (small pad hitbox radius)
+        static constexpr float MAX_REWARD = 0.3f;
+        static constexpr float MIN_REWARD = 0.1f;
 
-        mutable std::map<uint32_t, float> lastBoostAmount;
-
-        static constexpr float BIG_PAD_THRESHOLD = 90.0f;  // Detect 100 boost pickup
-        static constexpr float CENTER_RADIUS = 28.0f;      // Lock-on radius (optimal)
-        static constexpr float BOX_WIDTH = 160.0f;         // Collection boundary
-        static constexpr float MAX_REWARD = 0.3f;          // Perfect center hit (reduced - minor optimization)
-        static constexpr float MIN_REWARD = 0.1f;          // Edge of box
-
-    public:
-        virtual void Reset(const GameState& initialState) override {
-            lastBoostAmount.clear();
+        static bool IsBigPad(int padIdx) {
+            for (int i = 0; i < CommonValues::NUM_LARGE_BOOSTS; i++) {
+                if (CommonValues::LARGE_BOOST_INDICES[i] == padIdx) return true;
+            }
+            return false;
         }
 
+    public:
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            if (lastBoostAmount.find(player.carId) == lastBoostAmount.end()) {
-                lastBoostAmount[player.carId] = player.boost;
-                return 0.0f;
-            }
+            if (!state.prev) return 0.0f;
+            if (player.boost <= state.prev->players[player.index].boost) return 0.0f;
 
-            float prevBoost = lastBoostAmount[player.carId];
-            float boostGain = player.boost - prevBoost;
+            float reward = 0.0f;
+            for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++) {
+                bool wasAvailable = state.prev->boostPads[i];
+                bool isAvailable = state.boostPads[i];
+                if (!wasAvailable || isAvailable) continue;  // only pads just taken this step
 
-            // Detect big pad pickup (100 boost)
-            if (boostGain < BIG_PAD_THRESHOLD) {
-                lastBoostAmount[player.carId] = player.boost;
-                return 0.0f;
-            }
+                bool isBig = IsBigPad(i);
+                float centerRadius = isBig ? BIG_CENTER_RADIUS : SMALL_CENTER_RADIUS;
+                float boxWidth = isBig ? BIG_BOX_WIDTH : SMALL_BOX_WIDTH;
 
-            // Find closest big pad
-            float closestDist = std::numeric_limits<float>::max();
-            for (const auto& pad : bigBoostPads) {
-                float dist = pad.Dist(player.pos);
-                if (dist < closestDist) {
-                    closestDist = dist;
+                // XY-only distance (pad Z=70-73, car ground Z≈17 gap would make the
+                // center branch unreachable in 3D).
+                const Vec& pad = CommonValues::BOOST_LOCATIONS[i];
+                float dx = pad.x - player.pos.x;
+                float dy = pad.y - player.pos.y;
+                float dist2D = sqrtf(dx * dx + dy * dy);
+                if (dist2D > boxWidth) continue;  // not this player's pickup
+
+                if (dist2D <= centerRadius) {
+                    reward += MAX_REWARD;
+                } else {
+                    float ratio = 1.0f - (dist2D - centerRadius) / (boxWidth - centerRadius);
+                    reward += MIN_REWARD + (MAX_REWARD - MIN_REWARD) * ratio;
                 }
             }
-
-            // Score based on distance from pad center
-            float reward = 0.0f;
-
-            if (closestDist <= CENTER_RADIUS) {
-                // Perfect center hit
-                reward = MAX_REWARD;
-            }
-            else if (closestDist <= BOX_WIDTH) {
-                // Scale down from center to edge
-                float ratio = 1.0f - (closestDist - CENTER_RADIUS) / (BOX_WIDTH - CENTER_RADIUS);
-                reward = MIN_REWARD + (MAX_REWARD - MIN_REWARD) * ratio;
-            }
-            else {
-                // Shouldn't happen, but small reward for pickup
-                reward = 0.1f;
-            }
-
-            lastBoostAmount[player.carId] = player.boost;
             return reward;
+        }
+    };
+
+    // ============================================================================
+    // BIG BOOST APPROACH REWARD
+    // Continuous shaping: rewards velocity toward the nearest available big boost
+    // pad when the player is low on boost. Complements BigBoostPadCenterReward
+    // (which fires once at pickup) by teaching routing toward pads every step.
+    //
+    // Pattern: VelocityPlayerToBallReward but targeting boost pads.
+    // Only fires when player.boost < boostThreshold AND a pad is within maxDist.
+    // Uses XY-only direction (Z difference between pad and car is irrelevant for routing).
+    //
+    // lateralPenaltyScale penalizes the perpendicular (orbit) velocity component.
+    // Without it, circling gives ~0 reward (neutral), so the bot has no incentive
+    // to stop. With the penalty, circling at 1400 UU/s gives ≈ -0.18 per step vs
+    // +0.61 for a direct approach — making orbiting actively costly.
+    //   Direct at 1400 UU/s:  (1400 − 0)    / 2300 ≈ +0.61
+    //   Orbiting at 1400 UU/s: (0 − 0.3×1400)/ 2300 ≈ −0.18
+    //
+    // Output: [-1, 1] normalized to CAR_MAX_SPEED.
+    // Suggested weight: 5–10f (continuous shaping, no ZeroSum needed).
+    // ============================================================================
+    class BigBoostApproachReward : public Reward {
+    private:
+        float boostThreshold;
+        float maxDist;
+        float lateralPenaltyScale;  // penalizes perpendicular velocity to discourage circling
+
+    public:
+        BigBoostApproachReward(float boostThreshold = 40.0f, float maxDist = 3500.0f, float lateralPenaltyScale = 0.3f)
+            : boostThreshold(boostThreshold), maxDist(maxDist), lateralPenaltyScale(lateralPenaltyScale) {}
+
+        void Reset(const GameState&) override {}
+
+        float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (player.boost >= boostThreshold) return 0.0f;
+
+            // Find the nearest available big pad (XY distance only)
+            float bestDist = maxDist;
+            int bestIdx = -1;
+            for (int i = 0; i < CommonValues::NUM_LARGE_BOOSTS; i++) {
+                int padIdx = CommonValues::LARGE_BOOST_INDICES[i];
+                if (!state.boostPads[padIdx]) continue;  // depleted, skip
+                const Vec& pad = CommonValues::BOOST_LOCATIONS[padIdx];
+                float dx = pad.x - player.pos.x;
+                float dy = pad.y - player.pos.y;
+                float dist = sqrtf(dx * dx + dy * dy);
+                if (dist < bestDist) { bestDist = dist; bestIdx = padIdx; }
+            }
+            if (bestIdx < 0) return 0.0f;  // no available pad nearby
+
+            const Vec& pad = CommonValues::BOOST_LOCATIONS[bestIdx];
+            float dx = pad.x - player.pos.x;
+            float dy = pad.y - player.pos.y;
+            float len = sqrtf(dx * dx + dy * dy);
+            if (len < 1.0f) return 0.0f;
+            float toPadX = dx / len;
+            float toPadY = dy / len;
+
+            // Velocity component toward the pad (XY only)
+            float velTowardPad = player.vel.x * toPadX + player.vel.y * toPadY;
+
+            // Lateral (perpendicular) velocity component — the circling component
+            float speed2D = sqrtf(player.vel.x * player.vel.x + player.vel.y * player.vel.y);
+            float velLateral = sqrtf(RS_MAX(0.0f, speed2D * speed2D - velTowardPad * velTowardPad));
+
+            return (velTowardPad - lateralPenaltyScale * velLateral) / CommonValues::CAR_MAX_SPEED;
         }
     };
 
@@ -1922,6 +1976,91 @@ namespace RLGC {
             // Scale from 0 at minSupportingBoost to 0.5 at maxRewardBoost
             float reward = (player.boost - minSupportingBoost) / (maxRewardBoost - minSupportingBoost);
             return RS_CLAMP(reward, 0.0f, 0.5f);
+        }
+    };
+
+    // ============================================================================
+    // RotationPathBoostDenialReward
+    // Rewards MIDDLE or FURTHEST players for grabbing a 100-boost pad on the
+    // opponent's side while moving homeward (i.e., on the way back to rotation).
+    //
+    // Distinct from BoostStealReward: adds role gating (not CLOSEST) and a
+    // homeward-velocity check (>= 150 UU/s toward own goal) so the reward fires
+    // specifically on efficient rotation-path grabs, not pad-hunting detours.
+    //
+    // Register with ZeroSumReward(0.5f) — denying opponent boost is competitive.
+    // Skips 1v1 (no rotation roles). Event-based: fires once per pad pickup.
+    // ============================================================================
+    class RotationPathBoostDenialReward : public Reward {
+    private:
+        const std::vector<Vec> bigBoostPads = {
+            Vec(-3072.0f, -4096.0f, 73.0f),
+            Vec( 3072.0f, -4096.0f, 73.0f),
+            Vec(-3584.0f,     0.0f, 73.0f),
+            Vec( 3584.0f,     0.0f, 73.0f),
+            Vec(-3072.0f,  4096.0f, 73.0f),
+            Vec( 3072.0f,  4096.0f, 73.0f)
+        };
+
+        mutable std::map<uint32_t, float> lastBoostAmounts;
+
+        static constexpr float MIN_HOMEWARD_VEL = 150.0f;
+
+        enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
+
+        SimpleRole DetermineRole(const Player& player, const GameState& state) const {
+            float myDist = (player.pos - state.ball.pos).Length();
+            std::vector<float> dists;
+            for (const auto& p : state.players) {
+                if (p.team == player.team && p.carId != player.carId)
+                    dists.push_back((p.pos - state.ball.pos).Length());
+            }
+            if (dists.empty()) return SimpleRole::CLOSEST;
+            std::sort(dists.begin(), dists.end());
+            if (myDist < dists[0]) return SimpleRole::CLOSEST;
+            if (dists.size() >= 2 && myDist > dists[1]) return SimpleRole::FURTHEST;
+            return SimpleRole::MIDDLE;
+        }
+
+        bool IsOpposingSide(const Vec& padPos, Team team) const {
+            return (team == Team::BLUE) ? padPos.y > 1000.0f : padPos.y < -1000.0f;
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {
+            lastBoostAmounts.clear();
+        }
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (state.players.size() < 4) return 0.0f;
+            if (DetermineRole(player, state) == SimpleRole::CLOSEST) return 0.0f;
+
+            if (lastBoostAmounts.find(player.carId) == lastBoostAmounts.end()) {
+                lastBoostAmounts[player.carId] = player.boost;
+                return 0.0f;
+            }
+
+            float boostGained = player.boost - lastBoostAmounts[player.carId];
+            lastBoostAmounts[player.carId] = player.boost;
+
+            if (boostGained < 90.0f) return 0.0f;
+
+            for (const auto& pad : bigBoostPads) {
+                if (pad.Dist(player.pos) < 200.0f) {
+                    if (!IsOpposingSide(pad, player.team)) return 0.0f;
+
+                    // Must be moving homeward — on rotation path back, not detouring for pads
+                    Vec  ownGoal    = (player.team == Team::BLUE)
+                                       ? CommonValues::BLUE_GOAL_BACK
+                                       : CommonValues::ORANGE_GOAL_BACK;
+                    Vec  toOwnGoal  = (ownGoal - player.pos).Normalized();
+                    float homewardVel = player.vel.Dot(toOwnGoal);
+                    if (homewardVel < MIN_HOMEWARD_VEL) return 0.0f;
+
+                    return 1.0f;
+                }
+            }
+            return 0.0f;
         }
     };
 

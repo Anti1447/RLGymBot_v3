@@ -358,16 +358,14 @@ namespace RLGC {
 			float baseSetupReward          = 0.4f;     // base before quality multipliers
 			float boostFullQualityThresh   = 60.0f;    // boost level for full boostQuality (1.0)
 			float ballVelZFull             = 500.0f;   // ball vel.z for full upwardQuality (1.0)
+			float goalAlignQualityFloor    = 0.5f;     // min multiplier for poorly-aimed setups
 		};
 
 	private:
 		struct SetupMemory {
-			bool  pendingConfirm    = false;
-			float pendingReward     = 0.0f;
-			int   confirmTimer      = 0;
-			float lastSpeedQuality  = 0.0f;
-			float lastBoostQuality  = 0.0f;
-			float lastUpwardQuality = 0.0f;
+			bool  pendingConfirm = false;
+			float pendingReward  = 0.0f;
+			int   confirmTimer   = 0;
 		};
 
 		Config config;
@@ -537,12 +535,20 @@ namespace RLGC {
 			float boostQ  = ComputeBoostQuality(player.boost);
 			float upwardQ = ComputeUpwardQuality(state.ball.vel.z);
 
-			mem.pendingReward    = config.baseSetupReward * speedQ * boostQ * upwardQ;
-			mem.confirmTimer     = 0;
-			mem.pendingConfirm   = true;
-			mem.lastSpeedQuality = speedQ;
-			mem.lastBoostQuality = boostQ;
-			mem.lastUpwardQuality= upwardQ;
+			// Goal alignment quality: setups aimed toward the opponent goal are rewarded more
+			Vec oppGoalPos = (player.team == Team::BLUE)
+				? CommonValues::ORANGE_GOAL_BACK
+				: CommonValues::BLUE_GOAL_BACK;
+			float goalAlign = (ballSpeed > 1.0f)
+				? RS_CLAMP((state.ball.vel / ballSpeed).Dot((oppGoalPos - state.ball.pos).Normalized()), 0.0f, 1.0f)
+				: 0.0f;
+			float goalAlignQ = RS_CLAMP(
+				config.goalAlignQualityFloor + (1.0f - config.goalAlignQualityFloor) * goalAlign,
+				config.goalAlignQualityFloor, 1.0f);
+
+			mem.pendingReward  = config.baseSetupReward * speedQ * boostQ * upwardQ * goalAlignQ;
+			mem.confirmTimer   = 0;
+			mem.pendingConfirm = true;
 
 			m_touchesGated.fetch_add(1);
 			m_speedQualitySum.fetch_add(static_cast<int64_t>(speedQ  * 1000.0f));

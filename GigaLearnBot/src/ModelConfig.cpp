@@ -42,7 +42,7 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_4_PLATINUM:
-        cfg.entropyScale = 0.03f;
+        cfg.entropyScale = 0.02f;
         cfg.policyLR = 1.00e-4f;
         cfg.criticLR = 1.00e-4f;
         cfg.noTouchTimeout = 12.0f;
@@ -53,12 +53,12 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.025f;
-        cfg.policyLR = 1.3e-4f;
-        cfg.criticLR = 1.3e-4f;
+        cfg.entropyScale = 0.017f;
+        cfg.policyLR = 1.17e-4f;
+        cfg.criticLR = 1.17e-4f;
         cfg.noTouchTimeout = 12.0f;
         cfg.useRandomState = true;
-        cfg.randomStateChance = 0.7f;
+        cfg.randomStateChance = 0.65f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
         break;
@@ -173,7 +173,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 123;
 
     // === PPO CONFIG ===
-    int tsPerItr = 250'000;
+    int tsPerItr = 400'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.99715f;
+    cfg.ppo.gaeGamma = 0.9977f;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

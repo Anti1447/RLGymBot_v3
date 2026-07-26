@@ -163,7 +163,8 @@ public:
         bool inOppHalf = (player.team == Team::BLUE && player.pos.y > 0) ||
                          (player.team == Team::ORANGE && player.pos.y < 0);
 
-        if (inOppHalf && player.boost < OPP_HALF_BOOST_MIN && cd3 <= 0.0f) {
+        if (inOppHalf && player.boost < OPP_HALF_BOOST_MIN && cd3 <= 0.0f
+            && PositionAnalysis::AnyLivingOpponent(player, state.players)) {
             float distToClosestOpponent = PositionAnalysis::ClosestOpponentDistance(
                 player, player.pos, state.players);
             if (distToClosestOpponent >= PRESSURE_DISTANCE) {
@@ -187,7 +188,8 @@ public:
         // GATE 5: GOAL NET LANDING TRAP
         // ===================================================================
         if (PositionAnalysis::InOpponentGoalArea(player) &&
-            player.boost < RECOVERY_BOOST_THRESHOLD) {
+            player.boost < RECOVERY_BOOST_THRESHOLD &&
+            PositionAnalysis::AnyLivingOpponent(player, state.players)) {
             if (PositionAnalysis::RecentlyAttemptedShot(player, SHOT_RECOVERY_WINDOW)) {
                 float timeToRecover = (RECOVERY_BOOST_THRESHOLD - player.boost) / BOOST_DEPLETION_RATE;
                 if (timeToRecover >= SAFE_RECOVERY_TIME) {

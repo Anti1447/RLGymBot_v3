@@ -186,6 +186,28 @@ private:
         return maxPressure;
     }
 
+    // ------------------------------------------------------------------------
+    // Ball-threat gate (borrowed from PossessionControlRewardv2).
+    // Used as a SOFT multiplier here, not a hard gate: this class's own header
+    // critique (see top of file) argues possession isn't always forward, so we
+    // only damp — not zero — the idle-hold channels when the ball is not being
+    // carried at pace toward the opponent goal.
+    // ------------------------------------------------------------------------
+    static constexpr float THREAT_ATTACK_ZONE_DIST = 4000.0f;  // dist from opp GOAL_BACK
+    static constexpr float THREAT_MIN_BALL_SPEED   = 600.0f;   // uu/s — real pace, not drift
+    static constexpr float THREAT_MIN_ALIGNMENT    = 0.30f;    // matches possession vel-alignment convention
+    static constexpr float THREAT_IDLE_MULT        = 0.50f;    // hold-channel scale when no threat
+
+    bool BallThreatActive(Team team, const GameState& state) const {
+        Vec oppGoalBack = (team == Team::BLUE)
+            ? CommonValues::ORANGE_GOAL_BACK
+            : CommonValues::BLUE_GOAL_BACK;
+        if ((state.ball.pos - oppGoalBack).Length() > THREAT_ATTACK_ZONE_DIST) return false;
+        if (state.ball.vel.Length() < THREAT_MIN_BALL_SPEED) return false;
+        Vec toOppGoal = (oppGoalBack - state.ball.pos).Normalized();
+        return state.ball.vel.Normalized().Dot(toOppGoal) >= THREAT_MIN_ALIGNMENT;
+    }
+
 public:
     virtual void Reset(const GameState& initialState) override {
         possessionScoreHistory.clear();
@@ -256,13 +278,18 @@ public:
         float pressure = CalculateOpponentPressure(player, state, state.ball.pos);
         possessionScore *= (1.0f - pressure * pressure); // Quadratic penalty: matches PreStep calculation
 
+        // Soft threat multiplier: damp the idle-hold channels (maintain +
+        // extended-duration) when the ball is not being carried at pace toward
+        // the opponent goal. Air-dribble / won / lost channels are NOT scaled.
+        float threatMult = BallThreatActive(player.team, state) ? 1.0f : THREAT_IDLE_MULT;
+
         if (possessionScore > 0.3f) {
             // In possession - reward maintaining it
-            reward += possessionScore * 0.5f;
+            reward += possessionScore * 0.5f * threatMult;
 
             // Bonus for extended possession (diminishing returns, caps at 30s)
             if (duration > 1.0f) {
-                reward += RS_MIN(duration / 30.0f, 1.0f) * 0.5f;
+                reward += RS_MIN(duration / 30.0f, 1.0f) * 0.5f * threatMult;
             }
 
             // P3-1: Bonus for air dribble possession (more challenging variant)

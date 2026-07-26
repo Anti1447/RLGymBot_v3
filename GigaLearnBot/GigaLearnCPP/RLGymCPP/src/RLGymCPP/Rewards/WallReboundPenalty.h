@@ -8,9 +8,10 @@
 // Three-stage detection pipeline:
 //   Stage 1: Player touches ball near/toward a side wall (x-axis only).
 //            If an opponent touches the ball mid-window the track is cancelled.
-//            The nearest-to-ball touching player is recorded.
-//   Stage 2: Within TOUCH_WINDOW seconds, ball x-velocity sign flips while near wall
-//            (standard prev-state sign-flip bounce detection).
+//            The nearest-to-ball touching player is recorded, along with which
+//            branch qualified (near-wall vs. approaching-wall).
+//   Stage 2: Within the qualifying branch's window, ball x-velocity sign flips
+//            while near wall (standard prev-state sign-flip bounce detection).
 //   Stage 3: After the bounce, the opponent team's min-TimeToReach < our team's
 //            by ADVANTAGE_MARGIN → fire PENALTY once on the recorded toucher.
 //
@@ -20,6 +21,13 @@
 //     Side walls (x-axis) are the sole focus.
 //   - No ZeroSumReward wrapper needed — fires only on the specific toucher.
 //   - Cannot be farmed (it is a penalty).
+//   - Rev 2.0 (2026-07-06, NJH): TOUCH_WINDOW (0.8s) was shared by both
+//     qualifying branches, but BallGoingTowardSideWall can start tracking as
+//     far out as |x| > 2000 - at the WALL_VEL_TOWARD floor (500 uu/s) it takes
+//     ~4s to actually reach the wall and bounce, ~5x longer than the window
+//     allowed. That branch almost never survived to Stage 2. Split into two
+//     windows: the tight 0.8s window for touches already near the wall, and a
+//     longer TOUCH_WINDOW_APPROACH for touches that are still traveling toward it.
 
 #include "Reward.h"
 #include "../Math.h"
@@ -30,14 +38,16 @@ namespace RLGC {
 
 class PoorWallReboundPenalty : public Reward {
 private:
-    static constexpr float WALL_DIST        = 400.0f;   // UU from side wall plane
-    static constexpr float WALL_VEL_TOWARD  = 500.0f;   // UU/s toward wall to trigger tracking
-    static constexpr float WALL_VEL_POS_MIN = 2000.0f;  // ball must be past this |x| for vel trigger
-    static constexpr float TOUCH_WINDOW     = 0.8f;     // seconds (~12 steps @ 8-tick skip)
-    static constexpr float ADVANTAGE_MARGIN = 0.85f;    // opp must be ≥15% faster than friendly
-    static constexpr float PENALTY          = -1.0f;
+    static constexpr float WALL_DIST          = 400.0f;   // UU from side wall plane
+    static constexpr float WALL_VEL_TOWARD    = 500.0f;   // UU/s toward wall to trigger tracking
+    static constexpr float WALL_VEL_POS_MIN   = 2000.0f;  // ball must be past this |x| for vel trigger
+    static constexpr float TOUCH_WINDOW       = 0.8f;     // seconds, near-wall branch (~12 steps @ 8-tick skip)
+    static constexpr float TOUCH_WINDOW_APPROACH = 2.0f;  // seconds, approaching-wall branch (needs travel time)
+    static constexpr float ADVANTAGE_MARGIN   = 0.85f;    // opp must be ≥15% faster than friendly
+    static constexpr float PENALTY            = -1.0f;
 
     float    _timeSinceTouch   = 0.0f;
+    float    _activeWindow     = TOUCH_WINDOW;
     uint32_t _lastToucherCarId = 0;
     Team     _lastToucherTeam  = Team::BLUE;
     bool     _fired            = false;
@@ -69,6 +79,7 @@ private:
 public:
     virtual void Reset(const GameState& initialState) override {
         _timeSinceTouch   = 0.0f;
+        _activeWindow     = TOUCH_WINDOW;
         _lastToucherCarId = 0;
         _fired            = false;
         _stepPenalties.clear();
@@ -84,6 +95,7 @@ public:
         //   • Own-team touch near/toward side wall → record nearest-to-ball toucher
         const Player* bestToucher = nullptr;
         float bestDist = std::numeric_limits<float>::max();
+        float bestWindow = TOUCH_WINDOW;
         bool cancelled = false;
 
         for (const auto& p : state.players) {
@@ -95,14 +107,21 @@ public:
                 break;
             }
 
-            // Qualify: ball near side wall OR post-touch velocity toward side wall
-            if (!BallNearSideWall(state.ball.pos) &&
-                !BallGoingTowardSideWall(state.ball.pos, state.ball.vel))
-                continue;
+            // Qualify: ball near side wall OR post-touch velocity toward side wall.
+            // The "near wall" branch gets the tight window (bounce is imminent);
+            // the "approaching wall" branch gets the longer window (ball still
+            // has to travel there before it can bounce).
+            bool nearWall = BallNearSideWall(state.ball.pos);
+            bool towardWall = BallGoingTowardSideWall(state.ball.pos, state.ball.vel);
+            if (!nearWall && !towardWall) continue;
 
             // Select the nearest-to-ball toucher (deterministic in multi-touch steps)
             float dist = (p.pos - state.ball.pos).Length();
-            if (dist < bestDist) { bestDist = dist; bestToucher = &p; }
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestToucher = &p;
+                bestWindow = nearWall ? TOUCH_WINDOW : TOUCH_WINDOW_APPROACH;
+            }
         }
 
         if (cancelled) {
@@ -111,6 +130,7 @@ public:
             _lastToucherCarId = bestToucher->carId;
             _lastToucherTeam  = bestToucher->team;
             _timeSinceTouch   = 0.0f;
+            _activeWindow     = bestWindow;
             _fired            = false;
         }
 
@@ -120,7 +140,7 @@ public:
 
         // ── Stages 2+3: bounce + possession check ───────────────────────────
         if (_lastToucherCarId != 0 && !_fired
-            && _timeSinceTouch <= TOUCH_WINDOW
+            && _timeSinceTouch <= _activeWindow
             && SideWallBounceOccurred(state)) {
 
             float friendly = std::numeric_limits<float>::max();
@@ -140,7 +160,7 @@ public:
         }
 
         // Expire tracking window
-        if (_timeSinceTouch > TOUCH_WINDOW)
+        if (_timeSinceTouch > _activeWindow)
             _lastToucherCarId = 0;
     }
 

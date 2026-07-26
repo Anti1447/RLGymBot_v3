@@ -126,6 +126,27 @@ def run_analysis(checkpoint_path, checkpoints_root, total_timesteps, wandb_run=N
     if wandb_run is not None:
         _log_to_wandb(wandb_run, summary, checkpoints_root)
 
+    # 6b. Gradient analysis (dominance / dead / farming) -> wandb. Independent and
+    #     non-fatal: a failure here must never abort the rest of run_analysis.
+    try:
+        import sys
+        from pathlib import Path as _Path
+        sys.path.insert(0, str(_Path(__file__).parent))
+        import reward_gradient_analysis
+        grad = reward_gradient_analysis.analyze_gradients(current_metrics["rewards"])
+        if wandb_run is not None:
+            wandb_run.log(reward_gradient_analysis.wandb_metrics(grad))
+        # Also persist the same metrics (+ full table) to the reward_analysis folder,
+        # alongside the graph PNGs. Runs every checkpoint, even the first (no prev).
+        reward_gradient_analysis.write_report(
+            grad, checkpoints_root / "reward_analysis", total_timesteps
+        )
+        if grad["dead"] or grad["farming"]:
+            print(f"[RewardAnalysis] gradient: {len(grad['dominant'])} dominant, "
+                  f"{len(grad['dead'])} dead, {len(grad['farming'])} farming candidate(s)")
+    except Exception as e:
+        print(f"[RewardAnalysis] WARNING: gradient analysis failed (non-fatal): {e}")
+
     # 7. Generate graphs (need 2+ checkpoints for comparison)
     if prev_metrics is not None:
         _ensure_imports()

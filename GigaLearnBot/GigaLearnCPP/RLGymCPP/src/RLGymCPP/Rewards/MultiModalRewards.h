@@ -21,6 +21,21 @@ namespace RLGC {
     //   - Tighter commit detection: cos 0.3→0.5 (72°→60°), speed 300→500 UU/s
     //   - Penalty formula: (commitCount-1) → commitCount (counts all extra bots)
     //   - Added Config struct, Metrics, W&B atomics
+    //
+    // Rev 3.0 (2026-06-30, NJH + Claude) — fixes from Rev 2.0:
+    //   - BUG FIX: the scored player's own commitment was never checked. The old
+    //     commitCount loop counted teammates other than the scored player without
+    //     excluding the real first man, so a non-first-man player got penalized
+    //     just because their first man was correctly closing on the ball — even
+    //     if the penalized player wasn't moving toward the ball at all. Now the
+    //     scored player must themselves satisfy IsActivelyCommitting() before any
+    //     penalty applies.
+    //   - commitCount now excludes the true first man (by carId), not just self,
+    //     so it only counts genuine additional/illegitimate committers.
+    //   - Emergency gate height raised 400→emergencyGoalHeight (1000 UU default)
+    //     so aerial/bouncing scrambles near the own net are also exempted, not
+    //     just grounded ones.
+    //   - Replaced goto-based first-man check with an explicit firstManId lookup.
     // ============================================================================
     class DoubleCommitPenalty : public Reward {
     public:
@@ -32,6 +47,7 @@ namespace RLGC {
             float minCommitSpeed       = 500.0f;  // min speed to count as committing (was 300)
             float commitAlignCos       = 0.5f;    // cos(angle) threshold — 60° cone (was 0.3 = 72°)
             float emergencyGoalDist    = 1000.0f; // ball within this of own goal → no penalty
+            float emergencyGoalHeight  = 1000.0f; // ball below this height near own goal → no penalty (was hardcoded 400)
             bool  shadowMode           = false;
         };
 
@@ -90,25 +106,33 @@ namespace RLGC {
             float distToBall = (state.ball.pos - player.pos).Length();
             if (distToBall < config.minDistBeforePenalty) return 0.0f;
 
-            // Emergency defensive gate: everyone committing near own goal is correct
+            // Emergency defensive gate: everyone committing near own goal is correct,
+            // including aerial/bouncing scrambles (not just grounded ones).
             Vec ownGoal = (player.team == Team::BLUE)
                 ? CommonValues::BLUE_GOAL_CENTER
                 : CommonValues::ORANGE_GOAL_CENTER;
             if ((state.ball.pos - ownGoal).Length() < config.emergencyGoalDist &&
-                state.ball.pos.z < 400.0f)
+                state.ball.pos.z < config.emergencyGoalHeight)
                 return 0.0f;
 
-            // First-man exemption: if this player is the closest to ball on their team,
-            // their commit is correct — penalize them would be wrong
-            float myDistToBall = distToBall;
+            // Identify the team's true first man: the live teammate (possibly this
+            // player) closest to the ball. Only non-first-man players can double-commit.
+            uint32_t firstManId = player.carId;
+            float    firstManDist = distToBall;
             for (const auto& tm : state.players) {
                 if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
-                if ((tm.pos - state.ball.pos).Length() < myDistToBall)
-                    goto has_closer_teammate;
+                float tmDist = (tm.pos - state.ball.pos).Length();
+                if (tmDist < firstManDist) {
+                    firstManDist = tmDist;
+                    firstManId   = tm.carId;
+                }
             }
-            // No teammate is closer — this player IS the first man, commitment is valid
-            { commitStartTime.erase(player.carId); return 0.0f; }
-            has_closer_teammate:
+
+            if (firstManId == player.carId) {
+                // This player IS the first man — their commitment is correct.
+                commitStartTime.erase(player.carId);
+                return 0.0f;
+            }
 
             // Commit detection: tighter cone (0.5 = 60°) and higher speed floor (500 UU/s)
             auto IsActivelyCommitting = [&](const Player& p) -> bool {
@@ -120,10 +144,19 @@ namespace RLGC {
                 return p.vel.Normalized().Dot(toBallTm.Normalized()) > config.commitAlignCos;
             };
 
-            // Count teammates also committing (these are additional first-men, also wrong)
+            // The scored player must themselves be actively committing — otherwise
+            // they aren't double-committing, no matter what their teammates are doing.
+            if (distToBall >= config.commitDistance || !IsActivelyCommitting(player)) {
+                commitStartTime.erase(player.carId);
+                return 0.0f;
+            }
+
+            // Count all illegitimate committers on the team (excluding the real first
+            // man) to scale the penalty by how many extra bots are piling on. The
+            // scored player is guaranteed to be included here.
             int commitCount = 0;
             for (const auto& tm : state.players) {
-                if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+                if (tm.team != player.team || tm.carId == firstManId || tm.isDemoed) continue;
                 float tmDist = (state.ball.pos - tm.pos).Length();
                 if (tmDist < config.commitDistance && IsActivelyCommitting(tm))
                     commitCount++;

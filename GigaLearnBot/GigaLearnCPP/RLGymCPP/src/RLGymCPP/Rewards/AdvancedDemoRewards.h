@@ -877,4 +877,105 @@ namespace RLGC {
         }
     };
 
+    // ============================================================================
+    // ThirdManDemoReward
+    // Rewards the FURTHEST player (rotating back from first-man) who is still in
+    // the opponent's half for approaching and demolishing opponents on the way back.
+    //
+    // Two components:
+    //   A. Per-frame approach shaping: FURTHEST + opponent half + moving toward a
+    //      high-value opponent target at >= 800 UU/s. Scales with approach speed.
+    //   B. Event reward on demo: 2.0f base + 1.5f bonus if target was last defender.
+    //
+    // Target priority: last-defender (2pts) > near ball (1pt) > in attack half (1pt).
+    // Skips 1v1 (no FURTHEST rotation role). No ZeroSum wrapper needed.
+    // Pairs with SecondManOffensiveDemoReward (MIDDLE role) and DemoOpportunityReward.
+    // ============================================================================
+    class ThirdManDemoReward : public Reward {
+    private:
+        static constexpr float APPROACH_PER_SEC       = 0.4f;
+        static constexpr float MAX_APPROACH_SPEED     = 2300.0f;
+        static constexpr float MIN_APPROACH_COMPONENT = 800.0f;
+        static constexpr float BALL_PROX_THRESHOLD    = 1500.0f;
+        static constexpr float LAST_DEF_GOAL_DIST     = 1800.0f;
+        static constexpr float BASE_DEMO_REWARD       = 2.0f;
+        static constexpr float LAST_DEFENDER_BONUS    = 1.5f;
+
+        enum class SimpleRole { CLOSEST, MIDDLE, FURTHEST };
+
+        SimpleRole DetermineRole(const Player& player, const GameState& state) const {
+            float myDist = (player.pos - state.ball.pos).Length();
+            std::vector<float> dists;
+            for (const auto& p : state.players) {
+                if (p.team == player.team && p.carId != player.carId)
+                    dists.push_back((p.pos - state.ball.pos).Length());
+            }
+            if (dists.empty()) return SimpleRole::CLOSEST;
+            std::sort(dists.begin(), dists.end());
+            if (myDist < dists[0]) return SimpleRole::CLOSEST;
+            if (dists.size() >= 2 && myDist > dists[1]) return SimpleRole::FURTHEST;
+            return SimpleRole::MIDDLE;
+        }
+
+        // Returns -1 if opponent is irrelevant (defending half, not near ball).
+        float TargetScore(const Player& opp, const Player& player, const GameState& state) const {
+            Vec oppGoal = (player.team == Team::BLUE)
+                           ? CommonValues::ORANGE_GOAL_BACK
+                           : CommonValues::BLUE_GOAL_BACK;
+            bool nearBall       = (opp.pos - state.ball.pos).Length() < BALL_PROX_THRESHOLD;
+            float attackY       = (player.team == Team::BLUE) ? opp.pos.y : -opp.pos.y;
+            bool inAttackHalf   = attackY > 0.0f;
+            bool isLastDefender = (opp.pos - oppGoal).Length() < LAST_DEF_GOAL_DIST;
+            if (!inAttackHalf && !nearBall) return -1.0f;
+            float score = 0.0f;
+            if (nearBall)       score += 1.0f;
+            if (inAttackHalf)   score += 1.0f;
+            if (isLastDefender) score += 2.0f;
+            return score;
+        }
+
+    public:
+        virtual void Reset(const GameState& initialState) override {}
+
+        virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+            if (state.players.size() < 4) return 0.0f;
+            if (DetermineRole(player, state) != SimpleRole::FURTHEST) return 0.0f;
+
+            // Player must still be in opponent's half (rotating back from first-man)
+            float attackY = (player.team == Team::BLUE) ? player.pos.y : -player.pos.y;
+            if (attackY <= 0.0f) return 0.0f;
+
+            // Find highest-value demo target
+            const Player* target    = nullptr;
+            float         bestScore = -1.0f;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team || opp.isDemoed) continue;
+                float s = TargetScore(opp, player, state);
+                if (s > bestScore) { bestScore = s; target = &opp; }
+            }
+            if (!target) return 0.0f;
+
+            // Component B: event reward on demo
+            if (player.eventState.demo) {
+                float reward = BASE_DEMO_REWARD;
+                Vec oppGoal = (player.team == Team::BLUE)
+                               ? CommonValues::ORANGE_GOAL_BACK
+                               : CommonValues::BLUE_GOAL_BACK;
+                if ((target->pos - oppGoal).Length() < LAST_DEF_GOAL_DIST)
+                    reward += LAST_DEFENDER_BONUS;
+                return reward;
+            }
+
+            // Component A: per-frame approach shaping
+            Vec   toTarget  = target->pos - player.pos;
+            float dist      = toTarget.Length();
+            if (dist < 1.0f) return 0.0f;
+            float velComp   = player.vel.Dot(toTarget / dist);
+            if (velComp < MIN_APPROACH_COMPONENT) return 0.0f;
+            float approachFrac = RS_CLAMP(velComp / MAX_APPROACH_SPEED, 0.0f, 1.0f);
+            float dt           = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            return APPROACH_PER_SEC * approachFrac * dt;
+        }
+    };
+
 } // namespace RLGC

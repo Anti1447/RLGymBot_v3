@@ -143,6 +143,86 @@ struct RotationConfig {
 };
 
 // =========================================================================
+// ROLE DETECTION HELPERS
+// =========================================================================
+// Defined here (before reward classes) so all classes that include this
+// header can use DetermineRoleCommon without forward-declaration issues.
+
+// Role type enum - single source of truth for role determination
+enum class RoleType {
+	CLOSEST,      // Closest to ball
+	MIDDLE,       // Middle distance
+	FURTHEST      // Furthest from ball
+};
+
+// Unified role detection function - eliminates code duplication
+// Computes velocity-adjusted distances and determines player's role relative to teammates
+inline RoleType DetermineRoleCommon(const Player& player, const GameState& state) {
+	float distToBall = (player.pos - state.ball.pos).Length();
+	Vec ballVel = state.ball.vel;
+	Vec toPlayer = (player.pos - state.ball.pos).Normalized();
+
+	float velocityAlignment = 0.0f;
+	if (ballVel.Length() > 100.0f) {
+		velocityAlignment = ballVel.Normalized().Dot(toPlayer);
+	}
+
+	float adjustedDist = distToBall * (1.0f - velocityAlignment * 0.25f);
+
+	std::vector<float> adjustedTeammateDists;
+	for (const auto& p : state.players) {
+		if (p.team == player.team && p.carId != player.carId && !p.isDemoed) {
+			float dist = (p.pos - state.ball.pos).Length();
+			Vec toTeammate = (p.pos - state.ball.pos).Normalized();
+			float tmateAlignment = 0.0f;
+			if (ballVel.Length() > 100.0f) {
+				tmateAlignment = ballVel.Normalized().Dot(toTeammate);
+			}
+			float adjustedTmateDist = dist * (1.0f - tmateAlignment * 0.25f);
+			adjustedTeammateDists.push_back(adjustedTmateDist);
+		}
+	}
+
+	if (adjustedTeammateDists.empty()) {
+		return RoleType::CLOSEST;
+	}
+
+	std::sort(adjustedTeammateDists.begin(), adjustedTeammateDists.end());
+
+	if (adjustedDist < adjustedTeammateDists[0]) {
+		return RoleType::CLOSEST;
+	}
+	else if (adjustedTeammateDists.size() >= 2 && adjustedDist > adjustedTeammateDists[1]) {
+		return RoleType::FURTHEST;
+	}
+	else {
+		return RoleType::MIDDLE;
+	}
+}
+
+inline bool IsSecondManRole(const Player& player, const GameState& state) {
+	return DetermineRoleCommon(player, state) == RoleType::MIDDLE;
+}
+
+inline Player* GetFirstManTeammate(const Player& player, const GameState& state) {
+	float closestDistToBall = FLT_MAX;
+	Player* firstMan = nullptr;
+
+	for (const auto& p : state.players) {
+		if (p.carId == player.carId) continue;
+		if (p.team != player.team) continue;
+
+		float distToBall = (p.pos - state.ball.pos).Length();
+		if (distToBall < closestDistToBall) {
+			closestDistToBall = distToBall;
+			firstMan = const_cast<Player*>(&p);
+		}
+	}
+
+	return firstMan;
+}
+
+// =========================================================================
 // IMMEDIATE SPACING REWARD (PPO-FRIENDLY)
 // =========================================================================
 // Rewards/punishes INSTANTLY based on current spacing
@@ -150,10 +230,39 @@ struct RotationConfig {
 //
 // Bronze-Gold: Just don't cluster
 // Platinum+: Maintain optimal triangle spacing
+//
+// Rev 1.1 (2026-07-25 | NJH): four fixes from a code-review pass —
+//   1. Kickoff gate added (same convention as UncoveredNetPenalty /
+//      LastManOvercommitPenalty in this codebase). Standard 3v3 kickoff
+//      formations put two "back" spawns 509-809 UU apart (see
+//      CommonValues.h BLUE_KICKOFF_BACK_RIGHT/BACK_LEFT/FAR_BACK_CENTER) —
+//      well under even Bronze's 1200 UU minimum — so without this gate the
+//      reward fired a spacing penalty off pure spawn geometry every episode.
+//   2. Distance is now horizontal-only (X/Y, .z zeroed before the distance
+//      check). Previously a full 3D distance let vertical separation (e.g.
+//      one player mid-aerial directly above a grounded teammate) count as
+//      "good spacing" despite both occupying the same field position.
+//   3. Good-spacing bonus scale raised 0.1f -> 0.2f. The bonus was smaller
+//      than even the too-far penalty ceiling (weight*0.15), so in 3v3 a
+//      player with one good pairing and one bad pairing (through no fault
+//      of their own — a third teammate wandered off) averaged out negative.
+//      0.2f clears the too-far ceiling (good+worst-far nets positive) while
+//      staying well under the too-close ceiling (weight*1.0), so clustering
+//      — the reward's primary target — still dominates the signal.
+//      Averaging itself (reward / teammateCount) already produces the
+//      desired "aggregate positioning across all teammates" behavior; the
+//      bonus/penalty scale was the only thing making it read as unfair.
+//   4. Demoed player exclusion: a demoed player no longer receives this
+//      reward at all (returns 0 until respawn). Living teammates already
+//      correctly ignored demoed teammates as reference points (existing
+//      p.isDemoed check in the loop); if every teammate is demoed,
+//      teammateCount stays 0 and the existing fallback already returns 0.
 
 class InstantSpacingReward : public Reward {
 private:
 	RotationConfig config;
+
+	static constexpr float GOOD_SPACING_SCALE = 0.2f;  // Rev 1.1: was 0.1f
 
 public:
 	InstantSpacingReward(RotationPhase phase)
@@ -163,30 +272,40 @@ public:
 	void Reset(const GameState& state) override {}
 
 	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+		if (player.isDemoed) return 0.0f;
+
+		// Kickoff gate: ball parked at center, near-zero velocity
+		if (state.ball.pos.Length() < 200.0f && state.ball.vel.Length() < 150.0f)
+			return 0.0f;
+
 		float reward = 0.0f;
 		int teammateCount = 0;
 
 		for (const auto& p : state.players) {
-			if (p.team == player.team && p.carId != player.carId) {
-				float dist = (player.pos - p.pos).Length();
+			if (p.team != player.team || p.carId == player.carId || p.isDemoed) continue;
 
-				// INSTANT PENALTY for being too close
-				if (dist < config.minTeammateSpacing) {
-					float ratio = dist / config.minTeammateSpacing;
-					reward -= config.clusterPenaltyWeight * (1.0f - ratio);
-				}
-				// INSTANT PENALTY for being too far (only in phases that enforce max spacing)
-				else if (dist > config.maxTeammateSpacing && config.enableMaxSpacing) {
-					float excessDist = dist - config.maxTeammateSpacing;
-					reward -= config.clusterPenaltyWeight * 0.15f * RS_CLAMP(excessDist / 2000.0f, 0.0f, 1.0f);
-				}
-				// INSTANT REWARD for good spacing — proportional to phase severity
-				else {
-					reward += config.clusterPenaltyWeight * 0.1f;
-				}
+			// Horizontal-only (X/Y) spacing — height differences don't count
+			// as "spread out"; two players stacked vertically are still clustered.
+			Vec a = player.pos; a.z = 0.0f;
+			Vec b = p.pos;      b.z = 0.0f;
+			float dist = (a - b).Length();
 
-				teammateCount++;
+			// INSTANT PENALTY for being too close
+			if (dist < config.minTeammateSpacing) {
+				float ratio = dist / config.minTeammateSpacing;
+				reward -= config.clusterPenaltyWeight * (1.0f - ratio);
 			}
+			// INSTANT PENALTY for being too far (only in phases that enforce max spacing)
+			else if (dist > config.maxTeammateSpacing && config.enableMaxSpacing) {
+				float excessDist = dist - config.maxTeammateSpacing;
+				reward -= config.clusterPenaltyWeight * 0.15f * RS_CLAMP(excessDist / 2000.0f, 0.0f, 1.0f);
+			}
+			// INSTANT REWARD for good spacing — proportional to phase severity
+			else {
+				reward += config.clusterPenaltyWeight * GOOD_SPACING_SCALE;
+			}
+
+			teammateCount++;
 		}
 
 		return teammateCount > 0 ? reward / teammateCount : 0.0f;
@@ -210,17 +329,19 @@ class RetreatAfterTouchReward : public Reward {
 private:
 	struct TouchMemory {
 		bool justTouched = false;
-		int touchStepCount = 0;
+		float touchTime = 0.0f;
 		bool hasGivenEventReward = false;
 		bool isRetreating = false;
+		bool hasGivenThirdManBonus = false;
 	};
 
 	std::unordered_map<uint32_t, TouchMemory> memory;
 	RotationConfig config;
-	int currentStep = 0;
+	float currentTime = 0.0f;
 
-	// SHORT feedback window - only remember touch for 120 steps (~1 second at 120 ticks/sec)
-	static constexpr int MEMORY_STEPS = 120;
+	static constexpr float MEMORY_DURATION   = 2.0f;    // seconds — extended for PPO credit assignment
+	static constexpr float MAX_RETREAT_SPEED = 1200.0f; // u/s — fast retreat reference for speed scaling
+	static constexpr float THIRD_MAN_BONUS   = 0.4f;    // one-time bonus for fully rotating to last man
 
 	Vec GetBackPost(Team team, const Vec& ballPos) const {
 		float goalY = (team == Team::BLUE) ?
@@ -253,7 +374,7 @@ public:
 
 	void Reset(const GameState& state) override {
 		memory.clear();
-		currentStep = 0;
+		currentTime = 0.0f;
 	}
 
 	float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -267,13 +388,14 @@ public:
 		// Detect NEW touch
 		if (player.ballTouchedStep && !mem.justTouched) {
 			mem.justTouched = true;
-			mem.touchStepCount = currentStep;
+			mem.touchTime = currentTime;
 			mem.hasGivenEventReward = false;
 			mem.isRetreating = false;
+			mem.hasGivenThirdManBonus = false;
 		}
 
-		// Check if memory has expired (PPO-FRIENDLY: short window)
-		if (mem.justTouched && (currentStep - mem.touchStepCount) > MEMORY_STEPS) {
+		// Check if memory has expired
+		if (mem.justTouched && (currentTime - mem.touchTime) > MEMORY_DURATION) {
 			mem.justTouched = false;
 			return 0.0f;
 		}
@@ -290,25 +412,36 @@ public:
 
 			mem.isRetreating = retreating;
 
-			// SHAPING REWARD: Continuous reward for being near back-post (when ball is in defensive half)
+			// SHAPING REWARD: Continuous reward for retreating — scales with speed
 			if (retreating) {
-				// Back-post logic only applies when ball is in own defensive half
+				Vec ownGoal = (player.team == Team::BLUE)
+					? CommonValues::BLUE_GOAL_CENTER
+					: CommonValues::ORANGE_GOAL_CENTER;
+				Vec toGoal = (ownGoal - player.pos).Normalized();
+				float retreatSpeed = player.vel.Dot(toGoal);
+				float speedScale = RS_CLAMP(retreatSpeed / MAX_RETREAT_SPEED, 0.5f, 1.5f);
+
 				float ballGoalY = (player.team == Team::BLUE) ?
-					state.ball.pos.y : -state.ball.pos.y;  // Flip for ORANGE perspective
+					state.ball.pos.y : -state.ball.pos.y;
 
 				if (ballGoalY < 0) {
-					// Ball is in own defensive half - reward positioning near back-post
 					Vec backPost = GetBackPost(player.team, state.ball.pos);
 					float distToBackPost = (player.pos - backPost).Length();
-
-					// Proximity reward (immediate feedback)
 					float proximityRatio = 1.0f - RS_CLAMP(distToBackPost / config.backPostProximity, 0.0f, 1.0f);
-					reward += proximityRatio * config.rotationShapingWeight;
+					reward += proximityRatio * config.rotationShapingWeight * speedScale;
 				} else {
-					// Ball in offensive half - reward general retreat away from ball
 					float distFromBall = (player.pos - state.ball.pos).Length();
 					float retreatRatio = RS_CLAMP(distFromBall / (config.backPostProximity * 1.5f), 0.0f, 1.0f);
-					reward += (0.5f * retreatRatio) * config.rotationShapingWeight;
+					reward += (0.5f * retreatRatio) * config.rotationShapingWeight * speedScale;
+				}
+			}
+
+			// THIRD MAN BONUS: one-time reward for fully completing rotation to last man (3v3 only)
+			if (!mem.hasGivenThirdManBonus && state.players.size() >= 6) {
+				RoleType role = DetermineRoleCommon(player, state);
+				if (role == RoleType::FURTHEST) {
+					reward += THIRD_MAN_BONUS;
+					mem.hasGivenThirdManBonus = true;
 				}
 			}
 		}
@@ -317,7 +450,8 @@ public:
 	}
 
 	void PreStep(const GameState& state) override {
-		currentStep++;
+		float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+		currentTime += dt;
 	}
 };
 
@@ -334,94 +468,6 @@ namespace PhaseC {
 	static constexpr float SECOND_MAN_SUPPORT_RANGE_MAX = 3500.0f; // Maximum distance for support
 	static constexpr float GOAL_POST_BACK_DISTANCE = 2500.0f;    // "Back post" optimal position
 	static constexpr float OPPONENT_CHALLENGE_DIST = 2000.0f;   // When opponent is challenging
-}
-
-// Role type enum - single source of truth for role determination
-enum class RoleType {
-	CLOSEST,      // Closest to ball
-	MIDDLE,       // Middle distance
-	FURTHEST      // Furthest from ball
-};
-
-// Unified role detection function - eliminates code duplication
-// Computes velocity-adjusted distances and determines player's role relative to teammates
-inline RoleType DetermineRoleCommon(const Player& player, const GameState& state) {
-	float distToBall = (player.pos - state.ball.pos).Length();
-	Vec ballVel = state.ball.vel;
-	Vec toPlayer = (player.pos - state.ball.pos).Normalized();
-
-	float velocityAlignment = 0.0f;
-	if (ballVel.Length() > 100.0f) {
-		velocityAlignment = ballVel.Normalized().Dot(toPlayer);
-	}
-
-	// Adjust distance based on velocity alignment
-	// Players ahead of the ball's trajectory get lower adjusted distance (better positioned)
-	// Players behind the ball's trajectory get higher adjusted distance (worse positioned)
-	// Scalar 0.25 limits adjustment to 6% per role change, preventing overcorrection
-	float adjustedDist = distToBall * (1.0f - velocityAlignment * 0.25f);
-
-	// Collect adjusted teammate distances
-	std::vector<float> adjustedTeammateDists;
-	for (const auto& p : state.players) {
-		if (p.team == player.team && p.carId != player.carId) {
-			float dist = (p.pos - state.ball.pos).Length();
-			Vec toTeammate = (p.pos - state.ball.pos).Normalized();
-			float tmateAlignment = 0.0f;
-			if (ballVel.Length() > 100.0f) {
-				tmateAlignment = ballVel.Normalized().Dot(toTeammate);
-			}
-			float adjustedTmateDist = dist * (1.0f - tmateAlignment * 0.25f);
-			adjustedTeammateDists.push_back(adjustedTmateDist);
-		}
-	}
-
-	if (adjustedTeammateDists.empty()) {
-		return RoleType::CLOSEST;
-	}
-
-	std::sort(adjustedTeammateDists.begin(), adjustedTeammateDists.end());
-
-	// Determine role based on adjusted distances (velocity-aware)
-	if (adjustedDist < adjustedTeammateDists[0]) {
-		return RoleType::CLOSEST;
-	}
-	else if (adjustedTeammateDists.size() >= 2 && adjustedDist > adjustedTeammateDists[1]) {
-		return RoleType::FURTHEST;
-	}
-	else {
-		return RoleType::MIDDLE;
-	}
-}
-
-inline bool IsSecondManRole(const Player& player, const GameState& state) {
-	// Identify if player is in MIDDLE role (second-man)
-	// Uses unified DetermineRoleCommon to ensure consistency with RoleAwarenessReward
-	return DetermineRoleCommon(player, state) == RoleType::MIDDLE;
-}
-
-inline Player* GetFirstManTeammate(const Player& player, const GameState& state) {
-	// Find closest teammate to ball (the first-man)
-	float closestDistToBall = FLT_MAX;
-	Player* firstMan = nullptr;
-
-	for (const auto& p : state.players) {
-		if (p.carId == player.carId) {
-			continue;  // Skip self
-		}
-
-		if (p.team != player.team) {
-			continue;  // Only teammates
-		}
-
-		float distToBall = (p.pos - state.ball.pos).Length();
-		if (distToBall < closestDistToBall) {
-			closestDistToBall = distToBall;
-			firstMan = const_cast<Player*>(&p);
-		}
-	}
-
-	return firstMan;
 }
 
 // =========================================================================
@@ -448,15 +494,22 @@ private:
 		float timeInRole = 0.0f;
 		bool justTransitioned = false;
 
-		// NEW: Event tracking for hybrid (time + event) role transitions
-		bool lastFrameHadPossession = false;  // Did player possess ball last frame?
-		// TODO: lastFrameVel was used for demo detection, disabled for now (too noisy)
+		// Event tracking for hybrid (time + event) role transitions
+		bool lastFrameHadPossession = false;
+
+		// Post-first-man enforcement: track when player exits CLOSEST and enforce full retreat
+		bool wasRecentlyFirstMan = false;
+		float timePostFirstMan = 0.0f;   // elapsed seconds since leaving CLOSEST role
 	};
 
 	std::unordered_map<uint32_t, RoleMemory> memory;
 	RotationConfig config;
 
-	// NEW: Check for events that should trigger immediate role transition
+	static constexpr float POST_FIRST_MAN_WINDOW   = 5.0f;   // seconds to enforce full retreat after being first man
+	static constexpr float POST_FIRST_MAN_PENALTY  = 0.08f;  // per-step penalty for camping at MIDDLE post-first-man
+	static constexpr float POST_FIRST_MAN_BONUS    = 0.4f;   // one-time bonus for reaching FURTHEST after first-man
+
+	// Check for events that should trigger immediate role transition
 	bool CheckEventTriggers(const Player& player, const GameState& state, RoleMemory& mem) const {
 		// Event 1: Ball possession lost (player touched last frame, but doesn't now)
 		bool currentPossession = player.ballTouchedStep;
@@ -505,6 +558,41 @@ public:
 		}
 
 		SimpleRole currentRole = DetermineRole(player, state);
+
+		// POST-FIRST-MAN ENFORCEMENT (3v3 only — MIDDLE role is meaningless in 1v1/2v2)
+		// mem.lastRole still holds the PREVIOUS frame's role here; it is updated below.
+		if (state.players.size() >= 6) {
+			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
+			if (mem.lastRole == SimpleRole::CLOSEST && currentRole != SimpleRole::CLOSEST) {
+				mem.wasRecentlyFirstMan = true;
+				mem.timePostFirstMan = 0.0f;
+			}
+
+			if (mem.wasRecentlyFirstMan) {
+				mem.timePostFirstMan += dt;
+
+				if (currentRole == SimpleRole::FURTHEST) {
+					reward += POST_FIRST_MAN_BONUS;
+					mem.wasRecentlyFirstMan = false;
+					mem.timePostFirstMan = 0.0f;
+				}
+				else if (currentRole == SimpleRole::CLOSEST) {
+					// New first-man opportunity — clear without bonus
+					mem.wasRecentlyFirstMan = false;
+					mem.timePostFirstMan = 0.0f;
+				}
+				else if (mem.timePostFirstMan > POST_FIRST_MAN_WINDOW) {
+					// Timed out without completing rotation — clear, no bonus
+					mem.wasRecentlyFirstMan = false;
+					mem.timePostFirstMan = 0.0f;
+				}
+				else {
+					// Still at MIDDLE within window — penalize cutting rotation
+					reward -= POST_FIRST_MAN_PENALTY;
+				}
+			}
+		}
 
 		// Detect role change
 		if (currentRole != mem.lastRole) {
@@ -714,7 +802,7 @@ public:
 //   Gold:           WeightedReward(new ProgressiveRotationReward(RotationPhase::GOLD), 8.0f)
 //   Platinum:       WeightedReward(new ProgressiveRotationReward(RotationPhase::PLATINUM), 12.0f)
 //   Diamond:        WeightedReward(new ProgressiveRotationReward(RotationPhase::DIAMOND), 15.0f)
-//   Champion+:      WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 20.0f)
+//   Champion+:      WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 25.0f)
 
 class ProgressiveRotationReward : public Reward {
 private:
@@ -807,7 +895,7 @@ private:
 
 	struct RoleMemory {
 		BoostRole lastFrameRole = BoostRole::FURTHEST;
-		int roleStepCount = 0;
+		float roleDuration = 0.0f;
 		bool hasGivenEventReward = false;
 		float lastBoostDisparity = 0.0f;
 	};
@@ -816,7 +904,7 @@ private:
 	RotationConfig config;
 
 	// Constants
-	static constexpr int ROLE_STABILITY_STEPS = 45;   // ~0.375s — was 120 (too anti-PPO)
+	static constexpr float ROLE_STABILITY_DURATION = 0.375f;  // seconds — was 45 steps (too anti-PPO)
 	static constexpr float LOW_BOOST_THRESHOLD = 30.0f;   // was 75 — now meaningfully "low"
 	static constexpr float HIGH_BOOST_THRESHOLD = 70.0f;  // was 100 (unreachable, max boost is 100)
 	static constexpr float BOOST_DISPARITY_THRESHOLD = 30.0f;
@@ -829,57 +917,51 @@ private:
 		return BoostRole::MIDDLE;
 	}
 
-	// Get boost disparity between player and closest teammate
+	// Get boost disparity: average teammate boost minus player boost.
+	// Positive = teammates have more on average; negative = player has more.
 	float GetBoostDisparity(const Player& player, const GameState& state) const {
-		float closestTeammateDist = FLT_MAX;
-		float closestTeammateBoost = 0.0f;
+		float totalBoost = 0.0f;
+		int count = 0;
 
 		for (const auto& p : state.players) {
-			if (p.team == player.team && p.carId != player.carId) {
-				float dist = (player.pos - p.pos).Length();
-				if (dist < closestTeammateDist) {
-					closestTeammateDist = dist;
-					closestTeammateBoost = p.boost;
-				}
+			if (p.team == player.team && p.carId != player.carId && !p.isDemoed) {
+				totalBoost += p.boost;
+				count++;
 			}
 		}
 
-		if (closestTeammateDist == FLT_MAX) {
-			return 0.0f;  // No teammates
-		}
+		if (count == 0) return 0.0f;
 
-		return closestTeammateBoost - player.boost;
+		return (totalBoost / count) - player.boost;
 	}
 
 	// Check if player is in the correct role based on boost
 	bool IsCorrectRole(const Player& player, const GameState& state, BoostRole currentRole) const {
 		float boostDisparity = GetBoostDisparity(player, state);
 
-		// Low-boost player should be FURTHEST
+		// Low-boost player must be FURTHEST
 		if (player.boost < LOW_BOOST_THRESHOLD) {
 			return currentRole == BoostRole::FURTHEST;
 		}
 
-		// High-boost player should be CLOSEST
+		// Medium-low boost (30-50): typical post-touch level — MIDDLE accepted, but not CLOSEST
+		// Prevents low-boost players from pushing back to first man after a play
+		if (player.boost < 50.0f) {
+			return currentRole != BoostRole::CLOSEST;
+		}
+
+		// High-boost player should be CLOSEST when teammates are low
 		if (player.boost > HIGH_BOOST_THRESHOLD && boostDisparity < -BOOST_DISPARITY_THRESHOLD) {
 			return currentRole == BoostRole::CLOSEST;
 		}
 
-		// Balanced boost - no penalty for any role
+		// Balanced boost (50-70) — no penalty for any role
 		return true;
 	}
 
-	// Check if during kickoff (all players near center)
+	// Check if during kickoff (ball stationary at center)
 	bool IsKickoffPhase(const GameState& state) const {
-		const float KICKOFF_CENTER_RADIUS = 3000.0f;
-		Vec center(0, 0, 0);
-
-		for (const auto& p : state.players) {
-			if ((p.pos - center).Length() > KICKOFF_CENTER_RADIUS) {
-				return false;  // Player outside kickoff zone
-			}
-		}
-		return true;
+		return state.ball.pos.Length() < 200.0f && state.ball.vel.Length() < 150.0f;
 	}
 
 public:
@@ -910,25 +992,27 @@ public:
 		auto& mem = memory[player.carId];
 		float reward = 0.0f;
 
+		float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
 		BoostRole currentRole = DeterminePlayerRole(player, state);
 		float boostDisparity = GetBoostDisparity(player, state);
 		mem.lastBoostDisparity = boostDisparity;
 
 		// Check for role transition
 		if (currentRole != mem.lastFrameRole) {
-			mem.roleStepCount = 0;
+			mem.roleDuration = 0.0f;
 			mem.hasGivenEventReward = false;
 			mem.lastFrameRole = currentRole;
 		}
 
-		mem.roleStepCount++;
+		mem.roleDuration += dt;
 
 		// Only evaluate role correctness after stability window
-		if (mem.roleStepCount >= ROLE_STABILITY_STEPS) {
+		if (mem.roleDuration >= ROLE_STABILITY_DURATION) {
 			bool correctRole = IsCorrectRole(player, state, currentRole);
 
-			// EVENT REWARD: Transition to correct role
-			if (correctRole && !mem.hasGivenEventReward && mem.roleStepCount == ROLE_STABILITY_STEPS) {
+			// EVENT REWARD: First step correct after stability window expires
+			if (correctRole && !mem.hasGivenEventReward) {
 				reward += 0.3f;
 				mem.hasGivenEventReward = true;
 			}
@@ -943,9 +1027,17 @@ public:
 				reward += 0.2f * amplifier;
 			}
 			else {
-				// PENALTY: Low-boost player in CLOSEST role
+				// PENALTY: Low-boost player pushing forward
 				if (player.boost < LOW_BOOST_THRESHOLD && currentRole == BoostRole::CLOSEST) {
 					reward -= 0.15f;
+				}
+				// PENALTY: High-boost player camping back when they should be pushing
+				else if (player.boost > HIGH_BOOST_THRESHOLD && boostDisparity < -BOOST_DISPARITY_THRESHOLD && currentRole == BoostRole::FURTHEST) {
+					reward -= 0.15f;
+				}
+				// PENALTY: Medium-low boost player at first man (softer — post-touch range)
+				else if (player.boost < 50.0f && currentRole == BoostRole::CLOSEST) {
+					reward -= 0.08f;
 				}
 			}
 		}

@@ -84,7 +84,7 @@ void RewardFactory::Initialize() {
     Register("BoostStealReward", []() { return new BoostStealReward(); });
     Register("BoostStarvationReward", []() { return new BoostStarvationReward(); });
     Register("PostKickoffMidBoostReward", []() { return new PostKickoffMidBoostReward(); });
-    Register("BigBoostPadCenterReward", []() { return new BigBoostPadCenterReward(); });
+    Register("PadCenterAccuracyReward", []() { return new PadCenterAccuracyReward(); });
     Register("DefensiveRotationBoostReward", []() { return new DefensiveRotationBoostReward(); });
     // BoostAwareRotationReward requires constructor parameters - skipping
     // Register("BoostAwareRotationReward", []() { return new BoostAwareRotationReward(); });
@@ -205,6 +205,7 @@ void RewardFactory::Initialize() {
     Register("FirstToBallReward", []() { return new FirstToBallReward(); });
     Register("ChallengeCommitmentReward", []() { return new ChallengeCommitmentReward(); });
     Register("FakeChallengeOffenseReward", []() { return new FakeChallengeOffenseReward(); });
+    Register("FakeChallengeDefenseReward", []() { return new FakeChallengeDefenseReward(); });
     Register("SpatialFakeReward", []() { return new SpatialFakeReward(); });
 
     // Defensive Readiness & Rotation

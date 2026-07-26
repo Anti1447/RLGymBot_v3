@@ -24,7 +24,7 @@ namespace RLGC {
         explicit KickoffSpeedReward(
             float centerRadiusIn = 300.0f,
             float maxBallSpeedIn = 500.0f,
-            float minSpeedThresholdIn = 1800.0f)  // Require near-supersonic speed
+            float minSpeedThresholdIn = 2200.0f)  // Require near-supersonic speed
             : centerRadius(centerRadiusIn),
             maxBallSpeed(maxBallSpeedIn),
             minSpeedThreshold(minSpeedThresholdIn) {

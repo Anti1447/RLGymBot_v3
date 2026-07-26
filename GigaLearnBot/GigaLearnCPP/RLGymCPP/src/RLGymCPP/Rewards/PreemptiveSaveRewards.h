@@ -351,34 +351,49 @@ namespace RLGC {
     };
 
     // ============================================================================
-    // BALL TRAJECTORY INTERCEPTION REWARD
-    // Rewards positioning to intercept the ball's trajectory toward goal.
-    // Uses physics prediction to find optimal interception point.
+    // BALL LANDING POSITION REWARD
+    // Rev 1.0 (2026-07-07, NJH+Claude) — replaces BallTrajectoryInterceptionReward.
+    //
+    // Rewards whichever player (per team) is closest to the ball's actual predicted
+    // post-bounce landing spot, while the ball is airborne and a bounce is imminent.
+    // Uses BallPred::Cache's real bounce simulation (ground/wall/ceiling/backboard)
+    // instead of a straight-line heuristic, and applies to both offense and defense
+    // (not just balls heading toward the player's own goal).
+    //
+    // Trigger: ball airborne (z > AIRBORNE_HEIGHT_MIN) AND BallPred shows a first
+    // bounce (ground or surface, whichever is sooner) within PREDICTION_WINDOW.
+    // Anti-farming: gate depends on live ball state (can't camp a fixed spot); only
+    // the closest teammate to the landing spot is rewarded (prevents every teammate
+    // farming the same predicted spot in 2v2/3v3); smooth proximity curve, not a
+    // flat threshold.
+    //
+    // W&B: BallLandingPosition/ActivationRate, /MeanReward
     // ============================================================================
-    class BallTrajectoryInterceptionReward : public Reward {
+    class BallLandingPositionReward : public Reward {
     private:
-        static constexpr float PREDICTION_TIME = 1.5f;  // Predict 1.5 seconds ahead
-        static constexpr float INTERCEPTION_RADIUS = 500.0f;
-        static constexpr float BASE_REWARD = 0.4f;
-        static constexpr float EARLY_INTERCEPTION_BONUS = 0.3f;
+        static constexpr float PREDICTION_WINDOW  = 1.5f;    // only count bounces within this many seconds
+        static constexpr float AIRBORNE_HEIGHT_MIN = 150.0f; // ball must be at least this high to count as "in flight"
+        static constexpr float FALLOFF_RADIUS      = 2750.0f; // distance at which reward reaches 0
+        static constexpr float BASE_SCALE          = 0.35f;
 
         BallPred::Cache _ballCache;
 
-        // Find interception point on line from predicted ball to goal
-        Vec FindInterceptionPoint(const Vec& goalPos) const {
-            // Use the cache slice nearest to PREDICTION_TIME for physics-accurate position
-            Vec predictedBall = _ballCache.AtTime(PREDICTION_TIME).pos;
-
-            Vec predictedToGoal = goalPos - predictedBall;
-            float predictedDist = predictedToGoal.Length();
-
-            if (predictedDist < 0.01f) return predictedBall;
-
-            // Find point 30% of the way from predicted ball to goal
-            return predictedBall + (predictedToGoal * 0.3f);
-        }
+        inline static std::atomic<long long> s_rewardMilli{0};
+        inline static std::atomic<int> s_activeFrames{0};
 
     public:
+        struct Metrics {
+            double totalReward  = 0.0;
+            int    activeFrames = 0;
+        };
+
+        static Metrics GetAndResetMetrics() {
+            Metrics m;
+            m.totalReward  = double(s_rewardMilli.exchange(0)) / 1000.0;
+            m.activeFrames = s_activeFrames.exchange(0);
+            return m;
+        }
+
         virtual void PreStep(const GameState& state) override {
             _ballCache.Update(state);
         }
@@ -388,40 +403,37 @@ namespace RLGC {
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-            Vec goalPos = (player.team == Team::BLUE) ?
-                CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+            if (player.isDemoed) return 0.0f;
 
-            // Check if ball is moving toward goal
-            Vec ballToGoal = goalPos - state.ball.pos;
-            float ballSpeed = state.ball.vel.Length();
+            // Only meaningful while the ball is actually in flight
+            if (state.ball.pos.z < AIRBORNE_HEIGHT_MIN) return 0.0f;
 
-            if (ballSpeed < 500.0f) {
-                return 0.0f;  // Ball not moving fast enough to be threatening
+            // Find the first predicted bounce of any kind (ground or surface)
+            float groundT  = _ballCache.FirstGroundHitTime();
+            float surfaceT = _ballCache.FirstSurfaceHitTime();
+            float landingT;
+            if (groundT >= 0.0f && surfaceT >= 0.0f)  landingT = RS_MIN(groundT, surfaceT);
+            else if (groundT >= 0.0f)                 landingT = groundT;
+            else if (surfaceT >= 0.0f)                landingT = surfaceT;
+            else                                       return 0.0f;  // no bounce predicted in the cache horizon
+
+            if (landingT > PREDICTION_WINDOW) return 0.0f;
+
+            Vec landingPos = _ballCache.AtTime(landingT).pos;
+
+            // Only reward the player closest to the landing spot on their own team
+            // (prevents every teammate farming the same predicted spot)
+            float myDist = (player.pos - landingPos).Length();
+            for (const auto& tm : state.players) {
+                if (tm.team != player.team || tm.carId == player.carId || tm.isDemoed) continue;
+                if ((tm.pos - landingPos).Length() < myDist) return 0.0f;
             }
 
-            float alignment = state.ball.vel.Dot(ballToGoal.Normalized());
-            if (alignment < 0.3f) {
-                return 0.0f;  // Ball not heading toward goal
-            }
+            float proximity = RS_CLAMP(1.0f - myDist / FALLOFF_RADIUS, 0.0f, 1.0f);
+            float reward = BASE_SCALE * proximity;
 
-            // Find optimal interception point
-            Vec interceptionPoint = FindInterceptionPoint(goalPos);
-            float distToInterception = (player.pos - interceptionPoint).Length();
-
-            // Reward proximity to interception point
-            float reward = 0.0f;
-
-            if (distToInterception < INTERCEPTION_RADIUS) {
-                // At interception point
-                float proximityFactor = 1.0f - (distToInterception / INTERCEPTION_RADIUS);
-                reward = BASE_REWARD * proximityFactor;
-
-                // Bonus for early positioning (before ball gets close)
-                float ballDistToGoal = (state.ball.pos - goalPos).Length();
-                if (ballDistToGoal > 3000.0f) {
-                    reward += EARLY_INTERCEPTION_BONUS;
-                }
-            }
+            s_activeFrames.fetch_add(1);
+            if (reward > 0.0f) s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
 
             return reward;
         }
@@ -586,6 +598,30 @@ namespace RLGC {
         static constexpr float MAX_VELOCITY_DIFF_SOFT = 500.0f;  // Velocity diff threshold for "soft" contact
         static constexpr float ANGLE_TOLERANCE = 0.4f;           // Radians (~23°) tolerance for optimal angle
 
+        // Soft penalty when ball horizontal (XY) speed > 2300 uu/s — car can't keep up.
+        // Waived within 3000 UU of the opposing goal (hard-shot intent).
+        float GetHorizVelPenaltyMul(const Player& player, const GameState& state) const {
+            constexpr float HORIZ_VEL_LIMIT = 2300.0f;
+            constexpr float HORIZ_VEL_MAX   = 3000.0f;
+            constexpr float NEAR_GOAL_DIST  = 3000.0f;
+            constexpr float MIN_MUL         = 0.5f;
+
+            Vec oppGoal = (player.team == Team::BLUE)
+                ? CommonValues::ORANGE_GOAL_BACK
+                : CommonValues::BLUE_GOAL_BACK;
+            if ((state.ball.pos - oppGoal).Length() <= NEAR_GOAL_DIST)
+                return 1.0f;
+
+            float horizSpeed = sqrtf(state.ball.vel.x * state.ball.vel.x +
+                                     state.ball.vel.y * state.ball.vel.y);
+            if (horizSpeed <= HORIZ_VEL_LIMIT)
+                return 1.0f;
+
+            float t = RS_CLAMP((horizSpeed - HORIZ_VEL_LIMIT) / (HORIZ_VEL_MAX - HORIZ_VEL_LIMIT),
+                               0.0f, 1.0f);
+            return 1.0f - (1.0f - MIN_MUL) * t;  // [1.0, 0.5]
+        }
+
     public:
         virtual void Reset(const GameState& initialState) override {
             memory.clear();
@@ -714,6 +750,10 @@ namespace RLGC {
                 reward *= boostMultiplier;
             }
 
+            // Horizontal speed cap: penalize ball horiz speed > 1900 uu/s (car can't keep up)
+            if (reward > 0.0f)
+                reward *= GetHorizVelPenaltyMul(player, state);
+
             return reward;
         }
 
@@ -740,7 +780,7 @@ namespace RLGC {
         EarlyDangerDetectionReward earlyDanger;
         ShadowDefenseReward shadowDefense;
         GoalpostPositioningReward goalpostPositioning;
-        BallTrajectoryInterceptionReward trajectoryInterception;
+        BallLandingPositionReward trajectoryInterception;
         DefensiveReadinessReward defensiveReadiness;
         GoalLineClearanceReward goalLineClearance;
 

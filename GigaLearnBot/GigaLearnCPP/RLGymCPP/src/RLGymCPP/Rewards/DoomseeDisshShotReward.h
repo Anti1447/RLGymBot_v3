@@ -172,7 +172,12 @@ private:
             float shotDot = RS_CLAMP(SafeNorm(state.ball.vel).Dot(SafeNorm(oppGoal - state.ball.pos)), 0.0f, 1.0f);
             reward += REWARD_SHOT_QUALITY * shotDot;
         }
-        if (state.goalScored) reward += REWARD_GOAL_BONUS;
+        // Only award the goal bonus when the ball entered the OPPONENT's net.
+        // goalScored is a plain bool with no team info, so we infer from ball position.
+        bool scoredInOppGoal = (player.team == Team::BLUE)
+            ? (state.ball.pos.y > 0.0f)
+            : (state.ball.pos.y < 0.0f);
+        if (state.goalScored && scoredInOppGoal) reward += REWARD_GOAL_BONUS;
         return reward;
     }
 
@@ -281,7 +286,10 @@ public:
                 dState.phase          = DoomseeState::FLIP_CONVERSION;
                 dState.phaseStartTime = dState.timeAccum;
                 phaseReward = GetFlipConversionReward(player, state, dState);
-                if (state.goalScored) { goalBonusTick = true; ResetToIdle(dState); }
+                bool scoredInOppGoal = (player.team == Team::BLUE)
+                    ? (state.ball.pos.y > 0.0f)
+                    : (state.ball.pos.y < 0.0f);
+                if (state.goalScored && scoredInOppGoal) { goalBonusTick = true; ResetToIdle(dState); }
             } else {
                 phaseReward = GetWallEscapeReward(player, state.ball, dState);
             }
@@ -293,7 +301,10 @@ public:
             if (phaseElapsed > TIMEOUT_FLIP_CONV) { ResetToIdle(dState); return 0.0f; }
 
             phaseReward = GetFlipConversionReward(player, state, dState);
-            if (state.goalScored) { goalBonusTick = true; ResetToIdle(dState); }
+            bool scoredInOppGoal = (player.team == Team::BLUE)
+                ? (state.ball.pos.y > 0.0f)
+                : (state.ball.pos.y < 0.0f);
+            if (state.goalScored && scoredInOppGoal) { goalBonusTick = true; ResetToIdle(dState); }
             break;
         }
 

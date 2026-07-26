@@ -335,7 +335,11 @@ namespace RLGC {
         static constexpr float MAX_LATERAL_OFFSET  = 500.0f;
 
         // Minimum car speed to qualify — slow tap-ins don't count.
-        static constexpr float MIN_SPEED           = 1000.0f;
+        // Rev 1.1 (2026-07-19): raised 1000 -> 1400. At 1000, a policy could collect
+        // most of this reward's 50-weight payout well below KickoffSpeedReward's hard
+        // 2200 UU/s supersonic cliff, satisficing on a "good enough" touch speed instead
+        // of pushing for true supersonic. Small floor-only change, not a formula rewrite.
+        static constexpr float MIN_SPEED           = 1400.0f;
 
         mutable bool kickoffActive = false;
         mutable std::map<uint32_t, bool> kickoffContacted;
@@ -399,7 +403,30 @@ namespace RLGC {
                 zScore = RS_CLAMP(1.0f - std::abs(relZ) / BALL_RADIUS, 0.0f, 1.0f);
             }
 
-            return lateralScore * yAlignment * speedScore * zScore;  // [0, 1]
+            // Signal 5 (Rev 1.1, 2026-07-19): resultant-ball outcome quality. Signals 1-4
+            // only evaluate contact GEOMETRY (how the car approached), so a geometrically
+            // "perfect" touch that produces a weak or badly-directed ball previously scored
+            // identically to a genuine scoring-quality hit. This mirrors the proven
+            // direction/speed-quality pattern already active in KickoffFormReward's
+            // power-hit component (KickoffRewards.h) — state.ball.vel on the
+            // ballTouchedStep frame already reflects post-collision velocity there.
+            // Floored at 0.5 (not 0) so a well-aligned-but-modest-result touch still gets
+            // half credit rather than collapsing to zero, avoiding a destabilizing swing
+            // in one change.
+            Vec oppGoal = (player.team == Team::BLUE)
+                              ? CommonValues::ORANGE_GOAL_BACK
+                              : CommonValues::BLUE_GOAL_BACK;
+            Vec toOppGoal = (oppGoal - state.ball.pos).Normalized();
+            float ballSpeed = state.ball.vel.Length();
+
+            float directionQuality = 0.0f;
+            if (ballSpeed > 100.0f) {
+                directionQuality = RS_CLAMP(state.ball.vel.Dot(toOppGoal) / ballSpeed, 0.0f, 1.0f);
+            }
+            float speedOutcomeQuality = RS_CLAMP(ballSpeed / CommonValues::BALL_MAX_SPEED, 0.0f, 1.0f);
+            float outcomeQuality = 0.5f + 0.5f * (0.5f * directionQuality + 0.5f * speedOutcomeQuality);
+
+            return lateralScore * yAlignment * speedScore * zScore * outcomeQuality;  // [0, 1]
         }
     };
 

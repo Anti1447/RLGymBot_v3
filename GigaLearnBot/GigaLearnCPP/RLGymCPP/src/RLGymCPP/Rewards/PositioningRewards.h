@@ -382,11 +382,13 @@ private:
     static constexpr float OVERLAP_Y_WINDOW    = 2000.0f;
 
     // Gates
-    static constexpr float MIN_GAME_SIZE     = 4;
+    static constexpr int   MIN_GAME_SIZE     = 4;
     static constexpr float POSSESSION_RADIUS = 1500.0f;
 
     static constexpr float BASE_SCALE = 0.4f;
 
+    // NOTE: metrics are class-level (inline static) — shared across ALL instances.
+    // Never wire more than one ActiveSupportingPositionReward per phase or W&B values double.
     inline static std::atomic<long long> s_rewardMilli{0};
     inline static std::atomic<long long> s_penaltyMilli{0};
     inline static std::atomic<int> s_supportFrames{0};
@@ -399,16 +401,18 @@ private:
 
     SimpleRole DetermineRole(const Player& player, const GameState& state) const {
         float distToBall = (player.pos - state.ball.pos).Length();
-        std::vector<float> teammateDists;
+        float closest1   = FLT_MAX, closest2 = FLT_MAX;
+        int   liveFound  = 0;
         for (const auto& p : state.players) {
-            if (p.team == player.team && p.carId != player.carId) {
-                teammateDists.push_back((p.pos - state.ball.pos).Length());
-            }
+            if (p.team != player.team || p.carId == player.carId || p.isDemoed) continue;
+            float d = (p.pos - state.ball.pos).Length();
+            if (d < closest1) { closest2 = closest1; closest1 = d; }
+            else if (d < closest2) { closest2 = d; }
+            ++liveFound;
         }
-        if (teammateDists.empty()) return SimpleRole::CLOSEST;
-        std::sort(teammateDists.begin(), teammateDists.end());
-        if (distToBall < teammateDists[0]) return SimpleRole::CLOSEST;
-        if (teammateDists.size() >= 2 && distToBall > teammateDists[1]) return SimpleRole::FURTHEST;
+        if (liveFound == 0) return SimpleRole::CLOSEST;
+        if (distToBall < closest1) return SimpleRole::CLOSEST;
+        if (liveFound >= 2 && distToBall > closest2) return SimpleRole::FURTHEST;
         return SimpleRole::MIDDLE;
     }
 
@@ -416,6 +420,7 @@ private:
         float closestDist = 1e10f;
         Team closestTeam = Team::BLUE;
         for (const auto& p : state.players) {
+            if (p.isDemoed) continue;
             float dist = (p.pos - state.ball.pos).Length();
             if (dist < closestDist) { closestDist = dist; closestTeam = p.team; }
         }
@@ -448,7 +453,7 @@ public:
     virtual void Reset(const GameState& initialState) override {}
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        if (state.players.size() < static_cast<int>(MIN_GAME_SIZE)) return 0.0f;
+        if (static_cast<int>(state.players.size()) < MIN_GAME_SIZE) return 0.0f;
         if (!DoesTeamHavePossession(player, state)) return 0.0f;
         if (DetermineRole(player, state) != SimpleRole::MIDDLE) return 0.0f;
         if (!RewardMath::IsInOpponentHalf(state.ball.pos, player.team)) return 0.0f;
@@ -474,9 +479,13 @@ public:
         float s2x = 0.0f;
         float s2y = RS_CLAMP(oppGoalY - attackSign * SLOT2_Y_BACK, -4900.0f, 4900.0f);
 
-        // Slot 3: Wide Far-Side Diagonal — opposite side, upfield from ball
-        float s3x = RS_CLAMP(farSign * SLOT3_X, -3800.0f, 3800.0f);
-        float s3y = RS_CLAMP(ballY + attackSign * SLOT3_Y_UP, -4900.0f, 4900.0f);
+        // Slot 3: Wide Far-Side Diagonal — opposite side, upfield from ball.
+        // Clamp Y so slot stays ≥1500 UU from opponent goal, preventing collapse
+        // into the same region as Slots 1 & 2 when ball is deep in opponent half.
+        float s3x    = RS_CLAMP(farSign * SLOT3_X, -3800.0f, 3800.0f);
+        float s3yMax = (player.team == Team::BLUE) ? (oppGoalY - 1500.0f) :  4900.0f;
+        float s3yMin = (player.team == Team::BLUE) ? -4900.0f             : (oppGoalY + 1500.0f);
+        float s3y    = RS_CLAMP(ballY + attackSign * SLOT3_Y_UP, s3yMin, s3yMax);
 
         // 2D proximity to each slot (ignore Z)
         auto prox = [&](float tx, float ty) {
@@ -497,17 +506,20 @@ public:
 
         float reward = BASE_SCALE * bestScore;
 
-        // Overlap penalty: same-side AND close to ball carrier (stacking is still bad)
+        // Overlap penalty: same-side AND close to ball carrier (stacking is still bad).
+        // Guard on bestScore > 0: don't apply a pure penalty when base reward is also zero.
         float overlap = 0.0f;
-        const bool sameSide         = (ballX * player.pos.x > 0.0f) && std::fabs(ballX) > CENTER_BALL_EPS;
-        const float lateralGap      = std::fabs(player.pos.x - ballX);
-        const float longitudinalGap = std::fabs(player.pos.y - ballY);
+        if (bestScore > 0.0f) {
+            const bool sameSide         = (ballX * player.pos.x > 0.0f) && std::fabs(ballX) > CENTER_BALL_EPS;
+            const float lateralGap      = std::fabs(player.pos.x - ballX);
+            const float longitudinalGap = std::fabs(player.pos.y - ballY);
 
-        if (sameSide && lateralGap < OVERLAP_LATERAL_MAX && longitudinalGap < OVERLAP_Y_WINDOW) {
-            float strength = 1.0f - (lateralGap / OVERLAP_LATERAL_MAX);
-            overlap = -OVERLAP_PENALTY * strength;
-            s_overlapFrames.fetch_add(1);
-            s_penaltyMilli.fetch_add(static_cast<long long>(std::fabs(overlap) * 1000.0f));
+            if (sameSide && lateralGap < OVERLAP_LATERAL_MAX && longitudinalGap < OVERLAP_Y_WINDOW) {
+                float strength = 1.0f - (lateralGap / OVERLAP_LATERAL_MAX);
+                overlap = -OVERLAP_PENALTY * strength;
+                s_overlapFrames.fetch_add(1);
+                s_penaltyMilli.fetch_add(static_cast<long long>(std::fabs(overlap) * 1000.0f));
+            }
         }
 
         // Metrics
@@ -1048,11 +1060,15 @@ public:
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         if (player.isDemoed) return 0.0f;
 
-        // 2v2/3v3 only
+        // 3v3+ only — this reward is documented above as training "the third man
+        // (player furthest from ball on their team)"; a 2v2 team has no third man,
+        // only a second/support man, and this reward has no attacking-possession
+        // exemption, so in 2v2 it was paying the support player up to full credit
+        // for retreating to the back-diagonal quadrant during an attack (2026-07-21).
         int teamCount = 0;
         for (const auto& p : state.players)
             if (p.team == player.team) teamCount++;
-        if (teamCount < 2) return 0.0f;
+        if (teamCount < 3) return 0.0f;
 
         // Skip if ball is in an ambiguous quadrant (near center axes)
         if (fabsf(state.ball.pos.x) < QUADRANT_THRESHOLD ||

@@ -13,6 +13,7 @@
 #include "RewardMath.h"
 #include "AirDribbleAccuracyReward.h"
 #include "BallPrediction.h"
+#include "PositionAnalysis.h"
 
 namespace RLGC {
     // Helpers
@@ -133,7 +134,7 @@ public:
 class ProperLandingReward : public Reward {
 private:
     static constexpr float MIN_AIR_TIME       = 0.2f;   // ignore hops shorter than 200ms
-    static constexpr float AIR_TIME_SCALE_MAX = 6.0f;   // cap scaling at 6s airtime
+    static constexpr float AIR_TIME_SCALE_MAX = 10.0f;   // cap scaling at 10s airtime
 
     std::unordered_map<uint32_t, bool>  _wasAirborne;
     std::unordered_map<uint32_t, bool>  _hasLanding;
@@ -605,72 +606,113 @@ public:
 
 
 // Corner clears - hitting ball to corner from defensive position
+// Rev 2.0 2026-07-20 NJH — added min ball-speed gate (matches BigClearReward's
+// hardness bar) and a per-player cooldown (CLAUDE.md §7C pattern) to close a
+// farming vector: soft dribble touches that merely nudged the ball toward a
+// corner previously paid the full reward on every touched tick. Also switched
+// the alignment check to horizontal-only (XY) — the target corner points are
+// flat (z=0), so dotting against the ball's full 3D velocity previously scored
+// elevated, hard clears *worse* than flat ones as height increased.
+// Rev 3.0 2026-07-21 NJH — added opponent-target-awareness scaling against the
+// specific corner point being aimed for, matching BigClearReward Rev 4.0.
 class CornerClearReward : public Reward {
+private:
+    static constexpr float MIN_BALL_SPEED = 700.0f; // UU/s — matches BigClearReward's hardness gate
+    static constexpr float SAFE_DIST   = 2500.0f;   // UU, opponent this far from corner = full credit
+    static constexpr float DANGER_DIST = 800.0f;    // UU, opponent this close = floor credit
+    static constexpr float MIN_TARGET_SAFETY = 0.2f; // never fully zero a clear
+
+    float cooldownSeconds;
+    mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
+
 public:
+    CornerClearReward(float cooldownMs = 1000.0f) : cooldownSeconds(cooldownMs / 1000.0f) {}
+
+    virtual void Reset(const GameState& initialState) override {
+        _cooldownRemaining.clear();
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+        for (const auto& p : state.players) {
+            float& cd = _cooldownRemaining[p.carId];
+            if (cd > 0.0f) cd = RS_MAX(0.0f, cd - dt);
+        }
+    }
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         if (!player.ballTouchedStep) return 0.0f;
 
+        float& cd = _cooldownRemaining[player.carId]; // lazy-init to 0.0f
+        if (cd > 0.0f) return 0.0f;
+
+        if (state.ball.vel.Length() < MIN_BALL_SPEED) return 0.0f;
+
         Vec myGoal = (player.team == Team::BLUE) ?
             CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
-        
+
         // Check if ball was in defensive zone
         float ballDistToGoal = (state.ball.pos - myGoal).Length();
         if (ballDistToGoal > 3000.0f) return 0.0f; // Not defensive
-        
-        // Check if ball is now moving toward corners
-        Vec ballVelNorm = state.ball.vel.Normalized();
-        
+
+        // Check if ball is now moving toward corners (horizontal-only — ball
+        // height shouldn't distort alignment against a flat target point)
+        Vec ballVelNorm = Vec(state.ball.vel.x, state.ball.vel.y, 0.0f).Normalized();
+
         // Target corner positions
         Vec corners[] = {
             Vec(CommonValues::SIDE_WALL_X, myGoal.y + 2000.0f, 0),
             Vec(-CommonValues::SIDE_WALL_X, myGoal.y + 2000.0f, 0)
         };
-        
+
         for (auto& corner : corners) {
-            Vec toCorner = (corner - state.ball.pos).Normalized();
+            Vec toCorner = Vec(corner.x - state.ball.pos.x, corner.y - state.ball.pos.y, 0.0f).Normalized();
             float alignment = ballVelNorm.Dot(toCorner);
-            
+
             if (alignment > 0.7f) {
-                return 5.0f; // Good defensive clear to corner
+                cd = cooldownSeconds;
+                float nearestOpp = PositionAnalysis::ClosestOpponentDistance(player, corner, state.players);
+                float targetSafety = RS_CLAMP(
+                    (nearestOpp - DANGER_DIST) / (SAFE_DIST - DANGER_DIST),
+                    MIN_TARGET_SAFETY, 1.0f);
+                return 5.0f * targetSafety; // Good defensive clear to corner, scaled by opponent proximity
             }
         }
-        
+
         return 0.0f;
     }
 };
 
-// Air roll shot: airborne + 20-80° roll + underside ball contact + flipping
-// Rev 2.0 2026-06-01 NJH — full rewrite with proper orientation, contact, and flip gates
+// Air roll shot: airborne + genuine air-roll input + 20-160° roll orientation +
+// underside ball contact (with hitbox tolerance) + meaningful ball redirect.
+// Rev 3.0 2026-07-07 NJH — replaced the isFlipping/dodge-recency gate (which detected
+// dodges, not air-roll input, and was the primary cause of ~0% activation) with
+// player.prevAction.roll, matching the AirRollMultiplierGate/WallDashInputReward
+// pattern. Widened roll band, added underside tolerance, loosened redirect angle.
+// See Reward_Change_Log.md.
 class AirRollShotReward : public Reward {
 private:
     static constexpr float MIN_HEIGHT      = 300.0f;  // UU — minimum car height
     static constexpr float MIN_BALL_Z      = 150.0f;  // UU — ball must be off ground
-    static constexpr float ROLL_COS_MIN    = 0.174f;  // cos(80°) — max roll allowed
-    static constexpr float ROLL_COS_MAX    = 0.940f;  // cos(20°) — min roll required
-    static constexpr float FLIP_WINDOW_SEC = 0.35f;   // seconds after flip start counts
-    static constexpr float COOLDOWN_SEC    = 1.0f;    // prevent multi-tick double-count
+    static constexpr float ROLL_DOT_MIN    = -0.940f; // cos(160°) — exclude near-inverted-flat
+    static constexpr float ROLL_DOT_MAX    = 0.940f;  // cos(20°) — exclude near-upright
+    static constexpr float ROLL_INPUT_MIN  = 0.5f;    // matches AirRollMultiplierGate::ROLL_THRESHOLD
+    static constexpr float COOLDOWN_SEC       = 1.0f;    // prevent multi-tick double-count
+    static constexpr float MIN_PRE_TOUCH_SPEED  = 100.0f;  // UU/s — skip dir check if ball was stationary
+    static constexpr float MIN_POST_TOUCH_SPEED = 200.0f;  // UU/s — ball must move after contact
+    static constexpr float REDIRECT_COS_MAX     = 0.906f;  // cos(25°) — dot > this = <25° change → reject
+    static constexpr float UNDERSIDE_TOLERANCE_UU = 40.0f; // ~43% of BALL_RADIUS (92.75uu) for hitbox extents
 
-    float currentTime = 0.0f;
-    mutable std::unordered_map<uint32_t, float> lastFlipStartTime;
-    mutable std::unordered_map<uint32_t, bool>  wasFlipping;
-    mutable std::unordered_map<uint32_t, float> cooldownRemaining;
+    std::unordered_map<uint32_t, float> cooldownRemaining;
 
 public:
     virtual void Reset(const GameState&) override {
-        lastFlipStartTime.clear();
-        wasFlipping.clear();
         cooldownRemaining.clear();
-        currentTime = 0.0f;
     }
 
     virtual void PreStep(const GameState& state) override {
         float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
-        currentTime += dt;
         for (const auto& p : state.players) {
-            bool& prev = wasFlipping[p.carId];
-            if (!prev && p.isFlipping && !p.isOnGround)
-                lastFlipStartTime[p.carId] = currentTime;
-            prev = p.isFlipping;
             float& cd = cooldownRemaining[p.carId];
             if (cd > 0.0f) cd = RS_MAX(0.0f, cd - dt);
         }
@@ -686,17 +728,32 @@ public:
         auto cdIt = cooldownRemaining.find(player.carId);
         if (cdIt != cooldownRemaining.end() && cdIt->second > 0.0f) return 0.0f;
 
-        // Roll angle: 20-80° from upright (works for both left and right roll)
+        // Roll orientation: 20-160° from upright (works for both left and right roll)
         float rollDot = player.rotMat.up.Dot(Vec(0.0f, 0.0f, 1.0f));
-        if (rollDot < ROLL_COS_MIN || rollDot > ROLL_COS_MAX) return 0.0f;
+        if (rollDot < ROLL_DOT_MIN || rollDot > ROLL_DOT_MAX) return 0.0f;
 
-        // Underside contact: car center must be below ball center
-        if (player.pos.z >= state.ball.pos.z) return 0.0f;
+        // Genuine air-roll input at the moment of touch — proof of player intent,
+        // distinct from the orientation check above (which only proves the result)
+        if (fabsf(player.prevAction.roll) < ROLL_INPUT_MIN) return 0.0f;
 
-        // Flip requirement: flip must have started within FLIP_WINDOW_SEC
-        auto ftIt = lastFlipStartTime.find(player.carId);
-        if (ftIt == lastFlipStartTime.end()) return 0.0f;
-        if ((currentTime - ftIt->second) > FLIP_WINDOW_SEC) return 0.0f;
+        // Underside contact: car center must be below ball center (with hitbox tolerance)
+        if (player.pos.z >= state.ball.pos.z + UNDERSIDE_TOLERANCE_UU) return 0.0f;
+
+        // Ball direction must change significantly — guards against grazes and non-redirecting contact
+        {
+            Vec curBallVel = state.ball.vel;
+            float curSpeed = curBallVel.Length();
+            if (curSpeed < MIN_POST_TOUCH_SPEED) return 0.0f;
+
+            if (state.prev) {
+                Vec prevBallVel = state.prev->ball.vel;
+                float prevSpeed = prevBallVel.Length();
+                if (prevSpeed >= MIN_PRE_TOUCH_SPEED) {
+                    float dirDot = prevBallVel.Normalized().Dot(curBallVel.Normalized());
+                    if (dirDot > REDIRECT_COS_MAX) return 0.0f; // <25° direction change — not a redirect
+                }
+            }
+        }
 
         cooldownRemaining[player.carId] = COOLDOWN_SEC;
         return 1.0f;
@@ -778,11 +835,12 @@ public:
 //
 //   Layer 1 — Predictive Positioning (continuous, no touch required):
 //     Scans the 4-second ball trajectory for an upcoming backboard bounce.
-//     If one is predicted within PRED_HORIZON (1.5s), finds the post-bounce
-//     rebound position (bounceTime + 0.4s) and gives an exponential proximity
-//     reward: PRED_PROX_REWARD * exp(-dist / PRED_DIST_SCALE) * dt.
-//     Only fires when rebound lands in the attacking half. Teaches the bot
-//     to anticipate and chase backboard rebounds proactively.
+//     If one is predicted within PRED_HORIZON (1.5s), finds the earliest
+//     slice the bot can physically reach (dist <= CAR_MAX_SPEED * timeAvail)
+//     and gives an exponential proximity reward toward that intercept point:
+//     PRED_PROX_REWARD * exp(-dist / PRED_DIST_SCALE) * dt.
+//     Only fires when the intercept point is in the attacking half. Teaches
+//     the bot to anticipate and chase backboard rebounds proactively.
 //
 //   Layer 2 — Trajectory Quality Multiplier (on touch reward only):
 //     After all existing gates pass, checks where the ball will be 0.75s
@@ -792,6 +850,24 @@ public:
 //
 //   All original gates (backboard timer, scoring zone, speed, alignment)
 //   are unchanged. RewardConfig.h/cpp require no changes.
+//
+// 2026-06-26 - Rev 3 (NJH) — intercept calc + timer bug fix
+//   Bug fix: currentTime was accumulated in GetReward(), which runs once
+//   per player per step. In 3v3 (6 players) the 2.5s backboard timeout
+//   was expiring in ~0.4s real time. Moved accumulation to PreStep().
+//
+//   Layer 1: replaced fixed POST_BOUNCE_SEC (0.4s) sample with a physical
+//   intercept calculation. Iterates slices from bounceSlice forward and
+//   takes the first where dist <= CAR_MAX_SPEED * timeAvail. Adapts to
+//   bot distance and ball speed; also skips the reward automatically when
+//   the bot cannot reach the rebound at all.
+//
+//   Layer 1: rebound alignment gate lowered 0.4 → 0.0. The velocity at
+//   bounceSlice is confirmed post-bounce (Y-reflected inside the tick loop
+//   before the slice is recorded). 0.4 was discarding valid sideways
+//   rebounds that are still redirectable; 0.0 only rejects rebounds heading
+//   straight back toward own goal. The inAttackHalf check on the intercept
+//   position handles the real quality filtering.
 // ============================================================================
 class BackboardReboundReward : public Reward {
 private:
@@ -799,7 +875,6 @@ private:
 
     // ---- Layer 1: predictive positioning constants ----
     static constexpr float PRED_HORIZON     = 1.5f;    // max lookahead for backboard bounce (s)
-    static constexpr float POST_BOUNCE_SEC  = 0.4f;    // seconds after bounce to sample rebound pos
     static constexpr float PRED_PROX_REWARD = 1.2f;    // per-second reward at zero distance
     static constexpr float PRED_DIST_SCALE  = 900.0f;  // exponential falloff distance (UU)
     static constexpr float PRED_SHAPING_CAP = 0.3f;    // max total shaping per player per bounce sequence
@@ -829,7 +904,7 @@ private:
         float oppY = (playerTeam == Team::BLUE) ? CommonValues::BACK_WALL_Y
             : -CommonValues::BACK_WALL_Y;
         // Close in Y, above ground a bit, but not too high (avoid ceiling bounces)
-        return (std::fabs(pos.y - oppY) < 300.0f && pos.z > 300.0f && pos.z < 2500.0f);
+        return (std::fabs(pos.y - oppY) < 300.0f && pos.z > 300.0f && pos.z < CommonValues::CEILING_Z - CommonValues::WALL_BOTTOM_RAMP_RADIUS_APPROX);
     }
 
     bool IsInScoringZone(const Vec& pos, Team playerTeam) const {
@@ -849,6 +924,7 @@ public:
     }
 
     virtual void PreStep(const GameState& state) override {
+        currentTime += (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
         _ballCache.Update(state);
 
         // Detect new bounce prediction sequence so per-player shaping caps reset.
@@ -870,7 +946,6 @@ public:
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
-        currentTime += dt;
 
         Team playerTeam = player.team;
         auto& bs = boardStates[player.carId];  // Per-player state
@@ -901,7 +976,7 @@ public:
                     Vec bouncePos = _ballCache.slices[bounceSlice].pos;
 
                     // FILTER: Only reward backboard bounces ABOVE goal height
-                    if (bouncePos.z < CommonValues::GOAL_HEIGHT) {
+                    if (bouncePos.z < (CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS)) {
                         return positioningReward;  // Low bounce, skip
                     }
 
@@ -913,17 +988,31 @@ public:
                     Vec toGoal = (oppGoal - bouncePos).Normalized();
                     float reboundAlignment = reboundVel.Normalized().Dot(toGoal);
 
-                    if (reboundAlignment < 0.4f) {
-                        return positioningReward;  // Rebound going away from goal, skip
+                    if (reboundAlignment < 0.0f) {
+                        return positioningReward;  // Rebound heading straight back toward own goal, skip
                     }
 
-                    // Sample where ball will be 0.4s after the backboard impact
-                    Vec reboundPos = _ballCache.AtTime(bounceTime + POST_BOUNCE_SEC).pos;
-                    // Only reward if the rebound lands in the attacking half
-                    bool inAttackHalf = (playerTeam == Team::BLUE) ? (reboundPos.y > 0.0f)
-                                                                    : (reboundPos.y < 0.0f);
+                    // Find the earliest slice after the bounce that the bot can physically reach.
+                    // This replaces a fixed 0.4s sample: it adapts to both bot position and ball speed.
+                    const float CAR_MAX_SPEED = 2300.0f;
+                    Vec interceptPos = {};
+                    bool foundIntercept = false;
+                    for (int j = bounceSlice; j < BallPred::NUM_SLICES; j++) {
+                        float timeAvail  = _ballCache.slices[j].t;
+                        float distToSlice = (player.pos - _ballCache.slices[j].pos).Length();
+                        if (distToSlice <= CAR_MAX_SPEED * timeAvail) {
+                            interceptPos = _ballCache.slices[j].pos;
+                            foundIntercept = true;
+                            break;
+                        }
+                    }
+                    if (!foundIntercept) return positioningReward;
+
+                    // Only reward if the intercept point is in the attacking half
+                    bool inAttackHalf = (playerTeam == Team::BLUE) ? (interceptPos.y > 0.0f)
+                                                                    : (interceptPos.y < 0.0f);
                     if (inAttackHalf) {
-                        float dist = (player.pos - reboundPos).Length();
+                        float dist = (player.pos - interceptPos).Length();
 
                         // BONUS: Height multiplier — higher backboard bounces are more valuable
                         float heightBonus = (bouncePos.z - CommonValues::GOAL_HEIGHT) / 1500.0f;
@@ -979,7 +1068,7 @@ public:
             return positioningReward;
 
         float alignScore = RS_CLAMP((align - 0.6f) / 0.4f, 0.0f, 1.0f);
-        float speedScore = RS_CLAMP(speed / 2300.0f, 0.0f, 1.0f);
+		float speedScore = RS_CLAMP(speed / (2300.0f * 1.2f), 0.0f, 1.0f); // 2300 is max car speed, 1.2x so it can be slightly faster than max car speed (boosted) = 2760.0f
 
         float reward = 4.0f * alignScore * speedScore;
 
@@ -2491,12 +2580,10 @@ public:
             Vec ballVel = state.ball.vel;
             float ballSpeed = ballVel.Length();
 
-            // Ball velocity BEFORE flick (from previous state)
-            Vec prevBallVel = state.prev->ball.vel;
-            float prevBallSpeed = prevBallVel.Length();
-
-            // ACCELERATION: Calculate velocity change imparted to ball
-            float velocityChange = ballSpeed - prevBallSpeed;
+            // ACCELERATION: Calculate velocity change imparted to ball (vector magnitude, not scalar diff)
+            // Scalar (ballSpeed - prevBallSpeed) = 0 for side flicks at constant speed — use |Δvel| instead
+            Vec dv = state.ball.vel - state.prev->ball.vel;
+            float velocityChange = dv.Length();
 
             // SPEED GATE: Reward based on acceleration, not absolute final speed
             if (velocityChange < 200.0f) {
@@ -2578,6 +2665,33 @@ public:
             float directionMultiplier = 1.0f + angleBonus; // 1.0x to 1.25x+
 
             float reward = speedReward * directionMultiplier;
+
+            // GOAL DIRECTION MULTIPLIER
+            // Slightly higher scale than DribbleFlickRewards (0.30f) since AdvancedFlick targets harder shots
+            Vec oppGoalPos = (player.team == Team::BLUE)
+                ? Vec(0.0f, CommonValues::BACK_WALL_Y, CommonValues::BALL_RADIUS)
+                : Vec(0.0f, -CommonValues::BACK_WALL_Y, CommonValues::BALL_RADIUS);
+            Vec toGoal = (oppGoalPos - state.ball.pos).Normalized();
+            float goalAlign = RS_MAX(0.0f, ballDir.Dot(toGoal));
+            const float GOAL_DIR_SCALE = 0.40f;
+            reward *= (1.0f + GOAL_DIR_SCALE * goalAlign);
+
+            // OPPONENT EVASION MULTIPLIER
+            // Rewards flicking ball away from opponents — the harder they are to reach it, the better
+            float totalEvasion = 0.0f;
+            int numOpps = 0;
+            for (const auto& opp : state.players) {
+                if (opp.team == player.team || opp.isDemoed) continue;
+                Vec ballToOpp = (opp.pos - state.ball.pos).Normalized();
+                float evasion = RS_MAX(0.0f, -ballDir.Dot(ballToOpp)); // positive = ball moving away from opp
+                totalEvasion += evasion;
+                numOpps++;
+            }
+            if (numOpps > 0) {
+                float avgEvasion = totalEvasion / numOpps;
+                const float EVASION_SCALE = 0.35f;
+                reward *= (1.0f + EVASION_SCALE * avgEvasion);
+            }
 
             // Consistency bonus (if ball is moving cleanly without spin)
             float angVelMag = state.ball.angVel.Length();
@@ -2931,21 +3045,16 @@ private:
 
     // Unified per-sequence state (shared across all modes)
     struct SequenceState {
-        int consecutiveAirTouches = 0;
         float accumReward = 0.0f;
         float timeElapsed = 0.0f;
         int touchCount = 0;
         bool exhausted = false;
-        float startHeight = 0.0f;
-        float maxHeight = 0.0f;
-        bool heightBonusApplied = false;
-        Vec firstTouchBallVel;
+        float startHeight = 0.0f;       // used only by EvaluateGeneral; kept for mode revival
         bool firstTouchProcessed = false;
         float boostAtStart     = -1.0f;  // boost level when sequence opened (-1 = unset)
         Vec   playerPosAtStart = {};     // player position when sequence opened
-        float timeSinceLastTouch = 0.0f; // seconds since last rewarded touch; 0 = sequence open
 
-        // NEW: Velocity tracking (distance-dependent requirements)
+        // Velocity tracking (distance-dependent requirements)
         float initialBallVelocity = 0.0f;       // Ball speed when sequence started
         float distanceToOpponentGoal = 0.0f;    // Distance from start position to opponent goal
 
@@ -2975,7 +3084,8 @@ private:
     // ========================================================================
 
     Mode DetectMode(const Player& player, const GameState& state) const {
-        // Always use OFFENSIVE mode — air dribbles should always target the opponent's goal.
+        // Always OFFENSIVE — EvaluateDefensive and EvaluateGeneral are dead code.
+        // If modes are revived, the switch in GetReward handles dispatch.
         return Mode::OFFENSIVE;
     }
 
@@ -3092,6 +3202,35 @@ private:
     }
 
     // ========================================================================
+    // HORIZONTAL VELOCITY CAP HELPER
+    // ========================================================================
+
+    // Soft penalty when the ball's horizontal (XY) speed exceeds 2300 uu/s —
+    // at that speed the car can't keep up and the air dribble collapses.
+    // Waived when the ball is within 3000 UU of the opposing goal (hard shot intent).
+    float GetHorizVelPenaltyMul(const Player& player, const GameState& state) const {
+        constexpr float HORIZ_VEL_LIMIT = 2300.0f;  // penalty ramp starts here
+        constexpr float HORIZ_VEL_MAX   = 3000.0f;  // 0.5x floor at this speed
+        constexpr float NEAR_GOAL_DIST  = 3000.0f;  // uu from goal_back — waive penalty
+        constexpr float MIN_MUL         = 0.5f;
+
+        Vec oppGoal = (player.team == Team::BLUE)
+            ? CommonValues::ORANGE_GOAL_BACK
+            : CommonValues::BLUE_GOAL_BACK;
+        if ((state.ball.pos - oppGoal).Length() <= NEAR_GOAL_DIST)
+            return 1.0f;
+
+        float horizSpeed = sqrtf(state.ball.vel.x * state.ball.vel.x +
+                                 state.ball.vel.y * state.ball.vel.y);
+        if (horizSpeed <= HORIZ_VEL_LIMIT)
+            return 1.0f;
+
+        float t = RS_CLAMP((horizSpeed - HORIZ_VEL_LIMIT) / (HORIZ_VEL_MAX - HORIZ_VEL_LIMIT),
+                           0.0f, 1.0f);
+        return 1.0f - (1.0f - MIN_MUL) * t;  // [1.0, 0.5]
+    }
+
+    // ========================================================================
     // OFFENSIVE MODE (based on AirDribbleAccuracyReward)
     // ========================================================================
 
@@ -3108,8 +3247,8 @@ private:
         const float DECAY_EXPONENT = 0.35f;       // was 0.5 — slower decay, later touches still pay
         const float ENTRY_BONUS = 0.45f;          // was 0.65 — reduced to match lower per-touch scale
         const float SECOND_TOUCH_BONUS = 0.65f;   // was 1.0 — reduced to match
-        const float MIN_DIR_MULTIPLIER = 0.30f;  // was 0.46 — stronger penalty for bad-direction touches
-        const float GOOD_DIR_THRESHOLD = 0.525f;
+        const float MIN_DIR_MULTIPLIER = 0.20f;  // tightened: stronger penalty for off-goal touches
+        const float GOOD_DIR_THRESHOLD = 0.65f;  // tightened: cos⁻¹(0.65)≈49° required for top tier
         const float ROUGH_TOUCH_THRESHOLD = 1200.0f;
         const float ROUGH_TOUCH_PENALTY = 0.7f;
         const float SCORING_ZONE_MIN = 250.0f;
@@ -3144,8 +3283,13 @@ private:
         float remainingCap = RS_MAX(0.0f, SEQ_REWARD_CAP - seq.accumReward);
         float rewardBeforeDir = RS_MIN(perTouch * decay, remainingCap);
 
-        // Directional multiplier (toward opponent goal)
-        Vec ballToGoal = (oppGoal - state.ball.pos).Normalized();
+        // Directional multiplier — aim at goal mouth center (Z≈321), not the back floor,
+        // so high-arc dribbles are correctly aligned toward the actual opening.
+        constexpr float GOAL_MOUTH_Z = 321.4f;  // 642.775 / 2
+        Vec oppGoalCenter = (player.team == Team::BLUE)
+            ? Vec(0.0f,  CommonValues::BACK_WALL_Y, GOAL_MOUTH_Z)
+            : Vec(0.0f, -CommonValues::BACK_WALL_Y, GOAL_MOUTH_Z);
+        Vec ballToGoal = (oppGoalCenter - state.ball.pos).Normalized();
         Vec ballVelDir = state.ball.vel.Normalized();
         float alignment = ballVelDir.Dot(ballToGoal);
         float dirMul = (alignment < 0.0f) ? MIN_DIR_MULTIPLIER * 0.4f :
@@ -3185,8 +3329,9 @@ private:
             seq.firstTouchProcessed = true;
         }
 
-        // Trajectory quality multiplier: boost touches that predict ball approaching goal
-        // 0.7x when drifting away, 1.0x neutral, up to 1.5x heading straight to goal
+        // Trajectory quality multiplier: boost touches that predict ball approaching goal.
+        // Combines Y-approach (Euclidean distance reduction) with X-centering (converging
+        // toward goal centerline). 0.7x drifting away/wide, 1.0x neutral, up to 1.5x on target.
         {
             const float TRAJ_CHECK_TIME = 0.75f;    // seconds ahead to sample
             const float TRAJ_SCALE      = 1200.0f;  // UU of approach for full factor
@@ -3197,6 +3342,14 @@ private:
                 float futureDist = (futurePos - oppGoal).Length();
                 float improvement = curDist - futureDist;  // positive = ball moving toward goal
                 float trajFactor = RS_CLAMP(improvement / TRAJ_SCALE, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+
+                // X-centering: reward trajectory converging toward goal center (X=0),
+                // penalize drifting toward the corner. Capped at ±0.1 to not dominate.
+                float curLateral    = fabsf(state.ball.pos.x);
+                float futureLateral = fabsf(futurePos.x);
+                float lateralFactor = RS_CLAMP((curLateral - futureLateral) / 1000.0f, -0.1f, 0.1f);
+                trajFactor = RS_CLAMP(trajFactor + lateralFactor, TRAJ_MIN_FACTOR, TRAJ_MAX_FACTOR);
+
                 reward *= (1.0f + trajFactor);
             }
         }
@@ -3247,19 +3400,11 @@ private:
             }
         }
 
-        // NEW: Apply velocity-distance multiplier to the reward
-        if (state.ball.vel.Length() > 0.0f) {
-            float velocityBonus = GetInitialVelocityBonus(
-                seq.initialBallVelocity,
-                seq.distanceToOpponentGoal
-            );
-            reward *= velocityBonus;
-        }
+        reward *= GetInitialVelocityBonus(seq.initialBallVelocity, seq.distanceToOpponentGoal);
 
         if (reward > EPS_REWARD_SKIP) {
             seq.accumReward += reward;
             seq.touchCount++;
-            seq.timeSinceLastTouch = 0.0f;   // restart gap timer — next touch measured from now
             offensiveCompletions.fetch_add(1);
             if (seq.accumReward >= SEQ_REWARD_CAP - 1e-3f) {
                 seq.exhausted = true;
@@ -3501,10 +3646,6 @@ private:
             heightBonus = HEIGHT_BONUS_MULTIPLIER_1;
         }
 
-        if (heightBonus > 1.0f && !seq.heightBonusApplied) {
-            seq.heightBonusApplied = true;
-        }
-
         reward *= heightBonus;
 
         // Trajectory quality multiplier: boost touches that predict ball approaching opponent goal
@@ -3605,7 +3746,8 @@ public:
             float step_integral = step_dist * avg_z;
             if (step_integral > 0.0f) {
                 for (auto& [id, seq] : sequenceStates)
-                    seq.travelIntegralAccum += step_integral;
+                    if (!seq.exhausted)
+                        seq.travelIntegralAccum += step_integral;
             }
         }
         _prevBallPos      = state.ball.pos;
@@ -3643,14 +3785,6 @@ public:
             return 0.0f;
         }
 
-        // Advance timeSinceLastTouch every frame the sequence is alive — touch or not.
-        // Must run before the ballTouchedStep early-return so non-touch frames still tick.
-        {
-            auto tIt = sequenceStates.find(id);
-            if (tIt != sequenceStates.end())
-                tIt->second.timeSinceLastTouch += dt;
-        }
-
         if (!state.prev || !player.ballTouchedStep) {
             return 0.0f;
         }
@@ -3658,19 +3792,15 @@ public:
         // Initialize sequence state if absent
         if (sequenceStates.find(id) == sequenceStates.end()) {
             sequenceStates[id] = SequenceState();
-            sequenceStates[id].startHeight      = state.ball.pos.z;
-            sequenceStates[id].maxHeight        = state.ball.pos.z;
-            sequenceStates[id].boostAtStart     = player.boost;
-            sequenceStates[id].playerPosAtStart = player.pos;
-
-            // NEW: Track initial ball velocity and distance to opponent goal
-            sequenceStates[id].initialBallVelocity = state.ball.vel.Length();
+            sequenceStates[id].startHeight            = state.ball.pos.z;
+            sequenceStates[id].boostAtStart           = player.boost;
+            sequenceStates[id].playerPosAtStart       = player.pos;
+            sequenceStates[id].initialBallVelocity    = state.ball.vel.Length();
             sequenceStates[id].distanceToOpponentGoal = GetDistanceToOpponentGoal(player, state);
         }
 
         SequenceState& seq = sequenceStates[id];
         seq.timeElapsed += dt;
-        seq.consecutiveAirTouches++;
 
         if (seq.exhausted) {
             return 0.0f;
@@ -3698,6 +3828,9 @@ public:
         if (reward > EPS_REWARD_SKIP) {
             // Underside quality multiplier — rewards more vertical (beneath-ball) approach
             reward *= undersideMul;
+
+            // Horizontal speed cap: penalize ball horiz speed > 1900 uu/s (car can't keep up)
+            reward *= GetHorizVelPenaltyMul(player, state);
 
             // Ball travel integral bonus (adapted from BallTravelReward, rlgym-tools):
             // https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/ball_travel_reward.py
@@ -6457,6 +6590,12 @@ public:
                         s.phaseTimer = 0.0f;
                     }
                 }
+                // Pre-positioning shaping: nudge bot toward predicted rebound before ball hits surface.
+                // Half strength vs AWAITING_FINISH since prediction may drift.
+                if (s.reboundKnown) {
+                    float dist  = (player.pos - s.reboundPos).Length();
+                    s.posReward = 0.5f * PROX_REWARD_PER_SEC * expf(-dist / PROX_DIST_SCALE) * dt;
+                }
                 continue;
             }
 
@@ -6471,6 +6610,14 @@ public:
                 if (s.reboundKnown) {
                     float dist  = (player.pos - s.reboundPos).Length();
                     s.posReward = PROX_REWARD_PER_SEC * expf(-dist / PROX_DIST_SCALE) * dt;
+
+                    // Velocity-toward-rebound bonus: explicitly trains boosting toward intercept point.
+                    // Only counts when meaningfully far (>200 UU) to avoid noise at contact.
+                    if (dist > 200.0f) {
+                        Vec   toReb     = (s.reboundPos - player.pos).Normalized();
+                        float velToward = RS_MAX(0.0f, player.vel.Dot(toReb));
+                        s.posReward    += 0.15f * RS_CLAMP(velToward / CommonValues::CAR_MAX_SPEED, 0.0f, 1.0f) * dt;
+                    }
                 }
 
                 // Aerial rebound touch → issue finish reward
@@ -6841,280 +6988,679 @@ public:
 
 // ============================================================================
 // PossessionControlReward
-// Rewards maintaining possession and penalizes giving it away
-// Tracks both individual and team possession duration
+// Rewards possession quality, penalises giveaways, credits team support.
+// Rev 2.0: per-player + GlobalStepState architecture; bug fix for giveaway
+// detection; PossessionControlConfig; static-atomic metrics.
+// Run 2 flags (enableFieldZoneWeight, enableDenial) compiled in, disabled
+// by default — flip them after Run 1 is validated on W&B.
 // ============================================================================
+
+struct PossessionControlConfig {
+    // --- possession detection ---
+    float possessionDistance      = 250.0f;
+    float possessionVelAlignment  = 0.30f;
+    float baseTouchTimeout        = 2.0f;
+    // --- duration shaping (continuous) ---
+    float teamPossDurationGate    = 0.5f;
+    float teamPossDurationFull    = 5.0f;
+    float teamDurationWeight      = 0.05f;
+    float indivPossDurationGate   = 0.3f;
+    float indivPossDurationFull   = 3.0f;
+    float indivDurationWeight     = 0.08f;
+    // --- giveaway penalties (event) ---
+    float giveawayPenalty         = -1.5f;
+    float dangerGiveawayPenalty   = -2.5f;
+    float dangerBallSpeed         = 1000.0f;
+    float dangerDirThreshold      = -0.30f;
+    // --- smart-play bonuses ---
+    float forwardProgressThresh   = 500.0f;
+    float forwardProgressBonus    = 0.10f;
+    float tightControlDist        = 150.0f;
+    float tightControlBonus       = 0.05f;
+    // --- team support ---
+    float supportMinDist          = 800.0f;
+    float supportMaxDist          = 2000.0f;
+    float supportBonus            = 0.03f;
+    // --- [R2] field-zone weighting ---
+    bool  enableFieldZoneWeight   = false;
+    float defHalfPossMultiplier   = 0.40f;
+    float atkHalfPossMultiplier   = 1.30f;
+    // --- [R2] turnover denial ---
+    bool  enableDenial            = false;
+    float denialReward            = 0.6f;
+    float denialBallSpeedDelta    = 700.0f;
+    float denialChallengeDist     = 400.0f;
+    float denialCooldownSec       = 1.5f;
+};
+
 class PossessionControlReward : public Reward {
 private:
-    struct PossessionMemory {
-        Team lastPossessingTeam = Team::BLUE;
-        uint32_t lastPossessingPlayer = 0;
-        float possessionDuration = 0.0f;
-        float teamPossessionDuration = 0.0f;
-        bool hadPossession = false;
-        Vec lastBallVel;
+    PossessionControlConfig _cfg;
+
+    // Per-player state — written in PreStep, read-only in GetReward
+    struct PlayerPossState {
         float timeSinceLastTouch = 999.0f;
-        Vec lastTouchBallPos;  // Track ball position at last touch for distance-based timeout
+        float indivPossDuration  = 0.0f;
+        Vec   lastTouchBallPos;
+        float denialCooldown     = 0.0f;
     };
+    std::map<uint32_t, PlayerPossState> _perPlayer;
 
-    // Per-player possession state (immutable in GetReward, updated in PreStep)
-    std::map<uint32_t, PossessionMemory> playerMemory;
-    PossessionMemory globalMemory;  // Tracks team-level possession state
+    // Global step state — written once in PreStep, read-only in GetReward.
+    // prevPossTeam/prevPlayerId hold the PREVIOUS step's values so giveaway
+    // detection can compare prev vs curr correctly.
+    struct GlobalStepState {
+        Team     prevPossTeam   = Team::BLUE;
+        Team     currPossTeam   = Team::BLUE;
+        uint32_t prevPlayerId   = 0;
+        uint32_t currPlayerId   = 0;
+        Vec      prevBallVel;
+        float    teamPossDuration[2] = {};  // [0]=BLUE, [1]=ORANGE
+        bool     denialFired    = false;
+        uint32_t denialPlayerId = 0;
+    };
+    GlobalStepState _globalStep;
 
-    // Possession detection parameters
-    const float POSSESSION_DISTANCE = 250.0f;  // Max distance to ball to have possession
-    const float POSSESSION_VEL_ALIGNMENT = 0.3f;  // Min velocity alignment to have control
-    const float TOUCH_TIMEOUT = 2.0f;  // Time after touch to still consider possession
+    // Static atomic metrics — follow AirDribbleAccuracyReward idiom
+    inline static std::atomic<long long> s_activationFrames{ 0 };
+    inline static std::atomic<long long> s_totalFrames{ 0 };
+    inline static std::atomic<long long> s_rewardMilli{ 0 };
+    inline static std::atomic<long long> s_teamPossDurMilli{ 0 };
+    inline static std::atomic<long long> s_teamPossFrames{ 0 };
+    inline static std::atomic<long long> s_giveawayEvents{ 0 };
+    inline static std::atomic<long long> s_dangerGiveawayEvents{ 0 };
+    inline static std::atomic<long long> s_denialEvents{ 0 };
+    inline static std::atomic<long long> s_atkHalfPossFrames{ 0 };
+    inline static std::atomic<long long> s_possFramesTotal{ 0 };
 
-    // Check if a player has possession of the ball
     bool HasPossession(const Player& player, const GameState& state) const {
-        float distToBall = player.pos.Dist(state.ball.pos);
-
-        // Must be close to ball
-        if (distToBall > POSSESSION_DISTANCE) {
+        if (player.pos.Dist(state.ball.pos) > _cfg.possessionDistance)
             return false;
-        }
-
-        // Criteria 1: Just touched ball (most recent frame)
-        if (player.ballTouchedStep) {
+        if (player.ballTouchedStep)
             return true;
-        }
-
-        // Criteria 2: Moving together (both have significant velocity, aligned)
-        if (player.vel.Length() > 100.0f && state.ball.vel.Length() > 100.0f) {
-            Vec playerDir = player.vel.Normalized();
-            Vec ballDir = state.ball.vel.Normalized();
-            if (playerDir.Dot(ballDir) > POSSESSION_VEL_ALIGNMENT) {
+        if (player.vel.Length() > 100.0f && state.ball.vel.Length() > 100.0f)
+            if (player.vel.Normalized().Dot(state.ball.vel.Normalized()) > _cfg.possessionVelAlignment)
                 return true;
-            }
-        }
-
-        // Criteria 3: Stationary together (both moving slowly, can still control)
-        // Supports static dribbles and low-speed possession
-        if (player.vel.Length() < 100.0f && state.ball.vel.Length() < 200.0f) {
-            return true;  // Close & both slow = possession
-        }
-
+        if (player.vel.Length() < 100.0f && state.ball.vel.Length() < 200.0f)
+            return true;
         return false;
     }
 
-    // Calculate dynamic touch timeout based on ball distance traveled since last touch
-    // Base timeout of 2.0s, extended by distance ball has traveled
-    float GetDynamicTouchTimeout(const PossessionMemory& playerMem, const GameState& state) const {
-        float baseTouchTimeout = 2.0f;
-        float distBallTraveled = playerMem.lastTouchBallPos.Dist(state.ball.pos);
-
-        // Every 500 UU of distance adds 0.5s to timeout (up to 4.0s total)
-        // Encourages credit for ball traveling far
-        float distanceBonus = RS_MIN(distBallTraveled / 500.0f * 0.5f, 2.0f);
-        return baseTouchTimeout + distanceBonus;
+    float GetDynamicTouchTimeout(const PlayerPossState& ps, const GameState& state) const {
+        float dist = ps.lastTouchBallPos.Dist(state.ball.pos);
+        return _cfg.baseTouchTimeout + RS_MIN(dist / 500.0f * 0.5f, 2.0f);
     }
 
-    // Find which team has possession
+    // Only called from PreStep — fallback carries forward previous step's team
     Team GetPossessingTeam(const GameState& state, uint32_t& outPlayerId) const {
-        Team possessingTeam = Team::BLUE;
-        uint32_t possessingPlayer = 0;
-        float closestDist = 999999.0f;
-        bool anyPossession = false;
-
+        Team     bestTeam   = Team::BLUE;
+        uint32_t bestPlayer = 0;
+        float    bestDist   = 999999.0f;
+        bool     anyPoss    = false;
         for (const auto& p : state.players) {
             if (HasPossession(p, state)) {
-                float dist = p.pos.Dist(state.ball.pos);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    possessingTeam = p.team;
-                    possessingPlayer = p.carId;
-                    anyPossession = true;
-                }
+                float d = p.pos.Dist(state.ball.pos);
+                if (d < bestDist) { bestDist = d; bestTeam = p.team; bestPlayer = p.carId; anyPoss = true; }
             }
         }
-
-        outPlayerId = possessingPlayer;
-        return anyPossession ? possessingTeam : globalMemory.lastPossessingTeam;
+        outPlayerId = bestPlayer;
+        return anyPoss ? bestTeam : _globalStep.currPossTeam;
     }
 
 public:
+    struct Metrics {
+        double    activationRate;
+        double    meanValue;
+        double    teamPossDurationAvg;
+        long long giveawayEvents;
+        double    dangerGiveawayRatio;
+        long long denialEvents;
+        double    atkHalfPossShare;
+    };
+
+    static Metrics GetAndResetMetrics() {
+        long long activation = s_activationFrames.exchange(0);
+        long long total      = s_totalFrames.exchange(0);
+        long long rewardM    = s_rewardMilli.exchange(0);
+        long long possDurM   = s_teamPossDurMilli.exchange(0);
+        long long possFrames = s_teamPossFrames.exchange(0);
+        long long giveaways  = s_giveawayEvents.exchange(0);
+        long long danger     = s_dangerGiveawayEvents.exchange(0);
+        long long denial     = s_denialEvents.exchange(0);
+        long long atkHalf    = s_atkHalfPossFrames.exchange(0);
+        long long possTotal  = s_possFramesTotal.exchange(0);
+        Metrics m{};
+        m.activationRate      = total      > 0 ? (double)activation / total          : 0.0;
+        m.meanValue           = total      > 0 ? (rewardM / 1000.0) / total          : 0.0;
+        m.teamPossDurationAvg = possFrames > 0 ? (possDurM / 1000.0) / possFrames    : 0.0;
+        m.giveawayEvents      = giveaways;
+        m.dangerGiveawayRatio = giveaways  > 0 ? (double)danger / giveaways          : 0.0;
+        m.denialEvents        = denial;
+        m.atkHalfPossShare    = possTotal  > 0 ? (double)atkHalf / possTotal         : 0.0;
+        return m;
+    }
+
+    PossessionControlReward(PossessionControlConfig cfg = {}) : _cfg(cfg) {}
+
     virtual void Reset(const GameState& initialState) override {
-        playerMemory.clear();
-        globalMemory = PossessionMemory();
+        _perPlayer.clear();
+        _globalStep = GlobalStepState{};
     }
 
     virtual void PreStep(const GameState& state) override {
-        // Update possession state BEFORE GetReward is called
-        // This ensures thread-safe state updates
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
 
-        // Determine current possession holder
-        uint32_t currentPossessor = 0;
-        Team currentPossessingTeam = GetPossessingTeam(state, currentPossessor);
+        // STEP 1: Capture previous step's possession BEFORE overwriting (core bug fix)
+        _globalStep.prevPossTeam = _globalStep.currPossTeam;
+        _globalStep.prevPlayerId  = _globalStep.currPlayerId;
 
-        // Update all players' time-since-touch counters
+        // STEP 2: Compute this step's possession
+        uint32_t currPlayerId = 0;
+        Team currTeam = GetPossessingTeam(state, currPlayerId);
+        _globalStep.currPossTeam = currTeam;
+        _globalStep.currPlayerId  = currPlayerId;
+
+        // STEP 3: Update team possession duration
+        int idx = (currTeam == Team::BLUE ? 0 : 1);
+        _globalStep.teamPossDuration[idx]     += dt;
+        _globalStep.teamPossDuration[1 - idx]  = 0.0f;
+
+        // STEP 4: Update per-player state
         for (const auto& player : state.players) {
-            if (!playerMemory.count(player.carId)) {
-                playerMemory[player.carId] = PossessionMemory();
-            }
-
-            auto& mem = playerMemory[player.carId];
-
+            auto& ps = _perPlayer[player.carId];
             if (player.ballTouchedStep) {
-                mem.timeSinceLastTouch = 0.0f;
-                mem.lastTouchBallPos = state.ball.pos;  // Record ball position at touch for dynamic timeout
+                ps.timeSinceLastTouch = 0.0f;
+                ps.lastTouchBallPos   = state.ball.pos;
             } else {
-                mem.timeSinceLastTouch += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
+                ps.timeSinceLastTouch += dt;
             }
+            if (HasPossession(player, state)) ps.indivPossDuration += dt;
+            else                              ps.indivPossDuration  = 0.0f;
+            ps.denialCooldown = RS_MAX(0.0f, ps.denialCooldown - dt);  // tick unconditionally
+        }
 
-            // Track individual possession
-            bool playerHasPossession = HasPossession(player, state);
-            if (playerHasPossession) {
-                mem.possessionDuration += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
-                mem.hadPossession = true;
-            } else {
-                mem.possessionDuration = 0.0f;
+        // STEP 5: Turnover denial detection (Run 2 — no-op when disabled)
+        _globalStep.denialFired    = false;
+        _globalStep.denialPlayerId = 0;
+        if (_cfg.enableDenial && _globalStep.prevPossTeam != currTeam) {
+            for (const auto& player : state.players) {
+                if (player.team == _globalStep.prevPossTeam) continue;
+                auto& ps = _perPlayer[player.carId];
+                if (ps.denialCooldown > 0.0f) continue;
+                bool touch      = player.ballTouchedStep;
+                bool speedDelta = (state.ball.vel - _globalStep.prevBallVel).Length() >= _cfg.denialBallSpeedDelta;
+                bool withinDist = player.pos.Dist(state.ball.pos) <= _cfg.denialChallengeDist;
+                if (touch || (speedDelta && withinDist)) {
+                    _globalStep.denialFired    = true;
+                    _globalStep.denialPlayerId = player.carId;
+                    ps.denialCooldown          = _cfg.denialCooldownSec;
+                    s_denialEvents.fetch_add(1);
+                    break;
+                }
             }
         }
 
-        // Update global (team-level) possession state
-        if (currentPossessingTeam == globalMemory.lastPossessingTeam) {
-            globalMemory.teamPossessionDuration += state.deltaTime > 0.0f ? state.deltaTime : 0.016f;
-        } else {
-            globalMemory.teamPossessionDuration = 0.0f;
-        }
-
-        // Store current possession info for next frame's transition detection
-        globalMemory.lastPossessingTeam = currentPossessingTeam;
-        globalMemory.lastPossessingPlayer = currentPossessor;
-        globalMemory.lastBallVel = state.ball.vel;
+        // STEP 6: Save ball velocity for next step's denial detection
+        _globalStep.prevBallVel = state.ball.vel;
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        auto psIt = _perPlayer.find(player.carId);
+        if (psIt == _perPlayer.end()) return 0.0f;
+        const PlayerPossState& ps = psIt->second;
+
         float reward = 0.0f;
 
-        // Read state from PreStep (thread-safe, immutable)
-        uint32_t currentPossessor = 0;
-        Team currentPossessingTeam = GetPossessingTeam(state, currentPossessor);
-        bool playerHasPossession = HasPossession(player, state);
+        // Read-only over PreStep state
+        Team  currPossTeam  = _globalStep.currPossTeam;
+        bool  playerHasPoss = HasPossession(player, state);
+        float ballSpeed     = state.ball.vel.Length();
+        float speedMod      = RS_MAX(0.3f, 1.0f - (ballSpeed / 8000.0f));
+        int   teamIdx       = (player.team == Team::BLUE ? 0 : 1);
+        float teamPossDur   = _globalStep.teamPossDuration[teamIdx];
 
-        // P1-7: Ball speed modulation - reduce possession rewards for high-speed balls
-        // High-speed balls (6000+ UU/s = 300+ kph) are harder to control
-        // Low-speed balls (< 1000 UU/s = 50 kph) are most controllable
-        float ballSpeed = state.ball.vel.Length();
-        float speedModulation = RS_MAX(0.3f, 1.0f - (ballSpeed / 8000.0f));  // 1.0 at 0 kph → 0.3 at 300+ kph
-
-        // Get this player's memory (populated in PreStep)
-        auto playerMemIt = playerMemory.find(player.carId);
-        if (playerMemIt == playerMemory.end()) {
-            return 0.0f;  // No state yet, return neutral
-        }
-        const auto& mem = playerMemIt->second;
-        float timeSinceLastTouch = mem.timeSinceLastTouch;
-        float possessionDuration = mem.possessionDuration;
-        float teamPossessionDuration = globalMemory.teamPossessionDuration;
-
-        // ====================================================================
-        // 1. POSSESSION DURATION REWARDS (read-only from PreStep state)
-        // ====================================================================
-
-        // Team possession tracking (computed in PreStep)
-        if (currentPossessingTeam == player.team && teamPossessionDuration > 0.5f) {
-            // Continuous reward for maintaining team possession (modulated by ball speed)
-            float durationBonus = RS_CLAMP(teamPossessionDuration / 5.0f, 0.0f, 1.0f);
-            reward += 0.05f * durationBonus * speedModulation;
-        }
-
-        // Individual possession tracking (computed in PreStep)
-        if (playerHasPossession && possessionDuration > 0.3f) {
-            // Continuous reward for maintaining individual possession (modulated by ball speed)
-            float durationBonus = RS_CLAMP(possessionDuration / 3.0f, 0.0f, 1.0f);
-            reward += 0.08f * durationBonus * speedModulation;
+        // [R2] Field-zone multiplier (1.0 when disabled)
+        float zoneMult        = 1.0f;
+        float attackProgress  = 0.0f;
+        if (_cfg.enableFieldZoneWeight) {
+            float rawY   = (player.team == Team::BLUE) ? state.ball.pos.y : -state.ball.pos.y;
+            attackProgress = RS_CLAMP(rawY / 5120.0f, -1.0f, 1.0f);
+            float t  = (attackProgress + 1.0f) / 2.0f;
+            zoneMult = _cfg.defHalfPossMultiplier + t * (_cfg.atkHalfPossMultiplier - _cfg.defHalfPossMultiplier);
         }
 
         // ====================================================================
-        // 2. POSSESSION CHANGE DETECTION (GIVEAWAYS) - Read-only
+        // 1. POSSESSION DURATION (team + individual)
         // ====================================================================
+        if (currPossTeam == player.team && teamPossDur > _cfg.teamPossDurationGate) {
+            float dur = RS_CLAMP(teamPossDur / _cfg.teamPossDurationFull, 0.0f, 1.0f);
+            reward += _cfg.teamDurationWeight * dur * speedMod * zoneMult;
+        }
+        if (playerHasPoss && ps.indivPossDuration > _cfg.indivPossDurationGate) {
+            float dur = RS_CLAMP(ps.indivPossDuration / _cfg.indivPossDurationFull, 0.0f, 1.0f);
+            reward += _cfg.indivDurationWeight * dur * speedMod * zoneMult;
+        }
 
-        // Detect possession change to opponent team (from PreStep state)
-        if (globalMemory.lastPossessingTeam != currentPossessingTeam) {
-            // Check if this player gave away possession
-            float dynamicTimeout = GetDynamicTouchTimeout(mem, state);  // Scale timeout by ball distance traveled
-            if (globalMemory.lastPossessingPlayer == player.carId &&
-                timeSinceLastTouch < dynamicTimeout) {
-
-                // Opponent goal direction
+        // ====================================================================
+        // 2. GIVEAWAY DETECTION (possession flipped to opponent this step)
+        // prevPossTeam vs currPossTeam are preserved from the PREVIOUS step,
+        // so this comparison is now correct (was always false before Rev 2.0).
+        // ====================================================================
+        if (_globalStep.prevPossTeam != currPossTeam &&
+            _globalStep.prevPlayerId != 0 &&
+            _globalStep.prevPlayerId == player.carId) {
+            if (ps.timeSinceLastTouch < GetDynamicTouchTimeout(ps, state)) {
                 Vec oppGoal = (player.team == Team::BLUE)
                     ? CommonValues::ORANGE_GOAL_CENTER
                     : CommonValues::BLUE_GOAL_CENTER;
-                Vec toOppGoal = (oppGoal - state.ball.pos).Normalized();
-
-                // Check if ball is going toward opponent (good) or back to us (bad)
-                float ballDirectionQuality = state.ball.vel.Dot(toOppGoal);
-
-                if (ballDirectionQuality > 0.0f) {
-                    // Ball going toward opponent = good loss (intentional clear/shot)
-                    reward += 0.0f;  // Neutral
-                } else {
-                    // Ball going back toward our goal = BAD GIVEAWAY
-                    float giveawayPenalty = -1.5f;
-
-                    // Worse penalty if ball is moving fast back at us
-                    if (state.ball.vel.Length() > 1000.0f && ballDirectionQuality < -0.3f) {
-                        giveawayPenalty = -2.5f;  // Severe penalty for dangerous giveaway
-                    }
-
-                    reward += giveawayPenalty;
+                float ballDirQuality = state.ball.vel.Dot((oppGoal - state.ball.pos).Normalized());
+                if (ballDirQuality <= 0.0f) {
+                    float penalty = _cfg.giveawayPenalty;
+                    bool  isDanger = (ballSpeed > _cfg.dangerBallSpeed && ballDirQuality < _cfg.dangerDirThreshold);
+                    if (isDanger) penalty = _cfg.dangerGiveawayPenalty;
+                    reward += penalty;
+                    s_giveawayEvents.fetch_add(1);
+                    if (isDanger) s_dangerGiveawayEvents.fetch_add(1);
                 }
             }
         }
 
         // ====================================================================
-        // 3. SMART POSSESSION PLAY BONUSES (read-only from PreStep state)
+        // 3. SMART PLAY BONUSES (possession + forward movement / tight control)
         // ====================================================================
-
-        if (playerHasPossession && possessionDuration > 0.5f) {
-            // Bonus for maintaining possession while moving toward opponent goal
+        if (playerHasPoss && ps.indivPossDuration > 0.5f) {
             Vec oppGoal = (player.team == Team::BLUE)
                 ? CommonValues::ORANGE_GOAL_CENTER
                 : CommonValues::BLUE_GOAL_CENTER;
-            Vec toOppGoal = (oppGoal - player.pos).Normalized();
+            if (player.vel.Dot((oppGoal - player.pos).Normalized()) > _cfg.forwardProgressThresh)
+                reward += _cfg.forwardProgressBonus * speedMod;
+            if (player.pos.Dist(state.ball.pos) < _cfg.tightControlDist)
+                reward += _cfg.tightControlBonus * speedMod;
+        }
 
-            float forwardProgress = player.vel.Dot(toOppGoal);
-            if (forwardProgress > 500.0f) {
-                reward += 0.1f * speedModulation;  // Bonus for possession + forward movement (modulated by ball speed)
-            }
-
-            // Bonus for keeping ball close (tight dribble control)
+        // ====================================================================
+        // 4. TEAM SUPPORT (flat bonus — off-ball, support band, ahead of ball)
+        // ====================================================================
+        if (!playerHasPoss && currPossTeam == player.team) {
             float distToBall = player.pos.Dist(state.ball.pos);
-            if (distToBall < 150.0f) {
-                reward += 0.05f * speedModulation;  // Tight control bonus (modulated by ball speed)
+            if (distToBall > _cfg.supportMinDist && distToBall < _cfg.supportMaxDist) {
+                Vec oppGoal = (player.team == Team::BLUE)
+                    ? CommonValues::ORANGE_GOAL_CENTER
+                    : CommonValues::BLUE_GOAL_CENTER;
+                if (player.pos.Dist(oppGoal) < state.ball.pos.Dist(oppGoal))
+                    reward += _cfg.supportBonus;
             }
         }
 
         // ====================================================================
-        // 4. TEAM POSSESSION SUPPORT (read-only from PreStep state)
+        // 5. [R2] TURNOVER DENIAL (event-gated, one-shot per disruptor)
         // ====================================================================
+        if (_cfg.enableDenial && _globalStep.denialFired &&
+            _globalStep.denialPlayerId == player.carId) {
+            reward += _cfg.denialReward;
+        }
 
-        // Reward for being in support position when teammate has possession (P1-6: scaled by quality)
-        if (!playerHasPossession && currentPossessingTeam == player.team) {
-            // Check if we're in a good support position (not too close, not too far)
-            float distToBall = player.pos.Dist(state.ball.pos);
-            if (distToBall > 800.0f && distToBall < 2000.0f) {
-                // Ideal support distance range (1500 UU is optimal)
-                float optimalDist = 1500.0f;
-                float distFromOptimal = fabsf(distToBall - optimalDist);
-                float distanceQuality = RS_MAX(0.0f, 1.0f - (distFromOptimal / 700.0f));  // Peak at 1500 UU
+        // Metrics
+        s_totalFrames.fetch_add(1);
+        if (fabsf(reward) > 1e-3f) s_activationFrames.fetch_add(1);
+        s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
+        if (currPossTeam == player.team && teamPossDur > 0.0f) {
+            s_teamPossDurMilli.fetch_add(static_cast<long long>(teamPossDur * 1000.0f));
+            s_teamPossFrames.fetch_add(1);
+            if (_cfg.enableFieldZoneWeight) {
+                s_possFramesTotal.fetch_add(1);
+                if (attackProgress > 0.0f) s_atkHalfPossFrames.fetch_add(1);
+            }
+        }
 
-                // Check if we're ahead of the ball (offensive support)
+        return reward;
+    }
+};
+
+// ============================================================================
+// PossessionControlRewardv2  (threat-gated possession)
+// Copy of PossessionControlReward with two design changes:
+//   * Duration channels (team + individual) and the forward-progress bonus now
+//     ONLY pay while BallThreatActive() is true — i.e. the ball is being carried
+//     at pace into the attacking third, toward the opponent goal. This kills the
+//     "hold / shuffle side-to-side for reward" stalling pattern.
+//   * The unconditional tight-control bonus is DELETED (it paid regardless of
+//     what the car was doing with the ball — the single biggest stall farm).
+// Giveaway detection, team-support, and denial channels are unchanged.
+// Architecture (PreStep/GetReward split, per-player + GlobalStepState, static
+// atomic metrics) is identical to v1. Do NOT edit the v1 class above.
+// ============================================================================
+
+struct PossessionControlV2Config {
+    // --- possession detection ---
+    float possessionDistance      = 250.0f;
+    float possessionVelAlignment  = 0.30f;
+    float baseTouchTimeout        = 2.0f;
+    // --- duration shaping (continuous, THREAT-GATED in v2) ---
+    float teamPossDurationGate    = 0.5f;
+    float teamPossDurationFull    = 5.0f;
+    float teamDurationWeight      = 0.05f;
+    float indivPossDurationGate   = 0.3f;
+    float indivPossDurationFull   = 3.0f;
+    float indivDurationWeight     = 0.08f;
+    // --- giveaway penalties (event) ---
+    float giveawayPenalty         = -1.5f;
+    float dangerGiveawayPenalty   = -2.5f;
+    float dangerBallSpeed         = 1000.0f;
+    float dangerDirThreshold      = -0.30f;
+    // --- smart-play forward-progress bonus (folded into the threat gate in v2) ---
+    float forwardProgressBonus    = 0.10f;
+    // (tightControlDist / tightControlBonus intentionally removed — deleted channel)
+    // --- team support ---
+    float supportMinDist          = 800.0f;
+    float supportMaxDist          = 2000.0f;
+    float supportBonus            = 0.03f;
+    // --- ball-threat gate (v2) ---
+    float attackZoneDist          = 4000.0f;  // dist from opp GOAL_BACK; ~attacking-third-and-in
+    float ballThreatMinSpeed      = 600.0f;   // uu/s — real pace, not drift
+    float ballThreatMinAlignment  = 0.30f;    // matches possessionVelAlignment / IsShotOnGoal convention
+    // --- field-zone weighting (kept from v1, disabled by default) ---
+    bool  enableFieldZoneWeight   = false;
+    float defHalfPossMultiplier   = 0.40f;
+    float atkHalfPossMultiplier   = 1.30f;
+    // --- turnover denial (kept from v1, disabled by default) ---
+    bool  enableDenial            = false;
+    float denialReward            = 0.6f;
+    float denialBallSpeedDelta    = 700.0f;
+    float denialChallengeDist     = 400.0f;
+    float denialCooldownSec       = 1.5f;
+};
+
+class PossessionControlRewardv2 : public Reward {
+private:
+    PossessionControlV2Config _cfg;
+
+    // Per-player state — written in PreStep, read-only in GetReward
+    struct PlayerPossState {
+        float timeSinceLastTouch = 999.0f;
+        float indivPossDuration  = 0.0f;
+        Vec   lastTouchBallPos;
+        float denialCooldown     = 0.0f;
+    };
+    std::map<uint32_t, PlayerPossState> _perPlayer;
+
+    // Global step state — written once in PreStep, read-only in GetReward.
+    struct GlobalStepState {
+        Team     prevPossTeam   = Team::BLUE;
+        Team     currPossTeam   = Team::BLUE;
+        uint32_t prevPlayerId   = 0;
+        uint32_t currPlayerId   = 0;
+        Vec      prevBallVel;
+        float    teamPossDuration[2] = {};  // [0]=BLUE, [1]=ORANGE
+        bool     threatActive   = false;    // v2: computed once per tick
+        bool     denialFired    = false;
+        uint32_t denialPlayerId = 0;
+    };
+    GlobalStepState _globalStep;
+
+    // Static atomic metrics — follow AirDribbleAccuracyReward idiom
+    inline static std::atomic<long long> s_activationFrames{ 0 };
+    inline static std::atomic<long long> s_totalFrames{ 0 };
+    inline static std::atomic<long long> s_rewardMilli{ 0 };
+    inline static std::atomic<long long> s_giveawayEvents{ 0 };
+    inline static std::atomic<long long> s_dangerGiveawayEvents{ 0 };
+    inline static std::atomic<long long> s_denialEvents{ 0 };
+    // v2-specific: threat gate + gated duration channel
+    inline static std::atomic<long long> s_possControlFrames{ 0 };  // denom: frames where player's team possesses
+    inline static std::atomic<long long> s_threatActiveFrames{ 0 }; // of those, how many had threatActive
+    inline static std::atomic<long long> s_durBonusMilli{ 0 };      // sum of the (gated) duration-channel reward
+
+    bool HasPossession(const Player& player, const GameState& state) const {
+        if (player.pos.Dist(state.ball.pos) > _cfg.possessionDistance)
+            return false;
+        if (player.ballTouchedStep)
+            return true;
+        if (player.vel.Length() > 100.0f && state.ball.vel.Length() > 100.0f)
+            if (player.vel.Normalized().Dot(state.ball.vel.Normalized()) > _cfg.possessionVelAlignment)
+                return true;
+        if (player.vel.Length() < 100.0f && state.ball.vel.Length() < 200.0f)
+            return true;
+        return false;
+    }
+
+    float GetDynamicTouchTimeout(const PlayerPossState& ps, const GameState& state) const {
+        float dist = ps.lastTouchBallPos.Dist(state.ball.pos);
+        return _cfg.baseTouchTimeout + RS_MIN(dist / 500.0f * 0.5f, 2.0f);
+    }
+
+    // Only called from PreStep — fallback carries forward previous step's team
+    Team GetPossessingTeam(const GameState& state, uint32_t& outPlayerId) const {
+        Team     bestTeam   = Team::BLUE;
+        uint32_t bestPlayer = 0;
+        float    bestDist   = 999999.0f;
+        bool     anyPoss    = false;
+        for (const auto& p : state.players) {
+            if (HasPossession(p, state)) {
+                float d = p.pos.Dist(state.ball.pos);
+                if (d < bestDist) { bestDist = d; bestTeam = p.team; bestPlayer = p.carId; anyPoss = true; }
+            }
+        }
+        outPlayerId = bestPlayer;
+        return anyPoss ? bestTeam : _globalStep.currPossTeam;
+    }
+
+    // v2: is the ball being carried at pace into a dangerous position?
+    // Team-relative (uses the possessing team's opponent goal), so it applies
+    // the same regardless of which teammate is touching.
+    bool BallThreatActive(Team possessingTeam, const GameState& state) const {
+        Vec oppGoalBack = (possessingTeam == Team::BLUE)
+            ? CommonValues::ORANGE_GOAL_BACK
+            : CommonValues::BLUE_GOAL_BACK;
+        float distToOppGoal = (state.ball.pos - oppGoalBack).Length();
+        if (distToOppGoal > _cfg.attackZoneDist) return false;
+        float ballSpeed = state.ball.vel.Length();
+        if (ballSpeed < _cfg.ballThreatMinSpeed) return false;
+        Vec toOppGoal = (oppGoalBack - state.ball.pos).Normalized();
+        float alignment = state.ball.vel.Normalized().Dot(toOppGoal);
+        return alignment >= _cfg.ballThreatMinAlignment;
+    }
+
+public:
+    struct Metrics {
+        double    activationRate;
+        double    meanValue;
+        double    threatActiveRate;   // fraction of possession-ticks with threatActive
+        double    durationBonusMean;  // mean gated duration-channel reward per possession-tick
+        long long giveawayEvents;
+        double    dangerGiveawayRatio;
+        long long denialEvents;
+    };
+
+    static Metrics GetAndResetMetrics() {
+        long long activation = s_activationFrames.exchange(0);
+        long long total      = s_totalFrames.exchange(0);
+        long long rewardM    = s_rewardMilli.exchange(0);
+        long long giveaways  = s_giveawayEvents.exchange(0);
+        long long danger     = s_dangerGiveawayEvents.exchange(0);
+        long long denial     = s_denialEvents.exchange(0);
+        long long possCtrl   = s_possControlFrames.exchange(0);
+        long long threatAct  = s_threatActiveFrames.exchange(0);
+        long long durBonusM  = s_durBonusMilli.exchange(0);
+        Metrics m{};
+        m.activationRate      = total    > 0 ? (double)activation / total       : 0.0;
+        m.meanValue           = total    > 0 ? (rewardM / 1000.0) / total        : 0.0;
+        m.threatActiveRate    = possCtrl > 0 ? (double)threatAct / possCtrl       : 0.0;
+        m.durationBonusMean   = possCtrl > 0 ? (durBonusM / 1000.0) / possCtrl    : 0.0;
+        m.giveawayEvents      = giveaways;
+        m.dangerGiveawayRatio = giveaways > 0 ? (double)danger / giveaways        : 0.0;
+        m.denialEvents        = denial;
+        return m;
+    }
+
+    PossessionControlRewardv2(PossessionControlV2Config cfg = {}) : _cfg(cfg) {}
+
+    virtual void Reset(const GameState& initialState) override {
+        _perPlayer.clear();
+        _globalStep = GlobalStepState{};
+    }
+
+    virtual void PreStep(const GameState& state) override {
+        float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+
+        // STEP 1: Capture previous step's possession BEFORE overwriting
+        _globalStep.prevPossTeam = _globalStep.currPossTeam;
+        _globalStep.prevPlayerId  = _globalStep.currPlayerId;
+
+        // STEP 2: Compute this step's possession
+        uint32_t currPlayerId = 0;
+        Team currTeam = GetPossessingTeam(state, currPlayerId);
+        _globalStep.currPossTeam = currTeam;
+        _globalStep.currPlayerId  = currPlayerId;
+
+        // STEP 3: Update team possession duration
+        int idx = (currTeam == Team::BLUE ? 0 : 1);
+        _globalStep.teamPossDuration[idx]     += dt;
+        _globalStep.teamPossDuration[1 - idx]  = 0.0f;
+
+        // STEP 4: Update per-player state
+        for (const auto& player : state.players) {
+            auto& ps = _perPlayer[player.carId];
+            if (player.ballTouchedStep) {
+                ps.timeSinceLastTouch = 0.0f;
+                ps.lastTouchBallPos   = state.ball.pos;
+            } else {
+                ps.timeSinceLastTouch += dt;
+            }
+            if (HasPossession(player, state)) ps.indivPossDuration += dt;
+            else                              ps.indivPossDuration  = 0.0f;
+            ps.denialCooldown = RS_MAX(0.0f, ps.denialCooldown - dt);
+        }
+
+        // STEP 5: Turnover denial detection (no-op when disabled)
+        _globalStep.denialFired    = false;
+        _globalStep.denialPlayerId = 0;
+        if (_cfg.enableDenial && _globalStep.prevPossTeam != currTeam) {
+            for (const auto& player : state.players) {
+                if (player.team == _globalStep.prevPossTeam) continue;
+                auto& ps = _perPlayer[player.carId];
+                if (ps.denialCooldown > 0.0f) continue;
+                bool touch      = player.ballTouchedStep;
+                bool speedDelta = (state.ball.vel - _globalStep.prevBallVel).Length() >= _cfg.denialBallSpeedDelta;
+                bool withinDist = player.pos.Dist(state.ball.pos) <= _cfg.denialChallengeDist;
+                if (touch || (speedDelta && withinDist)) {
+                    _globalStep.denialFired    = true;
+                    _globalStep.denialPlayerId = player.carId;
+                    ps.denialCooldown          = _cfg.denialCooldownSec;
+                    s_denialEvents.fetch_add(1);
+                    break;
+                }
+            }
+        }
+
+        // STEP 6: v2 — compute the ball-threat gate once for the possessing team
+        _globalStep.threatActive = BallThreatActive(currTeam, state);
+
+        // STEP 7: Save ball velocity for next step's denial detection
+        _globalStep.prevBallVel = state.ball.vel;
+    }
+
+    virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
+        auto psIt = _perPlayer.find(player.carId);
+        if (psIt == _perPlayer.end()) return 0.0f;
+        const PlayerPossState& ps = psIt->second;
+
+        float reward = 0.0f;
+
+        Team  currPossTeam  = _globalStep.currPossTeam;
+        bool  playerHasPoss = HasPossession(player, state);
+        bool  threatActive  = _globalStep.threatActive;
+        float ballSpeed     = state.ball.vel.Length();
+        float speedMod      = RS_MAX(0.3f, 1.0f - (ballSpeed / 8000.0f));
+        int   teamIdx       = (player.team == Team::BLUE ? 0 : 1);
+        float teamPossDur   = _globalStep.teamPossDuration[teamIdx];
+
+        // Field-zone multiplier (1.0 when disabled)
+        float zoneMult        = 1.0f;
+        float attackProgress  = 0.0f;
+        if (_cfg.enableFieldZoneWeight) {
+            float rawY   = (player.team == Team::BLUE) ? state.ball.pos.y : -state.ball.pos.y;
+            attackProgress = RS_CLAMP(rawY / 5120.0f, -1.0f, 1.0f);
+            float t  = (attackProgress + 1.0f) / 2.0f;
+            zoneMult = _cfg.defHalfPossMultiplier + t * (_cfg.atkHalfPossMultiplier - _cfg.defHalfPossMultiplier);
+        }
+
+        // ====================================================================
+        // 1. POSSESSION DURATION (team + individual) — v2: THREAT-GATED
+        // ====================================================================
+        float durationBonus = 0.0f;
+        if (threatActive) {
+            if (currPossTeam == player.team && teamPossDur > _cfg.teamPossDurationGate) {
+                float dur = RS_CLAMP(teamPossDur / _cfg.teamPossDurationFull, 0.0f, 1.0f);
+                durationBonus += _cfg.teamDurationWeight * dur * speedMod * zoneMult;
+            }
+            if (playerHasPoss && ps.indivPossDuration > _cfg.indivPossDurationGate) {
+                float dur = RS_CLAMP(ps.indivPossDuration / _cfg.indivPossDurationFull, 0.0f, 1.0f);
+                durationBonus += _cfg.indivDurationWeight * dur * speedMod * zoneMult;
+            }
+        }
+        reward += durationBonus;
+
+        // ====================================================================
+        // 2. GIVEAWAY DETECTION (unchanged from v1)
+        // ====================================================================
+        if (_globalStep.prevPossTeam != currPossTeam &&
+            _globalStep.prevPlayerId != 0 &&
+            _globalStep.prevPlayerId == player.carId) {
+            if (ps.timeSinceLastTouch < GetDynamicTouchTimeout(ps, state)) {
                 Vec oppGoal = (player.team == Team::BLUE)
                     ? CommonValues::ORANGE_GOAL_CENTER
                     : CommonValues::BLUE_GOAL_CENTER;
-                float playerToGoalDist = player.pos.Dist(oppGoal);
-                float ballToGoalDist = state.ball.pos.Dist(oppGoal);
-
-                if (playerToGoalDist < ballToGoalDist) {
-                    // Strong bonus: base 0.15f scaled by distance quality and goal direction alignment
-                    Vec toGoal = (oppGoal - player.pos).Normalized();
-                    float goalAlignment = RS_MAX(0.0f, player.vel.Dot(toGoal) / RS_MAX(player.vel.Length(), 1.0f));
-                    reward += 0.15f * distanceQuality * (0.5f + 0.5f * goalAlignment);
+                float ballDirQuality = state.ball.vel.Dot((oppGoal - state.ball.pos).Normalized());
+                if (ballDirQuality <= 0.0f) {
+                    float penalty = _cfg.giveawayPenalty;
+                    bool  isDanger = (ballSpeed > _cfg.dangerBallSpeed && ballDirQuality < _cfg.dangerDirThreshold);
+                    if (isDanger) penalty = _cfg.dangerGiveawayPenalty;
+                    reward += penalty;
+                    s_giveawayEvents.fetch_add(1);
+                    if (isDanger) s_dangerGiveawayEvents.fetch_add(1);
                 }
             }
+        }
+
+        // ====================================================================
+        // 3. FORWARD-PROGRESS BONUS — v2: folded into the same threat gate.
+        //    (v1's separate player-velocity check and the tight-control bonus
+        //     are gone. One gate, one meaning.)
+        // ====================================================================
+        if (playerHasPoss && threatActive) {
+            reward += _cfg.forwardProgressBonus * speedMod;
+        }
+
+        // ====================================================================
+        // 4. TEAM SUPPORT (unchanged from v1)
+        // ====================================================================
+        if (!playerHasPoss && currPossTeam == player.team) {
+            float distToBall = player.pos.Dist(state.ball.pos);
+            if (distToBall > _cfg.supportMinDist && distToBall < _cfg.supportMaxDist) {
+                Vec oppGoal = (player.team == Team::BLUE)
+                    ? CommonValues::ORANGE_GOAL_CENTER
+                    : CommonValues::BLUE_GOAL_CENTER;
+                if (player.pos.Dist(oppGoal) < state.ball.pos.Dist(oppGoal))
+                    reward += _cfg.supportBonus;
+            }
+        }
+
+        // ====================================================================
+        // 5. TURNOVER DENIAL (unchanged from v1, disabled by default)
+        // ====================================================================
+        if (_cfg.enableDenial && _globalStep.denialFired &&
+            _globalStep.denialPlayerId == player.carId) {
+            reward += _cfg.denialReward;
+        }
+
+        // Metrics
+        s_totalFrames.fetch_add(1);
+        if (fabsf(reward) > 1e-3f) s_activationFrames.fetch_add(1);
+        s_rewardMilli.fetch_add(static_cast<long long>(reward * 1000.0f));
+        if (currPossTeam == player.team) {
+            s_possControlFrames.fetch_add(1);
+            if (threatActive) s_threatActiveFrames.fetch_add(1);
+            s_durBonusMilli.fetch_add(static_cast<long long>(durationBonus * 1000.0f));
         }
 
         return reward;

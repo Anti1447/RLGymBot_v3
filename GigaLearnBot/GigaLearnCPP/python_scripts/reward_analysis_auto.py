@@ -92,15 +92,27 @@ def run_analysis(checkpoint_path, checkpoints_root, total_timesteps, wandb_run=N
     current_metrics = json.loads(metrics_file.read_text())
     current_diagnosis = json.loads(diagnosis_file.read_text())
 
+    # Load flip reset metrics if available
+    flip_reset_file = checkpoint_path / "FLIP_RESET_METRICS.json"
+    current_flip_reset = None
+    if flip_reset_file.exists():
+        flip_reset_data = json.loads(flip_reset_file.read_text())
+        current_flip_reset = flip_reset_data.get("metrics", {})
+
     prev_metrics = None
     prev_diagnosis = None
+    prev_flip_reset = None
     if prev_checkpoint:
         prev_mf = prev_checkpoint / "REWARD_METRICS.json"
         prev_df = prev_checkpoint / "REWARD_DIAGNOSIS.json"
+        prev_ff = prev_checkpoint / "FLIP_RESET_METRICS.json"
         if prev_mf.exists():
             prev_metrics = json.loads(prev_mf.read_text())
         if prev_df.exists():
             prev_diagnosis = json.loads(prev_df.read_text())
+        if prev_ff.exists():
+            prev_flip_reset_data = json.loads(prev_ff.read_text())
+            prev_flip_reset = prev_flip_reset_data.get("metrics", {})
 
     # 4. Update persistent history
     history = _load_or_create_history(checkpoints_root)
@@ -108,11 +120,32 @@ def run_analysis(checkpoint_path, checkpoints_root, total_timesteps, wandb_run=N
     _save_history(history, checkpoints_root)
 
     # 5. Compute summary metrics
-    summary = _compute_summary(current_metrics, current_diagnosis, prev_metrics)
+    summary = _compute_summary(current_metrics, current_diagnosis, prev_metrics, current_flip_reset, prev_flip_reset)
 
     # 6. Log to wandb
     if wandb_run is not None:
         _log_to_wandb(wandb_run, summary, checkpoints_root)
+
+    # 6b. Gradient analysis (dominance / dead / farming) -> wandb. Independent and
+    #     non-fatal: a failure here must never abort the rest of run_analysis.
+    try:
+        import sys
+        from pathlib import Path as _Path
+        sys.path.insert(0, str(_Path(__file__).parent))
+        import reward_gradient_analysis
+        grad = reward_gradient_analysis.analyze_gradients(current_metrics["rewards"])
+        if wandb_run is not None:
+            wandb_run.log(reward_gradient_analysis.wandb_metrics(grad))
+        # Also persist the same metrics (+ full table) to the reward_analysis folder,
+        # alongside the graph PNGs. Runs every checkpoint, even the first (no prev).
+        reward_gradient_analysis.write_report(
+            grad, checkpoints_root / "reward_analysis", total_timesteps
+        )
+        if grad["dead"] or grad["farming"]:
+            print(f"[RewardAnalysis] gradient: {len(grad['dominant'])} dominant, "
+                  f"{len(grad['dead'])} dead, {len(grad['farming'])} farming candidate(s)")
+    except Exception as e:
+        print(f"[RewardAnalysis] WARNING: gradient analysis failed (non-fatal): {e}")
 
     # 7. Generate graphs (need 2+ checkpoints for comparison)
     if prev_metrics is not None:
@@ -226,7 +259,7 @@ def _count_diagnosis_types(diagnosis):
 # SUMMARY COMPUTATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _compute_summary(current_metrics, current_diagnosis, prev_metrics):
+def _compute_summary(current_metrics, current_diagnosis, prev_metrics, current_flip_reset=None, prev_flip_reset=None):
     rewards = current_metrics.get("rewards", {})
 
     active_count = sum(1 for r in rewards.values() if r.get("activation_rate", 0) > 0.001)
@@ -265,6 +298,30 @@ def _compute_summary(current_metrics, current_diagnosis, prev_metrics):
     total_wc = sum(abs(r.get("mean_value", 0)) * r.get("weight", 0) for r in rewards.values())
     summary["total_weighted_contribution"] = total_wc
     summary["gradient_dilution_active_ratio"] = active_count / max(1, len(rewards))
+
+    # Flip reset metrics
+    if current_flip_reset:
+        summary["flip_reset_reset_count"] = int(current_flip_reset.get("reset_count", 0))
+        summary["flip_reset_attempt_count"] = int(current_flip_reset.get("attempt_count", 0))
+        summary["flip_reset_success_rate"] = float(current_flip_reset.get("success_rate", 0))
+        summary["flip_reset_avg_height"] = float(current_flip_reset.get("avg_height", 0))
+        summary["flip_reset_height_std"] = float(current_flip_reset.get("height_std", 0))
+        summary["flip_reset_avg_time_between_resets"] = float(current_flip_reset.get("avg_time_between_resets", 0))
+        summary["flip_reset_handbrake_bonus_rate"] = float(current_flip_reset.get("handbrake_bonus_rate", 0))
+        summary["flip_reset_boost_off_bonus_rate"] = float(current_flip_reset.get("boost_off_bonus_rate", 0))
+        summary["flip_reset_post_reset_shot_rate"] = float(current_flip_reset.get("post_reset_shot_rate", 0))
+        summary["flip_reset_post_reset_clear_rate"] = float(current_flip_reset.get("post_reset_clear_rate", 0))
+        summary["flip_reset_post_reset_neutral_rate"] = float(current_flip_reset.get("post_reset_neutral_rate", 0))
+
+        # Compute deltas from previous checkpoint
+        if prev_flip_reset:
+            prev_success = float(prev_flip_reset.get("success_rate", 0))
+            curr_success = float(current_flip_reset.get("success_rate", 0))
+            summary["flip_reset_success_rate_delta"] = curr_success - prev_success
+
+            prev_height = float(prev_flip_reset.get("avg_height", 0))
+            curr_height = float(current_flip_reset.get("avg_height", 0))
+            summary["flip_reset_avg_height_delta"] = curr_height - prev_height
 
     return summary
 

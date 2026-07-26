@@ -13,6 +13,11 @@ set PYTHONHOME=C:\Users\nhafe\AppData\Local\Programs\Python\Python311
 set PYTHONPATH=%PYTHONHOME%\Lib;%PYTHONHOME%\DLLs
 bin\GigaLearnBot.exe --render
 
+## optional rendering
+bin\GigaLearnBot.exe --render --1v1
+bin\GigaLearnBot.exe --render --2v2
+bin\GigaLearnBot.exe --render --3v3
+
 ## Mechanic Template
 Mechanic: [name]
 Trigger condition: [exact observable state that fires the reward]

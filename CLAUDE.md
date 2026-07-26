@@ -8,12 +8,60 @@ A Rocket League AI bot trained via PPO reinforcement learning. The bot plays 1v1
 
 **Key paths:**
 - `GigaLearnBot/src/` — Training entrypoint and config files
-- `GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/` — All reward classes (~50 files)
+- `GigaLearnBot/GigaLearnCPP/RLGymCPP/src/RLGymCPP/Rewards/` — All reward classes (~110 header files; see 1A for a category map — most files are single/few-class, but 4 are dense multi-class mega-files)
 - `GigaLearnBot/GigaLearnCPP/src/` — PPO learner, model wrappers, inference
 - `GigaLearnBot/RLBotCPP/` — Live game deployment client
 - `GigaLearnBot/rlbot/` — RLBot v5 plugin config
 - `GigaLearnBot/python_scripts/` — Reward analysis, LLM reward generator, metrics
-- `ClaudeFiles/` — Reference docs, code reviews, archived reward files
+- `ClaudeFiles/` — Reference docs, code reviews, archived reward files (see 1A for subfolder index)
+
+## 1A. Quick Reference Map
+
+Use this before globbing/grepping the whole tree — it's usually faster to jump straight to the right file.
+
+**Reward file categories** (`Rewards/` directory, grouped by theme — check every file in a row when touching that mechanic, since related logic is often split across 2-3 files):
+- **Kickoff:** `KickoffRewards.h`, `AdvancedKickoffRewards.h`, `KickoffStrategyReward.h`, `KickoffRandomizationReward.h`, `KickoffCounterReward.h`, `KickoffCounterpositionReward.h`, `KickoffNoChaseTeamPenalty.h`, `MovementAndKickoffRewards_Enhanced.h` (`PowerShotRewards.h` also has `KickoffMassAlignmentReward`)
+- **Aerial / Air Dribble:** `AerialRewards.h`, `AerialOutplayReward.h`, `AirDribbleAccuracyReward.h`, `AirDribbleBumpReward.h`, `AirDribbleBumpConversionReward.h`, `AirDribbleClearingReward.h`, `AirDribbleExplorationReward.h`, `AirDribbleUtilities.h`, `InvertedAirDribbleReward.h`, `AirRollMultiplierReward.h`
+- **Flicks / Dribble Mechanics:** `DribbleFlickRewards.h`, `CompositeFlickReward.h`, `AngleFlickRewards.h`, `SpecializedFlickRewards.h`, `FlickExplorationReward.h`, `LateralPushDribbleReward.h`, `BallSteerReward.h`, `DoubleJumpPopReward.h`, `HookshotReward.h` (+ `HookShotNotes/`), `TornadoSpinTakeoffReward.h`
+- **Flip Reset:** `FlipResetReward.h`, `FlipResetApproachReward.h`, `FlipResetMetricsCollector.h`
+- **Boost Management / Cooperation:** `BoostManagementRewards.h`, `BoostCooperationRewards.h`, `BoostStealReward.h`
+- **Demos / Bumps:** `AdvancedDemoRewards.h`, `PredictiveDemoRewards.h`, `DemoAdvantageReward.h`, `DemoInterceptLeadReward.h`, `DemoLeadApproachReward.h`, `DemoOpportunityReward.h`, `PossessionSideDemoReward.h`, `RolvDemoReward.h`
+- **Positioning / Rotation / Overcommitment:** `PositioningRewards.h`, `RotationRewards.h`, `SimpleOvercommitmentPenalty.h`, `AdvancedOvercommitmentPenalty.h`, `AdvancedOpponentOvercommitmentReward.h`, `LastManOvercommitPenalty.h`, `GoalsideReward.h`, `NonPrimaryAirPenalty.h`, `AirborneOnPossessionLostPenalty.h`, `FlipDuringContestPenalty.h`, `GroundedAtContactReward.h`, `UncoveredNetPenalty.h`, `PositionAnalysis.h`, `ThirdManContext.h`, `ThirdManStallReward.h`, `CounterLaunchDiagonalReward.h`, `BallSideNumericalAdvantageReward.h`, `ChallengeAngleQualityReward.h`
+- **Defense / Saves / Clearing:** `DefensiveClearingRewards.h`, `PreemptiveSaveRewards.h`, `ImpendingShotDefenseReward.h`, `BackboardInterceptionReward.h`, `WallReboundPenalty.h`, `BallRaceAwarenessReward.h`, `CounterAttackReward.h`
+- **Shooting / Scoring / Outplay:** `ShootingRewards.h`, `ShotExplorationRewards.h`, `GoalMultiplierReward.h`, `GoalViewReward.h`, `DoomseeDisshShotReward.h`, `WallCeilingRedirectReward.h`, `PredictiveBounceReadReward.h`, `OpenNetPushReward.h`, `OutplayExplorationReward.h`, `OutplayRewards.h`, `SmartWallPlayRewards.h`
+- **Recovery / Movement:** `RecoveryRewards.h`, `RecoveryExplorationReward.h`, `IntelligentWavedashReward.h`, `WallDashReward.h`, `WallDashInputReward.h`, `PowerslideTurnRewards.h`, `GodTierMovementRewards_Enhanced.h`
+- **Passing / Teamwork / Possession:** `PassingRewards.h`, `SpatialPassingLaneRewards.h`, `PossessionRewards.h`, `MultiModalRewards.h`, `SoloPlayRewards.h`, `ConfidenceRewards.h`, `AdvancedPlayRewards.h`
+- **Core infra/utility (not gameplay rewards, but needed when authoring one):** `Reward.h` (base class, 66 lines), `RewardWrapper.h` (base wrapper), `ZeroSumReward.h`/`.cpp` (competitive wrapper), `PlayerReward.h` (template wrapper), `RewardMath.h` (306 lines — goal-geometry/trajectory helpers), `BallPrediction.h` (252 lines — ball trajectory cache), `ThirdManContext.h` (179 lines — shared per-step context), `AirDribbleUtilities.h`. Also outside `Rewards/`: `Gamestates/GameState.h`/`Player.h`, `CommonValues.h` (321 lines — field/physics constants), `Math.h` (15 lines).
+
+**Mega-files — never `Read` these in full, `Grep` for `class <Name>` first to get a line number, then `Read` with an offset:**
+- `CompleteMechanicsRewards.h` — 7,818 lines, ~75 classes. By far the largest file in the directory; a cross-cutting grab-bag spanning most categories above.
+- `AdvancedRewards.h` — 2,732 lines, ~24 classes.
+- `BoostManagementRewards.h` — 2,066 lines, ~23 classes.
+- `CommonRewards.h` — 1,766 lines, ~35 classes (this is also the "core primitives" file — `GoalReward`, `VelocityBallToGoalReward`, `TouchBallReward`, etc. live here).
+
+**Config file anchors** (line numbers as of 2026-07-22 — confirm with `Grep "case TrainingPhase::"` before trusting them, they drift as phases are edited):
+- `RewardConfig.h:112` — `CURRENT_PHASE` constexpr (the one line that switches training phase).
+- `RewardConfig.cpp` (1,367 lines) — per-phase `case` blocks in `GetPhasedRewards()`: PHASE_1_BRONZE:22, PHASE_2_SILVER:57, PHASE_3_GOLD:126, PHASE_4_PLATINUM:288, PHASE_5_DIAMOND:557, PHASE_6_CHAMPION:834, PHASE_7_GC/8_SSL/9_PRO share a block from 1090.
+- `ModelConfig.cpp` (208 lines) — per-phase `case` blocks in `GetPhaseConfig()`: PHASE_1:10, PHASE_2:21, PHASE_3:32, PHASE_4:44, PHASE_5:55, PHASE_6:66, PHASE_7:77, PHASE_8:88, PHASE_9:99.
+- `GameModeConfig.h` — mode-sampling weights are static constexpr fields (`WEIGHT_1V1`, `WEIGHT_2V2`, `WEIGHT_3V3`), no per-phase gating.
+
+**Known dead/stale files — don't read these for reference, don't edit them (not deleted — cleanup needs separate explicit approval per Section 6):**
+- `GigaLearnBot/src/*.bak` — stale backup copies of `RewardConfig.cpp`/`ExampleMain.cpp`, not built.
+- `Rewards/TTIUtility.h`/`.cpp` — dead stub, reverted experiment (see `ClaudeFiles/TTI-integration/TTI_Integration_Findings.md`).
+- `Rewards/"OutplayRewards (2).h"` — stale duplicate of `OutplayRewards.h`, a Windows copy artifact.
+- `Rewards/advanced_mechanic_rewards.cpp` — orphan draft, not wired into the build, not in the `RLGC` namespace.
+
+**`ClaudeFiles/` subfolder index** (so you don't need to list the whole tree to find prior work on a topic):
+- `WallDash/` — wall-dash detection/reward, fully documented (README + integration guide + test cases).
+- `MuZeroIntegration/` — MCTS/reanalysis experiment for a MuZero-style learner.
+- `MushyIntroFiles/` — session-brief docs for the "GigaLearnBot v2" / Tendency Memory Blocks effort.
+- `TTI-integration/` — **reverted** (caused rating drop/entropy spike) — check `TTI_Integration_Findings.md` before resurrecting anything here.
+- `Expansion_AI_Setup/` — automated/LLM-driven reward-engineering pipeline design.
+- `AirDribbleBump/`, `VelocityBallTOGoal/`, `lateraldribble/`, `soccerplays/` — single-mechanic spec + implementation pairs.
+- `Code Review 1-17-26/` — a completed code review of the MLP-Mixer integration.
+- `docs/` — the "real" living docs location (currently just the 2v2-rotation reward mapping).
+- Loose top-level files: `SSL_Training_Guide.md` (phase-by-phase training reference), `PossessionAnalysis.md`, `StateSetterDiscussion.md`, `OVERCOMMITMENT_SUMMARY.md` + phase-completion docs, plus several standalone reward `.h` files not yet promoted into the main `Rewards/` directory.
+- Full per-file class breakdown of the mega-files, and the `GigaLearnCPP/src/`, `RLBotCPP/`, `rlbot/` directory trees: see `ClaudeFiles/docs/CODEBASE_MAP.md`.
 
 ## 2. How do I run things?
 
@@ -69,8 +117,11 @@ After any reward add/edit/weight change, add a one-line entry to
 
 ## 4. What's weird here?
 
-- **~50 reward files, 40+ active simultaneously.** Gradient dilution is the #1 problem. Don't add rewards casually — every new reward dilutes the signal from existing ones. Surgical adjustments > dramatic weight changes.
-- **Root directory is full of orphaned .md files.** These are session summaries from prior Claude conversations. Ignore them. Real docs live in `ClaudeFiles/`.
+- **~110 reward files, 40+ active simultaneously.** Gradient dilution is the #1 problem. Don't add rewards casually — every new reward dilutes the signal from existing ones. Surgical adjustments > dramatic weight changes.
+- **Three separate pockets of orphaned .md files exist, all disposable.** These are session summaries from prior Claude conversations — ignore them, real docs live in `ClaudeFiles/`:
+  - Repo root (`C:\Projects\RLGymBot_v3\`) — ~54 loose `.md`/`.txt` files (`START_HERE.md`, `DOCUMENTATION_INDEX.md`, `*_COMPLETE.md`, `*_SUMMARY.md`, etc.)
+  - `GigaLearnBot/` root — a similar batch of `*_COMPLETE.md` / `*_SUMMARY.md` / `*_GUIDE.md` files
+  - `GigaLearnBot/scratchpad/` — another pocket of the same pattern
 - **Three copies of python scripts** exist (`python_scripts/`, `GigaLearnCPP/python_scripts/`, `build/python_scripts/`). The canonical copy is `GigaLearnBot/python_scripts/`.
 - **`#pragma once` in .cpp files** — `RewardConfig.cpp` has `#pragma once` at the top. It's nonstandard but works with MSVC. Don't "fix" it.
 - **Reward weights span 0.1 to 250.** `GoalReward` is 250, movement rewards are < 1. This is intentional — the scale encodes priority.

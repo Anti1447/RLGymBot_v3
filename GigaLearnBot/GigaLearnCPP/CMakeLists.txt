@@ -74,6 +74,10 @@ endif (MSVC)
 # Make our python files copy over to our build dir
 configure_file("./python_scripts/metric_receiver.py" "../python_scripts/metric_receiver.py" COPY)
 configure_file("./python_scripts/render_receiver.py" "../python_scripts/render_receiver.py" COPY)
+# reward_analysis_auto is imported by metric_receiver at checkpoint time; reward_gradient_analysis
+# is imported by reward_analysis_auto. Both MUST be copied or the checkpoint hook fails at runtime.
+configure_file("./python_scripts/reward_analysis_auto.py" "../python_scripts/reward_analysis_auto.py" COPY)
+configure_file("./python_scripts/reward_gradient_analysis.py" "../python_scripts/reward_gradient_analysis.py" COPY)
 
 # MSVC sometimes won't link to the libtorch DLLs unless you do this
 # This is also from https://pytorch.org/cppdocs/installing.html#minimal-example

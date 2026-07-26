@@ -44,7 +44,15 @@ def on_checkpoint_saved(checkpoint_path, checkpoints_root, total_timesteps):
 	Logs summary metrics to wandb and saves graphs locally. Non-fatal."""
 	global wandb_run
 	try:
-		from python_scripts import reward_analysis_auto
+		# Import reward_analysis_auto from same directory or parent directory
+		import sys
+		from pathlib import Path
+
+		# Add parent directory to path to find python_scripts module
+		script_dir = Path(__file__).parent
+		sys.path.insert(0, str(script_dir))
+
+		import reward_analysis_auto
 		reward_analysis_auto.run_analysis(
 			checkpoint_path=checkpoint_path,
 			checkpoints_root=checkpoints_root,

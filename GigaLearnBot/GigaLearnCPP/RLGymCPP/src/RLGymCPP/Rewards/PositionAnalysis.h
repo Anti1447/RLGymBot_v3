@@ -197,6 +197,18 @@ public:
         return closest;
     }
 
+    // True if at least one opponent is not currently demoed (i.e. can actually
+    // contest/punish right now). A demoed car's pos/vel freeze in place until
+    // Respawn() fires (RocketSim Car.cpp), so distance-based gates below would
+    // otherwise treat a fresh demo corpse as a live threat.
+    static bool AnyLivingOpponent(const Player& player, const std::vector<Player>& allPlayers) {
+        for (const auto& other : allPlayers) {
+            if (other.team == player.team) continue;
+            if (!other.isDemoed) return true;
+        }
+        return false;
+    }
+
     static float ClosestOpponentDistance(const Player& player,
                                         const Vec& targetPos,
                                         const std::vector<Player>& allPlayers) {

@@ -74,8 +74,8 @@ void RLGC::RandomState::ResetArena(Arena* arena) {
 		BallState bs = {};
 		bs.pos = Math::RandVec(Vec(-X_MAX, -Y_MAX, CommonValues::BALL_RADIUS), Vec(X_MAX, Y_MAX, Z_MAX));
 		if (randBallSpeed) {
-			bs.vel = RandNormVec() * RandFloat(0, 4000);
-			bs.angVel = Math::RandVec(Vec(-4, -4, -4), Vec(4, 4, 4));
+			bs.vel = RandNormVec() * RandFloat(0, 6000); //increased max ball rand speed to max ball speed (6000) from 4000 to allow for more extreme ball velocities
+			bs.angVel = Math::RandVec(Vec(-6, -6, -6), Vec(6, 6, 6)); //increased ball ang vel max from 4 to 6 to allow for more extreme ball spins
 		}
 		arena->ball->SetState(bs);
 	}

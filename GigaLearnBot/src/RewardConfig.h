@@ -21,12 +21,14 @@
 #include <RLGymCPP/Rewards/RotationRewards.h>
 #include <RLGymCPP/Rewards/PreemptiveSaveRewards.h>
 #include <RLGymCPP/Rewards/AdvancedDemoRewards.h>
+#include <RLGymCPP/Rewards/DemoAdvantageReward.h>
 #include <RLGymCPP/Rewards/RecoveryRewards.h>
 #include <RLGymCPP/Rewards/AdvancedPlayRewards.h>
 #include <RLGymCPP/Rewards/PositioningRewards.h>
 #include <RLGymCPP/Rewards/SmartWallPlayRewards.h>
 #include <RLGymCPP/Rewards/HookshotReward.h>
 #include <RLGymCPP/Rewards/WallDashReward.h>
+#include <RLGymCPP/Rewards/WallDashInputReward.h>
 #include <RLGymCPP/Rewards/OptionControlReward.h>
 #include <RLGymCPP/Rewards/OptionGatingWrappers.h>
 #include <RLGymCPP/Rewards/AngleFlickRewards.h>
@@ -34,6 +36,7 @@
 #include <RLGymCPP/Rewards/DefensiveClearingRewards.h>
 #include <RLGymCPP/Rewards/SpecializedFlickRewards.h>
 #include <RLGymCPP/Rewards/DribbleFlickRewards.h>
+#include <RLGymCPP/Rewards/DoubleJumpPopReward.h>
 #include <RLGymCPP/Rewards/BallSteerReward.h>
 #include <RLGymCPP/Rewards/OpenNetPushReward.h>
 #include <RLGymCPP/Rewards/AerialRewards.h>
@@ -58,6 +61,7 @@
 #include <RLGymCPP/Rewards/PredictiveDemoRewards.h>
 #include <RLGymCPP/Rewards/AdvancedKickoffRewards.h>
 #include <RLGymCPP/Rewards/KickoffCounterReward.h>
+#include <RLGymCPP/Rewards/KickoffCounterpositionReward.h>
 #include <RLGymCPP/Rewards/SoloPlayRewards.h>
 #include <RLGymCPP/Rewards/RolvVelocityPlayerToBallRewards.h>
 #include <RLGymCPP/Rewards/RolvDemoReward.h>
@@ -65,6 +69,8 @@
 #include <RLGymCPP/Rewards/DemoInterceptLeadReward.h>
 #include <RLGymCPP/Rewards/DemoOpportunityReward.h>
 #include <RLGymCPP/Rewards/LastManOvercommitPenalty.h>
+#include <RLGymCPP/Rewards/UncoveredNetPenalty.h>
+#include <RLGymCPP/Rewards/ShotLaneCoverageReward.h>
 #include <RLGymCPP/Rewards/BallRaceAwarenessReward.h>
 #include <RLGymCPP/Rewards/ImpendingShotDefenseReward.h>
 #include <RLGymCPP/Rewards/BackboardInterceptionReward.h>
@@ -79,9 +85,16 @@
 #include <RLGymCPP/Rewards/InvertedAirDribbleReward.h>
 #include <RLGymCPP/Rewards/TornadoSpinTakeoffReward.h>
 #include <RLGymCPP/Rewards/WallCeilingRedirectReward.h>
+#include <RLGymCPP/Rewards/PredictiveBounceReadReward.h>
 #include <RLGymCPP/Rewards/BallGoalProximityReward.h>
 #include <RLGymCPP/Rewards/ThirdManStallReward.h>
 #include <RLGymCPP/Rewards/CounterLaunchDiagonalReward.h>
+#include <RLGymCPP/Rewards/FlipDuringContestPenalty.h>
+#include <RLGymCPP/Rewards/GroundedAtContactReward.h>
+#include <RLGymCPP/Rewards/AirborneOnPossessionLostPenalty.h>
+#include <RLGymCPP/Rewards/RolvBallTravelReward.h>
+#include <RLGymCPP/Rewards/LateralPushDribbleReward.h>
+#include <RLGymCPP/Rewards/CounterAttackReward.h>
 using namespace RLGC;
 
 enum class TrainingPhase {
@@ -97,7 +110,7 @@ enum class TrainingPhase {
 };
 
 // >>> SET YOUR CURRENT PHASE HERE <<<
-constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_4_PLATINUM;
+constexpr TrainingPhase CURRENT_PHASE = TrainingPhase::PHASE_5_DIAMOND;
 
 /// <summary>
 /// Get the reward configuration for the current training phase

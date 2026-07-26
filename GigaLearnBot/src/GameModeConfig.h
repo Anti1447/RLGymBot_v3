@@ -12,9 +12,9 @@ namespace GGL {
 
 	struct GameModeConfig {
 		static constexpr float WEIGHT_SOLO = 0.0f;
-		static constexpr float WEIGHT_1V1  = 6.0f;
-		static constexpr float WEIGHT_2V2  = 6.0f;
-		static constexpr float WEIGHT_3V3  = 12.0f;
+		static constexpr float WEIGHT_1V1  = 3.0f;
+		static constexpr float WEIGHT_2V2  = 3.0f;
+		static constexpr float WEIGHT_3V3  = 9.0f;
 		static constexpr float TOTAL_WEIGHT = WEIGHT_SOLO + WEIGHT_1V1 + WEIGHT_2V2 + WEIGHT_3V3;
 		// Cycling mode state (for render mode: cycles through 1v1 -> 2v2 -> 3v3)
 		static int cycleIndex;

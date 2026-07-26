@@ -12,3 +12,8 @@ add_library(RocketSim ${FILES_ROCKETSIM} ${FILES_BULLET})
 
 set_target_properties(RocketSim PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(RocketSim PROPERTIES CXX_STANDARD 20)
+
+# Suppress warnings from embedded Bullet3 third-party library
+if (MSVC)
+    target_compile_options(RocketSim PRIVATE /wd4715 /wd4244 /wd4267 /wd4101)
+endif()

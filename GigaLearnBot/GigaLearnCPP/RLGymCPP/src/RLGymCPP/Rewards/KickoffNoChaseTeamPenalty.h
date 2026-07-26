@@ -1,9 +1,14 @@
 #pragma once
-// KickoffNoChaseTeamPenalty.h — Rev 1.0 (2026-02-23, NJH)
+// KickoffNoChaseTeamPenalty.h — Rev 1.1 (2026-07-19, NJH + Claude)
 //
 // Team-level kickoff penalty. If NO player on a team commits to the ball
-// during a kickoff (defined as: touching it OR closing within 600 UU),
-// ALL players on that team receive a per-second penalty after the grace period.
+// during a kickoff (defined as: touching it OR closing within 600 UU while
+// actively closing on the ball at >= MIN_CHASE_APPROACH_SPEED), ALL players
+// on that team receive a per-second penalty after the grace period.
+//
+// Rev 1.1: proximity alone used to count as "committed," letting a player graze
+// 600 UU and peel off without ever challenging, clearing the whole-team penalty
+// for free. Now requires closing velocity toward the ball alongside proximity.
 //
 // Key design difference from KickoffContactPunishmentReward:
 //   - That reward: penalizes each individual player who doesn't personally touch.
@@ -43,6 +48,11 @@ namespace RLGC {
         static constexpr float KICKOFF_BALL_RADIUS  = 500.0f;
         // Any player on a team within this distance = that team "committed"
         static constexpr float CHASE_DIST_THRESHOLD = 600.0f;
+        // Proximity alone isn't enough — must also be closing on the ball at this speed
+        // (UU/s), matching KickoffDoubleCommitPenalty::MIN_APPROACH_SPEED's convention.
+        // Prevents a player from grazing CHASE_DIST_THRESHOLD and peeling off to clear
+        // the whole-team penalty without genuinely challenging.
+        static constexpr float MIN_CHASE_APPROACH_SPEED = 200.0f;
         // Grace period after kickoff start before penalty activates.
         // Corner spawn (~3279 UU) at supersonic needs ~1.4s — 1.5s gives margin.
         static constexpr float GRACE_PERIOD_SEC     = 1.5f;
@@ -123,8 +133,14 @@ namespace RLGC {
                 // Once committed, team stays committed for this kickoff
                 if (teamHasChased[idx]) continue;
 
-                bool touched     = p.ballTouchedStep;
-                bool closeEnough = p.pos.Dist(state.ball.pos) < CHASE_DIST_THRESHOLD;
+                bool touched = p.ballTouchedStep;
+
+                Vec toBall = state.ball.pos - p.pos;
+                float dist = toBall.Length();
+                bool closingIn = (dist > 1.0f) &&
+                    (p.vel.Dot(toBall / dist) > MIN_CHASE_APPROACH_SPEED);
+                bool closeEnough = (dist < CHASE_DIST_THRESHOLD) && closingIn;
+
                 if (touched || closeEnough) {
                     teamHasChased[idx] = true;
                 }

@@ -23,29 +23,46 @@ private:
         Vec flipDirection;
         float startSpeed;
         float startTime;
+        float jumpStartTime;              // Fix 6: when car left ground
         bool cancelDetected;
         bool diagonalFlipDetected;
-        bool airRollUsed;
+        bool airRollUsedInCancelWindow;   // Fix 4: only early roll counts
     };
-    
+
     mutable std::map<uint32_t, FlipData> flipData;
     mutable std::map<uint32_t, bool> isFlipping;
+    mutable std::map<uint32_t, bool> prevOnGround;   // Fix 6
+    mutable std::map<uint32_t, float> jumpStartTimes; // Fix 6
     mutable float currentTime;
 
 public:
     virtual void Reset(const GameState& initialState) override {
         flipData.clear();
         isFlipping.clear();
+        prevOnGround.clear();
+        jumpStartTimes.clear();
         currentTime = 0.0f;
     }
 
+    // Fix 2: accumulate time once per frame, not once per player
+    virtual void PreStep(const GameState& state) override {
+        currentTime += (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+    }
+
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
-        currentTime += state.deltaTime;
         float reward = 0.0f;
-        
+
+        // Fix 6: detect jump (ground → air transition) to time the full sequence
+        bool onGround = player.isOnGround;
+        bool& wasOnGround = prevOnGround[player.carId];
+        if (wasOnGround && !onGround) {
+            jumpStartTimes[player.carId] = currentTime;
+        }
+        wasOnGround = onGround;
+
         bool wasFlipping = isFlipping[player.carId];
         isFlipping[player.carId] = player.isFlipping;
-        
+
         // ===== FLIP START DETECTION =====
         if (!wasFlipping && player.isFlipping) {
             FlipData data;
@@ -53,121 +70,109 @@ public:
             data.initialVelocity = player.vel;
             data.startSpeed = player.vel.Length();
             data.startTime = currentTime;
+            // Capture jump start time; fall back to now if car was already airborne
+            data.jumpStartTime = jumpStartTimes.count(player.carId)
+                                     ? jumpStartTimes[player.carId]
+                                     : currentTime;
             data.cancelDetected = false;
             data.diagonalFlipDetected = false;
-            data.airRollUsed = false;
-            
-            // Detect diagonal flip (slightly to the side)
-            // Speed flip should NOT be straight forward
-            Vec velDir = player.vel.Normalized();
-            Vec forwardDir = player.rotMat.forward;
-            float forwardAlignment = velDir.Dot(forwardDir);
-            
-            // Check for diagonal component (pitch + yaw input)
+            data.airRollUsedInCancelWindow = false;
+
             float pitch = player.prevAction.pitch;
             float yaw = player.prevAction.yaw;
-            
+
             // Speed flip = forward flip with slight side component
             if (pitch > 0.5f && abs(yaw) > 0.2f && abs(yaw) < 0.8f) {
                 data.diagonalFlipDetected = true;
                 data.flipDirection = Vec(yaw, pitch, 0).Normalized();
             }
-            
+
             flipData[player.carId] = data;
             return 0.0f;
         }
-        
+
         // ===== DURING FLIP - DETECT CANCEL =====
         if (player.isFlipping && wasFlipping) {
             auto& data = flipData[player.carId];
-            
-            // Check for air roll usage
-            if (abs(player.prevAction.roll) > 0.3f){
-                data.airRollUsed = true;
+
+            // Fix 4: air roll only counts within the cancel window (~first 0.4s of flip)
+            float timeSinceFlipStart = currentTime - data.startTime;
+            if (timeSinceFlipStart < 0.4f && abs(player.prevAction.roll) > 0.3f) {
+                data.airRollUsedInCancelWindow = true;
             }
-            
-            // Detect cancel: "drag stick down to bottom"
-            // This means pitch goes from positive (forward) to negative (backward)
-            float pitch = player.prevAction.pitch;
-            
-            if (pitch < -0.7f) { // Strong backward input = cancel
+
+            // Detect cancel: drag stick down to strongly negative pitch
+            if (player.prevAction.pitch < -0.7f) {
                 data.cancelDetected = true;
             }
         }
-        
+
         // ===== FLIP END - EVALUATE SPEED FLIP =====
         if (wasFlipping && !player.isFlipping) {
             const FlipData& data = flipData[player.carId];
-            
+
+            // Fix 6: hard gate — full jump-to-flip-end sequence must be ≤ 1.5s
+            float totalSequenceDuration = currentTime - data.jumpStartTime;
+            if (totalSequenceDuration > 1.5f) {
+                return 0.0f;
+            }
+
             float endSpeed = player.vel.Length();
-            float speedGain = endSpeed - data.startSpeed;
             float flipDuration = currentTime - data.startTime;
-            
-            // === SPEED FLIP CRITERIA (from video) ===
-            // 1. Diagonal flip (forward + slightly to side)
-            // 2. Cancel detected (drag stick down)
-            // 3. Air roll adjustment used
-            // 4. Massive speed gain (>300 units/s)
-            // 5. Fast execution (<1.0s)
-            // 6. High end speed (>1800)
-            
+
+            // Fix 3: require forward-projected speed gain, not raw scalar gain
+            Vec initialFwdNorm = data.initialForward.Normalized();
+            float forwardSpeedBefore = data.initialVelocity.Dot(initialFwdNorm);
+            float forwardSpeedAfter = player.vel.Dot(initialFwdNorm);
+            float forwardSpeedGain = forwardSpeedAfter - forwardSpeedBefore;
+
+            // === SPEED FLIP CRITERIA ===
             bool criteriaA = data.diagonalFlipDetected;
             bool criteriaB = data.cancelDetected;
-            bool criteriaC = data.airRollUsed;
-            bool criteriaD = speedGain > 300.0f;
-            bool criteriaE = flipDuration < 1.0f;
-            bool criteriaF = endSpeed > 1800.0f;
-            
-            // Count how many criteria met
-            int criteriaMet = 
+            bool criteriaC = data.airRollUsedInCancelWindow;  // Fix 4
+            bool criteriaD = forwardSpeedGain > 300.0f;       // Fix 3
+            bool criteriaE = flipDuration < 0.6f;             // tightened from 1.0s
+            bool criteriaF = endSpeed > 2000.0f;              // Fix 5: raised from 1800
+
+            int criteriaMet =
                 (criteriaA ? 1 : 0) +
                 (criteriaB ? 1 : 0) +
                 (criteriaC ? 1 : 0) +
                 (criteriaD ? 1 : 0) +
                 (criteriaE ? 1 : 0) +
                 (criteriaF ? 1 : 0);
-            
-            // === GRADED REWARDS ===
-            
+
             if (criteriaMet >= 5) {
                 // PERFECT SPEED FLIP
                 reward += 15.0f;
-                
-                // All criteria = exceptional
+
                 if (criteriaMet == 6) {
-                    reward += 5.0f; // Textbook speed flip!
+                    reward += 5.0f;
                 }
-                
-                // Context bonuses
+
                 bool isKickoff = state.ball.pos.Length() < 200.0f &&
-                               data.initialVelocity.Length() < 1000.0f &&
-                               (player.pos - state.ball.pos).Length() > 3000.0f;
-                
+                                 data.initialVelocity.Length() < 1000.0f &&
+                                 (player.pos - state.ball.pos).Length() > 3000.0f;
                 if (isKickoff) {
-                    reward += 10.0f; // CRITICAL for kickoffs
+                    reward += 10.0f;
                 }
-                
-                // Supersonic achievement
+
                 if (endSpeed > 2200.0f) {
                     reward += 5.0f;
                 }
-                
-            } else if (criteriaMet >= 3) {
-                // GOOD SPEED FLIP ATTEMPT
-                reward += 5.0f * (criteriaMet / 6.0f);
-                
+
             } else {
-                // FAILED SPEED FLIP
-                // Penalize if tried but failed (teaches proper technique)
+                // Fix 1: removed criteriaMet >= 3 partial tier — it was the exploit
+                // Penalize poorly executed attempts to discourage the half-flip pattern
                 if (data.diagonalFlipDetected || data.cancelDetected) {
-                    reward -= 1.0f; // Attempted but executed poorly
+                    reward -= 1.0f;
                 }
             }
         }
-        
+
         return reward;
     }
-};  
+};
 
 // ============================================================================
 // ENHANCED ZAP DASH REWARD

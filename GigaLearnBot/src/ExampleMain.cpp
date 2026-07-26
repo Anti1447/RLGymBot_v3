@@ -33,6 +33,8 @@ using namespace RLGC;
 
 // Global flag to indicate if we're in render mode (used for fixed game modes)
 bool g_renderMode = false;
+// Which mode to render when g_renderMode is true (set via --1v1/--2v2/--3v3)
+GameModeType g_renderGameMode = GameModeType::MODE_1V1;
 
 // ============================================================================
 // ENVIRONMENT CREATION
@@ -54,14 +56,9 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Sample game mode based on environment index
     GameModeType mode;
     if (g_renderMode) {
-        // In render mode with 3 games: game 0=1v1, game 1=2v2, game 2=3v3
-        if (index == 0) {
-            mode = GameModeType::MODE_1V1;
-        } else if (index == 1) {
-            mode = GameModeType::MODE_2V2;
-        } else {
-            mode = GameModeType::MODE_3V3;
-        }
+        // Render mode only ever creates 1 arena (see Learner.cpp: numArenas = renderMode ? 1 : numGames),
+        // so the mode is fixed by the --1v1/--2v2/--3v3 flag rather than cycling by index.
+        mode = g_renderGameMode;
     } else {
         // In training mode: random sampling with 1:2:3 distribution
         mode = GameModeConfig::SampleMode();
@@ -182,6 +179,26 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
         report.AddAvg("AirDribbleClearing/Successful", clearingMetrics.successful);
         report.AddAvg("AirDribbleClearing/In Clearing Zone", clearingMetrics.inClearingZone);
         report.AddAvg("AirDribbleClearing/Total Reward", clearingMetrics.rewardSum);
+    }
+
+    // ========================================================================
+    // DOUBLE JUMP POP METRICS (collected every step)
+    // ========================================================================
+    {
+        auto m = DoubleJumpPopReward::GetAndResetMetrics();
+        if (m.carriesStarted > 0 || m.doubleJumps > 0) {
+            report.AddAvg("DoubleJumpPop/CarriesStarted",   (float)m.carriesStarted);
+            report.AddAvg("DoubleJumpPop/JumpsFromCarry",   (float)m.jumpsFromCarry);
+            report.AddAvg("DoubleJumpPop/DoubleJumps",      (float)m.doubleJumps);
+            report.AddAvg("DoubleJumpPop/PopsQualified",    (float)m.popsQualified);
+            report.AddAvg("DoubleJumpPop/PopsRejectedFar",  (float)m.popsRejectedFar);
+            report.AddAvg("DoubleJumpPop/PopsRejectedMag",  (float)m.popsRejectedMag);
+            report.AddAvg("DoubleJumpPop/FollowThroughHit", (float)m.followThroughHit);
+            report.AddAvg("DoubleJumpPop/JumpRate",          (float)m.jumpRate);
+            report.AddAvg("DoubleJumpPop/PopQualifyRate",    (float)m.popQualifyRate);
+            report.AddAvg("DoubleJumpPop/FollowThroughRate", (float)m.followThroughRate);
+            report.AddAvg("DoubleJumpPop/AvgRewardPerPop",   (float)m.avgRewardPerPop);
+        }
     }
 
     // ========================================================================
@@ -314,6 +331,69 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
             report.AddAvg("WallCeilingRedirect/RewardSum",         (float)m.rewardSum);
             report.AddAvg("WallCeilingRedirect/ShapingSum",        (float)m.shapingSum);
         }
+    }
+
+    // ========================================================================
+    // COUNTER-ATTACK REWARD — Fast-Break Window Metrics
+    // ========================================================================
+    {
+        auto m = CounterAttackReward::GetAndResetMetrics();
+        if (m.windowsOpened > 0) {
+            report.AddAvg("CounterAttack/WindowsOpened",      (float)m.windowsOpened);
+            report.AddAvg("CounterAttack/WindowsCapitalized", (float)m.windowsCapitalized);
+            report.AddAvg("CounterAttack/AvgAdvantage",       (float)m.avgAdvantage);
+            report.AddAvg("CounterAttack/RewardSum",          (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // POSSESSION CONTROL v2 — Threat-gated possession metrics
+    // ========================================================================
+    {
+        auto m = PossessionControlRewardv2::GetAndResetMetrics();
+        report.AddAvg("Possession/V2/ThreatActiveRate %", (float)(m.threatActiveRate * 100.0));
+        report.AddAvg("Possession/V2/DurationBonusMean",  (float)m.durationBonusMean);
+        report.AddAvg("Possession/V2/GiveawayEvents",     (float)m.giveawayEvents);
+        report.AddAvg("Possession/V2/DangerGiveawayRatio %", (float)(m.dangerGiveawayRatio * 100.0));
+        report.AddAvg("Possession/V2/ActivationRate %",   (float)(m.activationRate * 100.0));
+        report.AddAvg("Possession/V2/MeanValue",          (float)m.meanValue);
+    }
+
+    // ========================================================================
+    // FAKE CHALLENGE REWARDS — Defensive fake + Offensive fake shot (Rev 2)
+    // ========================================================================
+    {
+        auto m = FakeChallengeDefenseReward::GetAndResetMetrics();
+        if (m.sells > 0 || m.zoneRejects > 0) {
+            report.AddAvg("FakeChallenge/Def/Sells",       (float)m.sells);
+            report.AddAvg("FakeChallenge/Def/Aborts",      (float)m.aborts);
+            report.AddAvg("FakeChallenge/Def/OppCommits",  (float)m.oppCommits);
+            report.AddAvg("FakeChallenge/Def/Fires",       (float)m.fires);
+            report.AddAvg("FakeChallenge/Def/ZoneRejects", (float)m.zoneRejects);
+            if (m.fires > 0)
+                report.AddAvg("FakeChallenge/Def/AvgReward", (float)(m.rewardSum / m.fires));
+        }
+    }
+    {
+        auto m = FakeChallengeOffenseReward::GetAndResetMetrics();
+        if (m.sells > 0) {
+            report.AddAvg("FakeChallenge/Off/Sells",      (float)m.sells);
+            report.AddAvg("FakeChallenge/Off/Aborts",     (float)m.aborts);
+            report.AddAvg("FakeChallenge/Off/OppCommits", (float)m.oppCommits);
+            report.AddAvg("FakeChallenge/Off/Fires",      (float)m.fires);
+            if (m.fires > 0)
+                report.AddAvg("FakeChallenge/Off/AvgReward", (float)(m.rewardSum / m.fires));
+        }
+    }
+
+    // ========================================================================
+    // BALL LANDING POSITION — bounce-landing-spot positioning (replaces
+    // BallTrajectoryInterceptionReward, Rev 1.0 2026-07-07)
+    // ========================================================================
+    {
+        auto m = BallLandingPositionReward::GetAndResetMetrics();
+        report.AddAvg("BallLandingPosition/ActivationRate", (float)m.activeFrames);
+        report.AddAvg("BallLandingPosition/MeanReward", (float)m.totalReward);
     }
 
     // ========================================================================
@@ -465,6 +545,12 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
             report.AddAvg("Kickoff/Counter/AvgBallSpeed",  (float)m.avgBallSpeed);
         }
     }
+    {
+        auto m = KickoffCounterpositionReward::GetAndResetMetrics();
+        report.AddAvg("Kickoff/CounterPos/SpeedflipDetected", (float)m.speedflipDetected);
+        report.AddAvg("Kickoff/CounterPos/PreshadeCorrect",   (float)m.preshadeCorrect);
+        report.AddAvg("Kickoff/CounterPos/TouchBonus",        (float)m.touchBonus);
+    }
 
     // Add our metrics
     for (auto& state : states) {
@@ -515,16 +601,26 @@ int main(int argc, char* argv[]) {
 
     // Parse command-line arguments for render mode
     bool renderMode = false;
+    GameModeType renderGameMode = GameModeType::MODE_1V1;
     for (int i = 1; i < argc; i++) {
-        if (std::string(argv[i]) == "--render") {
+        std::string arg = argv[i];
+        if (arg == "--render") {
             renderMode = true;
-            std::cout << "[CONFIG] Render mode enabled\n";
-            break;
+        } else if (arg == "--1v1") {
+            renderGameMode = GameModeType::MODE_1V1;
+        } else if (arg == "--2v2") {
+            renderGameMode = GameModeType::MODE_2V2;
+        } else if (arg == "--3v3") {
+            renderGameMode = GameModeType::MODE_3V3;
         }
     }
+    if (renderMode) {
+        std::cout << "[CONFIG] Render mode enabled (" << GameModeConfig::GetModeName(renderGameMode) << ")\n";
+    }
 
-    // Set global render flag (used by EnvCreateFunc for cycling mode)
+    // Set global render flags (used by EnvCreateFunc since render mode only creates 1 arena)
     g_renderMode = renderMode;
+    g_renderGameMode = renderGameMode;
 
     // HARDCODED: taker runs a position-specific speed-flip sequence; NN resumes after.
     // STOCHASTIC: NN controls every frame including kickoffs (useful for debugging).
@@ -549,8 +645,8 @@ int main(int argc, char* argv[]) {
         cfg.sendMetrics = false;           // No need to log metrics from render instance
         cfg.renderMode = true;             // Enable visualization
         cfg.ppo.deterministic = true;      // Use deterministic policy (best actions, no exploration)
-        cfg.numGames = 3;                  // 3 games: 1v1, 2v2, 3v3 (one per mode, cycling)
-        std::cout << "[CONFIG] Rendering with deterministic policy (1v1, 2v2, 3v3 cycling)\n";
+        cfg.numGames = 1;                  // Render mode only ever creates 1 arena (see Learner.cpp)
+        std::cout << "[CONFIG] Rendering with deterministic policy (" << GameModeConfig::GetModeName(renderGameMode) << ")\n";
     } else {
         cfg.sendMetrics = true;
         cfg.renderMode = false;

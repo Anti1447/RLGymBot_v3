@@ -511,89 +511,93 @@ namespace RLGC {
     // ============================================================================
     // OPPONENT PASS INTERCEPTION REWARD
     // ============================================================================
-    // Rewards bots for intercepting passes between opponents
-    // Detects when opponent A passes to opponent B and we intercept it
+    // Rewards bots for intercepting passes between opponents.
+    // Detects when a team touches the ball with a supporting teammate nearby
+    // (pass-like context), then rewards the first touch by the other team
+    // within PASS_WINDOW seconds afterward.
     // Rev 1.0 (2025-01-31, NJH)
+    // Rev 2.0 (2026-07-06, NJH): the original design required the passer's and
+    //   interceptor's touches to land on the exact same physics step, which is
+    //   only possible on simultaneous double-touches (50/50s) - a real pass
+    //   takes multiple steps to travel, so it never had a chance to fire on an
+    //   actual interception. Replaced with PreStep-based cross-step tracking
+    //   per the CLAUDE.md duration-window pattern.
     class OpponentPassInterceptionReward : public Reward {
     public:
-        float passInterceptionDistance;  // How close the pass needs to be to our intercept
-        float minPassSpeed;              // Minimum speed to count as a pass
-        float cooldownSeconds;          // Cooldown duration in seconds
+        float minPassSpeed;    // Minimum ball speed to count as a pass
+        float cooldownSeconds; // Per-interceptor cooldown duration in seconds
 
-        mutable std::unordered_map<uint32_t, uint64_t> lastInterceptTick;
+        static constexpr float PASS_WINDOW = 1.2f;           // seconds a pass-like touch stays interceptable
+        static constexpr float TEAMMATE_PROXIMITY = 3000.0f; // uu, pass-support radius
 
-        OpponentPassInterceptionReward(float distance = 500.0f, float minSpeed = 1000.0f, float cooldown = 0.3f)
-            : passInterceptionDistance(distance), minPassSpeed(minSpeed), cooldownSeconds(cooldown) {
+        OpponentPassInterceptionReward(float minSpeed = 600.0f, float cooldown = 0.3f)
+            : minPassSpeed(minSpeed), cooldownSeconds(cooldown) {
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            _currentTime = 0.0f;
+            _hasLastPasser = false;
+            _lastPasserTeam = Team::BLUE;
+            _lastPassTime = -1000.0f;
+            _lastPassAccuracy = 0.0f;
+            _cooldownRemaining.clear();
+        }
+
+        virtual void PreStep(const GameState& state) override {
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            _currentTime += dt;
+
+            // Tick down every interceptor's cooldown regardless of touch state this step
+            for (auto& kv : _cooldownRemaining)
+                kv.second = RS_MAX(0.0f, kv.second - dt);
+
+            float ballSpeed = state.ball.vel.Length();
+            if (ballSpeed < minPassSpeed) return;
+
+            for (const auto& toucher : state.players) {
+                if (!toucher.ballTouchedStep) continue;
+
+                // Does the toucher have a supporting teammate nearby? (pass-like context)
+                float distToClosestTeammate = 1e6f;
+                for (const auto& teammate : state.players) {
+                    if (teammate.team != toucher.team) continue;
+                    if (teammate.carId == toucher.carId) continue;
+
+                    float distToTeammate = (state.ball.pos - teammate.pos).Length();
+                    distToClosestTeammate = RS_MIN(distToClosestTeammate, distToTeammate);
+                }
+
+                if (distToClosestTeammate < TEAMMATE_PROXIMITY) {
+                    _lastPasserTeam = toucher.team;
+                    _hasLastPasser = true;
+                    _lastPassTime = _currentTime;
+                    _lastPassAccuracy = RS_CLAMP(1.0f - (distToClosestTeammate / TEAMMATE_PROXIMITY), 0.0f, 1.0f);
+                }
+            }
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (!player.ballTouchedStep) return 0.0f;
+            if (!_hasLastPasser) return 0.0f;
+            if (_lastPasserTeam == player.team) return 0.0f;             // touch by the passer's own team, not an interception
+            if (_currentTime - _lastPassTime > PASS_WINDOW) return 0.0f; // pass window went stale
 
-            // Cooldown check
-            auto it = lastInterceptTick.find(player.carId);
-            if (it != lastInterceptTick.end()) {
-                uint64_t ticksSinceLast = state.lastTickCount - it->second;
-                float secondsSinceLast = ticksSinceLast * state.deltaTime;  // Approximate time elapsed
-                if (secondsSinceLast < cooldownSeconds) {
-                    return 0.0f;
-                }
-            }
+            float& cd = _cooldownRemaining[player.carId];
+            if (cd > 0.0f) return 0.0f;
 
-            // Check if ball velocity is high enough to be a pass
-            float ballSpeed = state.ball.vel.Length();
-            if (ballSpeed < minPassSpeed) {
-                return 0.0f;
-            }
+            cd = cooldownSeconds;
 
-            // Find if this ball came from an opponent recently
-            bool passFromOpponent = false;
-            float passAccuracy = 0.0f;
-
-            for (const auto& other : state.players) {
-                if (other.team == player.team) continue;  // Not an opponent
-                if (!other.ballTouchedStep) continue;     // Didn't touch ball this frame
-
-                // They just touched the ball - is it heading toward their teammate?
-                bool hasTeammate = false;
-                float distToClosestTeammate = 10000.0f;
-
-                for (const auto& teammate : state.players) {
-                    if (teammate.team != other.team) continue;
-                    if (teammate.carId == other.carId) continue;
-
-                    float distToTeammate = (state.ball.pos - teammate.pos).Length();
-                    if (distToTeammate < distToClosestTeammate) {
-                        distToClosestTeammate = distToTeammate;
-                        hasTeammate = true;
-                    }
-                }
-
-                // If this opponent touched the ball and has a teammate nearby, it's likely a pass
-                if (hasTeammate && distToClosestTeammate < 3000.0f) {
-                    passFromOpponent = true;
-
-                    // Accuracy bonus: how well we intercepted (closer = better interception)
-                    float distToTeammate = distToClosestTeammate;
-                    passAccuracy = RS_CLAMP(
-                        1.0f - (distToTeammate / 3000.0f),
-                        0.0f, 1.0f
-                    );
-                    break;
-                }
-            }
-
-            if (!passFromOpponent) return 0.0f;
-
-            lastInterceptTick[player.carId] = state.lastTickCount;
-
-            // Reward: base 1.5 + accuracy bonus
-            float reward = 1.5f + (passAccuracy * 1.0f);  // 1.5 to 2.5
-            return reward;
+            // Reward: base 1.5 + accuracy bonus (1.5 to 2.5)
+            return 1.5f + (_lastPassAccuracy * 1.0f);
         }
 
-        virtual void Reset(const GameState& initialState) override {
-            lastInterceptTick.clear();
-        }
+    private:
+        float _currentTime = 0.0f;
+        bool _hasLastPasser = false;
+        Team _lastPasserTeam = Team::BLUE;
+        float _lastPassTime = -1000.0f;
+        float _lastPassAccuracy = 0.0f;
+        mutable std::unordered_map<uint32_t, float> _cooldownRemaining;
     };
 
     class FiftyAggressionReward : public Reward {
