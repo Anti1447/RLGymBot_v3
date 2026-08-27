@@ -53,10 +53,10 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.017f;
-        cfg.policyLR = 1.17e-4f;
-        cfg.criticLR = 1.17e-4f;
-        cfg.noTouchTimeout = 12.0f;
+        cfg.entropyScale = 0.015f;
+        cfg.policyLR = 1.18e-4f;
+        cfg.criticLR = 1.18e-4f;
+        cfg.noTouchTimeout = 15.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.65f;
         cfg.useAerialTraining = false;
@@ -127,11 +127,11 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     // === CHECKPOINTS ===
     // Use absolute path to ensure it works regardless of working directory
     cfg.checkpointFolder = "C:\\Projects\\RLGymBot_v3\\GigaLearnBot\\build\\checkpoints";
-    cfg.tsPerSave = 100'000'000ULL;      // Save every 100M steps
+    cfg.tsPerSave = 200'000'000ULL;      // Save every 200M steps
     cfg.checkpointsToKeep = 128;
 
     // === POLICY VERSIONS ===
-    cfg.tsPerVersion = 200'000'000ULL;   // New version every 100M steps
+    cfg.tsPerVersion = 400'000'000ULL;   // New version every 400M steps
     cfg.maxOldVersions = 64;
 
     cfg.trainAgainstOldVersions = true;
@@ -173,7 +173,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
     cfg.randomSeed = 123;
 
     // === PPO CONFIG ===
-    int tsPerItr = 400'000;
+    int tsPerItr = 500'000;
     cfg.ppo.tsPerItr = tsPerItr;
     cfg.ppo.batchSize = tsPerItr;
     cfg.ppo.miniBatchSize = 25'000;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.9977f;
+    cfg.ppo.gaeGamma = 0.99785f;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

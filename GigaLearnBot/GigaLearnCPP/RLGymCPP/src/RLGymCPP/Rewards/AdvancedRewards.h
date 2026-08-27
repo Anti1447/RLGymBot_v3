@@ -425,37 +425,78 @@ namespace RLGC {
 
     // ============================================================================
     // HighBallTouchReward
-    // Simple linear reward for touching the ball higher in the air.
+    // Linear reward for touching the ball higher in the air.
     //  - Requires ballTouchedStep
     //  - Scales linearly from minHeight (0 reward) to maxHeight (full reward)
+    //  - Anti-farming: per-player cooldown, kickoff exclusion, min touch-strength gate
     // 2025-12-09 | Rev 1.0 | NJH
+    // Rev 2.0 (2026-07-28, NJH) — hardened against farming: cooldown throttle (stops
+    //   lingering-contact double-pay), kickoff exclusion, minimum touch-strength gate
+    //   (stops near-zero-impulse resting-ball loops). Not gated on isOnGround — cars
+    //   legitimately drive on walls/ceiling and a genuine redirect there should still count.
     // ============================================================================
     class HighBallTouchReward : public Reward {
     private:
         float minHeight;  // height where reward = 0
         float maxHeight;  // height where reward = 1
 
+        // Anti-farming tunables
+        float cooldownSeconds;     // per-player re-trigger throttle, stored as seconds
+        float minTouchVel;         // min ball velocity-delta (uu/s) to count as a real touch
+        static constexpr float kickoffPosThresh = 200.0f;
+        static constexpr float kickoffVelThresh = 150.0f;
+
+        mutable std::unordered_map<uint32_t, float> _cooldownRemaining; // cleared in Reset()
+
     public:
         HighBallTouchReward(float minH = (CommonValues::BALL_RADIUS+400.0f),
-            float maxH = CommonValues::CEILING_Z - 200.0f)
-            : minHeight(minH), maxHeight(maxH) {
+            float maxH = CommonValues::CEILING_Z - 200.0f,
+            float cooldownMs = 500.0f,
+            float minTouchKPH = 10.0f)
+            : minHeight(minH), maxHeight(maxH),
+              cooldownSeconds(cooldownMs / 1000.0f),
+              minTouchVel(RLGC::Math::KPHToVel(minTouchKPH)) {
+        }
+
+        virtual void Reset(const GameState& initialState) override {
+            _cooldownRemaining.clear();
         }
 
         virtual float GetReward(const Player& player,
             const GameState& state,
             bool isFinal) override
         {
+            // Cooldown ticks down every step regardless of touch (see CLAUDE.md 7C pattern)
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            float& cd = _cooldownRemaining[player.carId];
+            if (cd > 0.0f) {
+                cd = RS_MAX(0.0f, cd - dt);
+                return 0.0f;
+            }
+
             if (!player.ballTouchedStep)
                 return 0.0f;
 
-            float z = state.ball.pos.z;
+            // Kickoff exclusion (defense-in-depth; mirrors AerialFirstTouchReward)
+            if (state.ball.pos.Length() < kickoffPosThresh && state.ball.vel.Length() < kickoffVelThresh)
+                return 0.0f;
 
+            float z = state.ball.pos.z;
             if (z <= minHeight)
                 return 0.0f;
-            if (z >= maxHeight)
-                return 1.0f;
 
-            float t = (z - minHeight) / (maxHeight - minHeight); // linear 0–1
+            // Minimum touch-strength gate: filters near-zero-impulse "resting ball"
+            // contacts (ball wedged against a wall/ceiling) without requiring a
+            // strong hit — weak legitimate touches still clear this bar.
+            if (!state.prev)
+                return 0.0f;
+            float hitForce = (state.ball.vel - state.prev->ball.vel).Length();
+            if (hitForce < minTouchVel)
+                return 0.0f;
+
+            float t = (z >= maxHeight) ? 1.0f : (z - minHeight) / (maxHeight - minHeight);
+
+            _cooldownRemaining[player.carId] = cooldownSeconds;
             return t;
         }
     };

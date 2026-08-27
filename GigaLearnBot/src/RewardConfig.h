@@ -15,6 +15,7 @@
 #include <RLGymCPP/Rewards/OutplayRewards.h>
 #include <RLGymCPP/Rewards/FlipResetReward.h>
 #include <RLGymCPP/Rewards/FlipResetApproachReward.h>
+#include <RLGymCPP/Rewards/RolvFlipResetReward.h>
 #include <RLGymCPP/Rewards/GodTierMovementRewards_Enhanced.h>
 #include <RLGymCPP/Rewards/PossessionRewards.h>
 #include <RLGymCPP/Rewards/MovementAndKickoffRewards_Enhanced.h>
@@ -95,6 +96,7 @@
 #include <RLGymCPP/Rewards/RolvBallTravelReward.h>
 #include <RLGymCPP/Rewards/LateralPushDribbleReward.h>
 #include <RLGymCPP/Rewards/CounterAttackReward.h>
+#include <RLGymCPP/Rewards/FreeShotConversionReward.h>
 using namespace RLGC;
 
 enum class TrainingPhase {

@@ -347,6 +347,19 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     }
 
     // ========================================================================
+    // FREE SHOT CONVERSION REWARD — Uncontested Shot Window Metrics
+    // ========================================================================
+    {
+        auto m = FreeShotConversionReward::GetAndResetMetrics();
+        if (m.windowsOpened > 0) {
+            report.AddAvg("FreeShot/WindowsOpened",    (float)m.windowsOpened);
+            report.AddAvg("FreeShot/WindowsConverted", (float)m.windowsConverted);
+            report.AddAvg("FreeShot/AvgTimeToConvert",  (float)m.avgTimeToConvert);
+            report.AddAvg("FreeShot/RewardSum",         (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
     // POSSESSION CONTROL v2 — Threat-gated possession metrics
     // ========================================================================
     {

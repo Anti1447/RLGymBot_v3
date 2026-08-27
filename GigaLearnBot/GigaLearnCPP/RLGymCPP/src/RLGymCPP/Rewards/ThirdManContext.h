@@ -136,8 +136,8 @@ struct ThirdManContext {
 
             if (fwdVel < -200.0f) anyMovingBack[ti] = true; // actively retreating
 
-            // Role: FURTHEST = third man
-            isThirdMan[p.carId] = (DetermineRoleCommon(p, state) == RoleType::FURTHEST);
+            // Role: LAST = third man
+            isThirdMan[p.carId] = (DetermineRoleCommon(p, state) == RoleType::LAST);
         }
 
         // Opponent closing speed on ball — compute for each team's perspective

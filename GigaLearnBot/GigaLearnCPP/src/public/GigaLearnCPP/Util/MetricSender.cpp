@@ -37,7 +37,13 @@ void GGL::MetricSender::Send(const Report& report) {
 	try {
 		pyMod.attr("add_metrics")(reportDict);
 	} catch (std::exception& e) {
-		RG_ERR_CLOSE("MetricSender: Failed to add metrics, exception: " << e.what());
+		// Non-fatal (2026-08-04): a dropped wandb upload (e.g. a transient network
+		// reset in wandb's own asyncio networking layer) used to kill the entire
+		// multi-day training run via RG_ERR_CLOSE. Metrics logging is not essential
+		// to training progress -- skip this iteration's upload and keep going,
+		// mirroring the existing non-fatal pattern used for on_checkpoint_saved()
+		// just above this call site in Learner.cpp.
+		RG_LOG("WARNING: MetricSender: Failed to add metrics (non-fatal, skipping this iteration's upload): " << e.what());
 	}
 }
 

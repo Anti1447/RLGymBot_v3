@@ -147,7 +147,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 12.0f),  // retired Rev 1.0 — Phase 6+ only
                 WeightedReward(new PitchControlAerialReward(),10.0f),
                 WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 10.0f),
-                WeightedReward(new HighBallTouchReward(), 20.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
+                WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.3f), 10.0f), // taper toward P4-6 plateau; now zero-sum for consistency (was unwrapped — see Reward_Change_Log 2026-07-28)
                 WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 10.0f),
                 WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 15.0f),
                 WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.3f), 40.0f),
@@ -317,10 +317,15 @@ std::vector<WeightedReward> GetPhasedRewards() {
             WeightedReward(new PitchControlAerialReward(), 14.0f),
             
             //WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 20.0f),
-            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.5f), 5.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
+            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.3f), 5.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
             //WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 10.0f),
             //WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 10.0f),
             WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.3f), 60.0f),
+            // UnifiedAirDribbleReward: base progress-toward-goal channel. A second, independent
+            // instance is intentionally also registered below (~line 529) inside a
+            // MathRewardWrapper({UnifiedAirDribbleReward, ShotAccuracyInBoundsReward}, MULTIPLY) —
+            // that second instance is a shot-accuracy-gated bonus channel layered on top of this
+            // one, not an accidental duplicate. Do not remove either without removing both.
             WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.3f), 40.0f),
             WeightedReward(new ZeroSumReward(new UnifiedDoubleTapReward(), 0.3f), 100.0f),
              //WeightedReward(new ZeroSumReward(new JumpTouchReward(), 0.3f), 20.0f),
@@ -522,6 +527,10 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 ),
                 50.0f
             ),
+            // Second UnifiedAirDribbleReward instance (see the base instance + comment at line 324).
+            // This one is gated by ShotAccuracyInBoundsReward via MULTIPLY — a separate
+            // shot-accuracy-conditioned bonus channel, intentionally stacked with the base
+            // progress reward above, not a duplicate registration.
             WeightedReward(
                 new ZeroSumReward(
                     new MathRewardWrapper(
@@ -559,62 +568,73 @@ std::vector<WeightedReward> GetPhasedRewards() {
         auto* thirdManCtx = new ThirdManContext();   // one per arena (per GetPhasedRewards call)
         return std::vector<WeightedReward>{
             //WeightedReward(new FaceBallReward(), 0.1f),
-            WeightedReward(new TrajectoryComparisonVPBReward(), 1.0f),  // replaces VPTB with more nuanced velocity shaping. dont use at the same time as other VPTB to avoid gradient confusion
+            //WeightedReward(new TrajectoryComparisonVPBReward(), 1.0f),  // replaces VPTB with more nuanced velocity shaping. dont use at the same time as other VPTB to avoid gradient confusion
                 // Source: https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/velocity_player_to_ball_reward.py
                 // ZeroSumReward wrappers restored 2026-07-07: every other phase wraps these
                 // three in ZeroSumReward(child, 0.3f); Phase 5 was missing it (unexplained
                 // copy-paste omission) at the highest raw weights in the whole config.
-                WeightedReward(new ZeroSumReward(new StrongTouchReward(50, 110), 0.3f), 130.0f),  // Stricter
-                WeightedReward(new HalfVolleyReward(), 10.0f),
-                WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.3f), 50.0f),
-                WeightedReward(new ZeroSumReward(new DirectionalAccelerationReward(), 0.3f), 80.0f),
-                WeightedReward(new ZeroSumReward(new EnhancedVelocityBallToGoalReward(), 1.0f), 40.0f),  // ← 5x boost
-                WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 40.0f),
+                WeightedReward(new ZeroSumReward(new StrongTouchReward(50, 110), 0.3f), 25.0f),  // Stricter
+                //WeightedReward(new HalfVolleyReward(), 10.0f),
+                WeightedReward(new ZeroSumReward(new TouchAccelReward(), 0.2f), 35.0f),
+                WeightedReward(new ZeroSumReward(new DirectionalAccelerationReward(), 0.2f), 50.0f),
+                WeightedReward(new ZeroSumReward(new EnhancedVelocityBallToGoalReward(), 1.0f), 15.0f),  // ← 5x boost
+                WeightedReward(new ZeroSumReward(new VelocityBallToGoalReward(), 1.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new OpenNetPushReward(), 1.0f), 25.0f),  // 2026-06-04 push ball into open net (far bottom corner)
-                WeightedReward(new PowerSlideControlReward(), 0.8f),
+                //WeightedReward(new PowerSlideControlReward(), 0.5f),
                 // GoalViewReward: potential-based shaping via goal-mouth solid angle (Rolv / Ng et al. 1999).
                 // NOT wrapped in ZeroSumReward — the class already returns +/- by team internally.
                 //WeightedReward(new GoalViewReward(0.9975f), 40.0f),
                 WeightedReward(new BallGoalProximityReward(), 0.6f), // no zerosum needed since this is just a proximity shaping reward, not directly competitive
                 // CornerToLaneReward: rewards moving ball toward center lane when in opponent corner.
                 // Discourages corner-to-corner pinching; x-component reward only.
-                WeightedReward(new ZeroSumReward(new CornerToLaneReward(), 0.5f), 20.0f),
+                //WeightedReward(new ZeroSumReward(new CornerToLaneReward(), 0.5f), 20.0f),
                 //WeightedReward(new OwnGoalPenalty(-1.0f), 1500.0f),
-                WeightedReward(new RolvBallTravelReward(
-                    /*selfToSelf*/    0.2f,   // dribble credit
-                    /*selfToTm8*/     1.0f,   // pass sender
-                    /*tm8ToSelf*/     1.0f,   // pass receiver
-                    /*selfToOpp*/    -1.0f,   // turnover penalty
-                    /*oppToSelf*/     0.5f,   // intercept credit
-                    /*selfToOppGoal*/ 1.5f,   // shot scoring (separate from GoalReward)
-                    /*selfToOwnGoal*/-1.0f    // concede penalty
-                ), 25.0f),
+                //WeightedReward(new RolvBallTravelReward(
+                //    /*selfToSelf*/    0.2f,   // dribble credit
+                //    /*selfToTm8*/     1.0f,   // pass sender
+                //    /*tm8ToSelf*/     1.0f,   // pass receiver
+                //    /*selfToOpp*/    -1.0f,   // turnover penalty
+                //    /*oppToSelf*/     0.5f,   // intercept credit
+                //    /*selfToOppGoal*/ 1.0f,   // shot scoring (separate from GoalReward)
+                //    /*selfToOwnGoal*/-1.0f    // concede penalty
+                //), 25.0f),
 
 
                 // NEW: Aerial focus
                 //WeightedReward(new AirReward(), 0.2f),
                 //WeightedReward(new ZeroSumReward(new AirTouchReward(), 0.3f), 50.0f),  // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
-                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 0.6f), 100.0f),
-                //WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 6.0f),
+                WeightedReward(new ZeroSumReward(new AerialFirstTouchReward(), 0.5f), 50.0f),
+                WeightedReward(new ZeroSumReward(new BallRedirectReward(), 0.3f), 100.0f),
+                WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.2f), 1.5f),
                 //WeightedReward(new DoubleJumpAerialReward(), 50.0f),  // stepping stone: teach pure double-jump before PitchControl can fire
-                //WeightedReward(new PitchControlAerialReward(), 12.0f),
+                // PitchControlAerialReward — disabled 2026-07-31: pays up to 27 raw (2.0 base +
+                // 3.0 height + 1.0 pitch, ×1.5 boosted) for jump→pitch25-65°→doublejump-within-0.55s
+                // with NO ball-distance/relevance gate at all, and isOnGround is true on walls too,
+                // so it fires equally for wall-jumps. Suspected root cause of unnecessary off-ball
+                // flipping/airtime — see Reward_Change_Log.md.
+                //WeightedReward(new PitchControlAerialReward(), 3.0f),
 
                 //WeightedReward(new ZeroSumReward(new EarlyAerialReward(), 0.5f), 20.0f),
-                WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.6f), 10.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
+                WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.2f), 8.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
                 //WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 1.0f), 10.0f),
                 //WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 10.0f),
-                //WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.4f), 30.0f),
-                //WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.4f), 30.0f),
-                WeightedReward(new ZeroSumReward(new UnifiedDoubleTapReward(), 0.4f), 150.0f),
+                WeightedReward(new ZeroSumReward(new MultiAirTouchReward(), 0.2f), 10.0f),
+                WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.2f), 20.0f),
+                // RolvFlipResetReward: ported from rlgym-tools (credit Rolv-Arild). Introduces
+                // flip-reset acquisition/use one phase earlier than the existing FlipReset*
+                // trio (Phase 6). NOT ZeroSummed, matching FlipResetReward/SimpleFlipResetReward
+                // convention (individual mechanic skill, not directly competitive).
+                WeightedReward(new RolvFlipResetReward(), 400.0f),
+                WeightedReward(new ZeroSumReward(new UnifiedDoubleTapReward(), 0.2f), 150.0f),
                 //WeightedReward(new ZeroSumReward(new JumpTouchReward(), 0.3f), 20.0f),
-               WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 30.0f),
-               // AirRollShotReward Rev 3.0 (2026-07-07): re-enabled after fixing the gate
-               // (was checking isFlipping/dodge-recency instead of genuine air-roll input).
-               // Weight 40.0f is a fresh conservative estimate, not the stale pre-fix 100.0f
-               // — re-tune once real activation data comes in. See Reward_Change_Log.md.
-               //WeightedReward(new ZeroSumReward(new AirRollShotReward(), 0.3f), 80.0f),
-                WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.4f), 60.0f),
-                WeightedReward(new ZeroSumReward(new AerialOutplayReward(), 0.4f), 30.0f),  // Tactical awareness during aerials
+                WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 40.0f),
+                // AirRollShotReward Rev 3.0 (2026-07-07): re-enabled after fixing the gate
+                // (was checking isFlipping/dodge-recency instead of genuine air-roll input).
+                // Weight 40.0f is a fresh conservative estimate, not the stale pre-fix 100.0f
+                // — re-tune once real activation data comes in. See Reward_Change_Log.md.
+                //WeightedReward(new ZeroSumReward(new AirRollShotReward(), 0.3f), 80.0f),
+                WeightedReward(new ZeroSumReward(new BackboardReboundReward(), 0.4f), 100.0f),
+                WeightedReward(new ZeroSumReward(new AerialOutplayReward(), 0.4f), 60.0f),  // Tactical awareness during aerials
                 // WallCeilingRedirectReward — COMMENTED OUT 2026-06-25: provides indirect shaping
                 // toward post-bounce position, which masks whether the bot is genuinely pre-reading
                 // or just reacting. Replaced by PredictiveBounceReadReward for an explicit signal.
@@ -627,7 +647,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new OutplayExplorationReward(), 6.0f),
                 // OutplayCreativityReward: inverted/sideways car or low-boost (<30) during outplay touch.
                 //WeightedReward(new OutplayCreativityReward(), 2.5f),
-                WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 100.0f),
+                WeightedReward(new ZeroSumReward(new DoomseeDisshShotReward(), 0.3f), 50.0f),
                 //WeightedReward(new InvertedAirDribbleReward(), 110.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
                 //WeightedReward(new TornadoSpinTakeoffReward(), 5.0f), // begin decreasing so we can focus on other rewards. covered by AerialFirstTouchReward
 
@@ -636,22 +656,27 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new ReverseHalfFlipReward(), 3.0f),
                 WeightedReward(new RolvWavedashReward(), 4.0f),
                 //WeightedReward(new WavedashBasicReward(), 5.0f),
+                // WavedashJumpFlipChainReward — disabled 2026-07-31: pays up to 72 raw (15.0 base +
+                // 5.0 speed + 4.0 timing, ×3.0 weight) for a wavedash→jump→flip input chain with
+                // NO ball-distance/relevance gate at all. Highest unguarded per-event payout found
+                // in the investigation — suspected primary cause of unnecessary off-ball flipping.
+                // See Reward_Change_Log.md.
                 //WeightedReward(new WavedashJumpFlipChainReward(), 3.0f),
                 //WeightedReward(new EnhancedSpeedFlipReward(), 16.0f),
                 //WeightedReward(new CeilingDoubleJumpReward(), 2.0f),
                 //WeightedReward(new DirectionalFlipRecoveryReward(), 0.4f),
                 WeightedReward(new ProperLandingReward(), 1.0f),
                 WeightedReward(new AdvancedRecoveryReward(), 0.12f),
-                //WeightedReward(new PowerslideJumpFlipReward(), 0.5f),
+                WeightedReward(new PowerslideJumpFlipReward(), 0.5f),
                 WeightedReward(new BumpedFlipRecoveryReward(), 0.4f),
                 WeightedReward(new GoalPostRecoveryReward(), 0.5f),
-                WeightedReward(new SupersonicReward(), 3.0f),
+                //WeightedReward(new SupersonicReward(), 3.0f),
                 //WeightedReward(new VelocityReward(), 0.1f),
 
                 //WeightedReward(new BoostDownRecoveryReward(), 1.0f),
 
                 // Powerslide turning mechanics (Phase 3 intro — conservative weights)
-                WeightedReward(new PowerslideSharpTurnReward(), 1.5f),
+                //WeightedReward(new PowerslideSharpTurnReward(), 1.5f),
                 //WeightedReward(new Powerslide180ForwardReward(), 1.5f),
                 //WeightedReward(new Powerslide180ReverseReward(), 1.5f),
                 //WeightedReward(new Powerslide360Reward(), 2.0f),
@@ -660,13 +685,13 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // Retired 2026-07-19: pure subset of KickoffSpeedReward + ClosestPlayerKickoffSideReward's
                 // closing-velocity signal (see Reward_Change_Log.md). Class kept intact for other phases.
                 //WeightedReward(new KickoffVelocityPlayerToBallReward(), 1.0f),
-                WeightedReward(new KickoffSpeedReward(), 30.0f),
-                WeightedReward(new ZeroSumReward(new KickoffBallPositionReward(), 1.0f), 20.0f),
-                WeightedReward(new ClosestPlayerKickoffSideReward(), 10.0f),
+                WeightedReward(new KickoffSpeedReward(), 20.0f),
+                WeightedReward(new ZeroSumReward(new KickoffBallPositionReward(), 1.0f), 10.0f),
+                //WeightedReward(new ClosestPlayerKickoffSideReward(), 10.0f),
                 WeightedReward(new KickoffDoubleCommitPenalty(), 1.8f),
                 //WeightedReward(new KickoffStrategyReward(), 15.0f),  // Reward diverse kickoff strategies
                 // Kickoff - Penalize team if nobody commits to the ball
-                WeightedReward(new KickoffNoChaseTeamPenalty(), 20.0f),
+                //WeightedReward(new KickoffNoChaseTeamPenalty(), 20.0f),
                 // Kickoff - Support players grab corner/mid boost during kickoff (2v2+)
                 //WeightedReward(new KickoffSupportBoostReward(), 10.0f),
                 //WeightedReward(new KickoffFormReward(), 20.0f),
@@ -679,59 +704,63 @@ std::vector<WeightedReward> GetPhasedRewards() {
 
                 // NEW: Boost management (critical for aerials)
                 WeightedReward(new PickupBoostReward(0.2f), 90.0f),  // INCREASED; lossWeight=0.2 test (Phase 5 only, see Reward_Change_Log.md)
-                WeightedReward(new SaveBoostReward(), 0.6f),
-                //WeightedReward(new SmallPadCollectionReward(), 50.0f),
-                //WeightedReward(new SmallPadRecoveryRouteReward(), 10.0f),
+                //WeightedReward(new SaveBoostReward(), 0.6f),
+                WeightedReward(new SmallPadCollectionReward(), 20.0f),
+                WeightedReward(new SmallPadRecoveryRouteReward(), 10.0f),
                 WeightedReward(new ZeroSumReward(new BoostStealReward(), 0.5f), 350.0f),
                 //WeightedReward(new ZeroSumReward(new RotationPathBoostDenialReward(), 0.5f), 60.0f),
-                WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 3.5f),
+                //WeightedReward(new ZeroSumReward(new BoostStarvationReward(), 1.0f), 3.5f),
                 //WeightedReward(new BoostWastePenaltyReward(), 15.0f),
                 //WeightedReward(new KickoffBoostRetentionReward(), 2.0f),
-                WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 5.0f),
-                //WeightedReward(new BigBoostApproachReward(), 10.0f),      // leave commented - isolating this test
-                //WeightedReward(new PadCenterAccuracyReward(), 30.0f),
-                //WeightedReward(new DefensiveRotationBoostReward(), 35.0f),
+                //WeightedReward(new SupportingPlayerBoostMaintenanceReward(), 5.0f),
+                //WeightedReward(new BigBoostApproachReward(), 5.0f),      // leave commented - isolating this test
+                //WeightedReward(new PadCenterAccuracyReward(), 5.0f),
+                WeightedReward(new DefensiveRotationBoostReward(), 10.0f),
 
                 // NEW: Dribbling
-                WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 2.0f),
-                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 4.0f),
-                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 0.5f),
+                WeightedReward(new ZeroSumReward(new DribbleReward(), 0.2f), 0.5f),
+                WeightedReward(new ZeroSumReward(new DribbleMasteryReward(), 0.3f), 1.0f),
+                WeightedReward(new ZeroSumReward(new CatchBallOnCarReward(), 0.4f), 0.15f),
                 // LateralPushDribbleReward (Rev 1.1, 2026-06-30): grounded push-dribble toward
                 // far-corner<->net cone, kept slow (<2100 UU/s) and flat (|velZ|<300). Live at
                 // conservative weight per rollout plan step 2. W&B: see GetAndResetMetrics().
-                WeightedReward(new LateralPushDribbleReward(), 2.5f),
+                //WeightedReward(new LateralPushDribbleReward(), 2.5f),
                 // DoubleJumpPopReward (Rev 1.1, 2026-06-30): carry (ball-on-roof grounded
                 // >=0.3s) -> jump -> neutral double jump -> controlled height-gain pop, with
                 // an air-dribble follow-through bonus. Not ZeroSummed — individual mechanic
                 // execution, not a competitive exchange. No dedicated state setter yet;
                 // relies on organic carries from CatchBallOnCarReward/DribbleMasteryReward.
                 // W&B: see GetAndResetMetrics().
-                WeightedReward(new DoubleJumpPopReward(), 35.0f),
+                //WeightedReward(new DoubleJumpPopReward(), 35.0f),
                 //WeightedReward(new ZeroSumReward(new CatchBallReward(), 0.4f), 0.5f),
                 //WeightedReward(new ZeroSumReward(new DribbleSetupReward(), 0.2f), 1.0f),
                 //WeightedReward(new ZeroSumReward(new FlickReward(), 0.5f), 20.0f),
-                WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 0.5f), 60.0f),
-                //WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 20.0f),
-                WeightedReward(new ZeroSumReward(new FlickOutplayReward(), 0.5f), 60.0f),
-                WeightedReward(new ZeroSumReward(new FrontFlipFlickReward(), 0.5f), 25.0f),  // 2026-06-04 front-flip dribble flick
-                WeightedReward(new ZeroSumReward(new DiagonalFlickReward(), 0.5f), 25.0f),   // 2026-06-04 diagonal dribble flick
-                //WeightedReward(new ZeroSumReward(new SideFlickReward(), 0.5f), 15.0f),      // 2026-06-07 pure sideways dribble flick
+                //WeightedReward(new ZeroSumReward(new AdvancedFlickReward(), 0.5f), 60.0f),
+                WeightedReward(new ZeroSumReward(new CompositeFlickReward(), 0.3f), 10.0f),
+                WeightedReward(new ZeroSumReward(new FlickOutplayReward(), 0.5f), 30.0f),
+                WeightedReward(new ZeroSumReward(new FrontFlipFlickReward(), 0.5f), 25.0f),  // 2026-07-29 re-enabled: was never active in any phase, likely contributor to bot not flicking past defenders in 2v2/3v3
+                WeightedReward(new ZeroSumReward(new DiagonalFlickReward(), 0.5f), 25.0f),   // 2026-07-29 re-enabled: was never active in any phase, likely contributor to bot not flicking past defenders in 2v2/3v3
+                WeightedReward(new ZeroSumReward(new SideFlickReward(), 0.5f), 15.0f),      // 2026-07-29 re-enabled: was never active in any phase, likely contributor to bot not flicking past defenders in 2v2/3v3
                 //WeightedReward(new ZeroSumReward(new BallSteerReward(), 0.4f), 0.4f),                                // 2026-06-19 ball-steering through dribble turns
 
                 // NEW: Basic Shots
-                WeightedReward(new ZeroSumReward(new HookShotReward(), 0.3f), 40.0f),
-                WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 40.0f),
-                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 40.0f), // updated reward on 01/30/26
+                WeightedReward(new ZeroSumReward(new HookShotReward(), 0.3f), 20.0f),
+                WeightedReward(new ZeroSumReward(new DirectionChangeReward(), 0.3f), 30.0f),
+                WeightedReward(new ZeroSumReward(new CutOutplayReward(), 0.3f), 30.0f), // updated reward on 01/30/26
+                // ShotExplorationReward: wide-angle, height variety, and field-position shot bonuses.
+                //WeightedReward(new ShotExplorationReward(), 12.0f),
+                // ShotCreativityReward: inverted/sideways car, redirect geometry, first-touch shots.
+                //WeightedReward(new ShotCreativityReward(), 12.0f),
 
                 // NEW: Minor possession shaping and defense
                 //WeightedReward(new DefensivePositionReward(), 1.0f),
-                //WeightedReward(new ZeroSumReward(new ChallengeAngleQualityReward(), 0.3f), 0.9f),  // Angle of challenge approach vs threat vector
-                WeightedReward(new BackboardDefenseReward(), 5.5f),
+                //WeightedReward(new ZeroSumReward(new ChallengeAngleQualityReward(), 0.3f), 0.5f),  // Angle of challenge approach vs threat vector
+                //WeightedReward(new BackboardDefenseReward(), 4.5f),
                 //WeightedReward(new ZeroSumReward(new BackboardInterceptionReward(), 0.5f), 20.0f),
-                WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 2.6f),  // P4: 2.5 → 2.0
+                WeightedReward(new ZeroSumReward(new TimeToBalPossessionReward(), 1.0f), 0.6f),  // P4: 2.5 → 2.0
                 //WeightedReward(new ZeroSumReward(new PossessionControlReward(), 1.0f), 8.0f),   // P4: 10.0 → 1.0 (light intro)
-                WeightedReward(new ZeroSumReward(new PossessionControlRewardv2(), 1.0f), 20.0f),   // P4: [v2: threat-gated]
-                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 0.5f), 3.0f),
+                WeightedReward(new ZeroSumReward(new PossessionControlRewardv2(), 1.0f), 2.0f),   // P4: [v2: threat-gated]
+                WeightedReward(new ZeroSumReward(new ShadowDefenseVsPossessionReward(), 0.5f), 1.0f),
                 //WeightedReward(new ZeroSumReward(new ShadowDefenseReward(), 0.5f), 1.3f),
                 WeightedReward(new ZeroSumReward(new SingleJumpLow5050Reward(), 0.5f), 2.5f),
 
@@ -746,7 +775,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // W&B: FakeChallenge/Off/* and FakeChallenge/Def/*
                 //WeightedReward(new ZeroSumReward(new FakeChallengeOffenseReward(), 0.4f), 1.5f),
                 //WeightedReward(new ZeroSumReward(new FakeChallengeDefenseReward(), 1.0f), 5.0f),
-                //WeightedReward(new DefensivePositioningChallengeReward(), 0.9f),
+                WeightedReward(new DefensivePositioningChallengeReward(), 0.9f),
                 //WeightedReward(new LastManOvercommitPenalty(), 10.0f),
                 //WeightedReward(new UncoveredNetPenalty(), 4.0f),
                 //WeightedReward(new OpponentInterceptAwarePenalty(), 10.0f),
@@ -755,59 +784,61 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 WeightedReward(new ZeroSumReward(new BigClearReward(), 0.5f), 14.0f),
                 WeightedReward(new ZeroSumReward(new CornerClearReward(), 0.5f), 10.0f),
                 //WeightedReward(new PoorWallReboundPenalty(), 80.0f),
-                //WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 25.0f),
+                WeightedReward(new ZeroSumReward(new OpponentPassInterceptionReward(), 1.0f), 25.0f),
                 //WeightedReward(new ZeroSumReward(new BallLandingPositionReward(), 1.0f), 30.0f),
-                WeightedReward(new GoalpostPositioningReward(), 12.0f),
+                //WeightedReward(new GoalpostPositioningReward(), 12.0f),
                 //WeightedReward(new EarlyDangerDetectionReward(), 1.0f),
-                WeightedReward(new EmergencySaveCommitReward(), 6.0f),
-                //WeightedReward(new SimpleOvercommitmentPenalty(), 25.0f),  // Phase 1: Resource management & positioning discipline. 35.0f->26.0f 2026-07-21: Gate 3/5 tax uncontested 1v1 forward commitment, see Reward_Change_Log.md
+                WeightedReward(new EmergencySaveCommitReward(), 3.0f),
+                //WeightedReward(new SimpleOvercommitmentPenalty(), 15.0f),  // Phase 1: Resource management & positioning discipline. 35.0f->26.0f 2026-07-21: Gate 3/5 tax uncontested 1v1 forward commitment, see Reward_Change_Log.md
                 WeightedReward(new DoubleCommitPenalty(), 100.0f),
-                WeightedReward(new ActiveSupportingPositionReward(), 10.0f),
+                //WeightedReward(new ActiveSupportingPositionReward(), 10.0f),
                 //WeightedReward(new LowBoostOppHalfFiftyPunish(), 100.0f),
-                WeightedReward(new ClosestPlayerSpeedReward(), 5.0f),
+                //WeightedReward(new ClosestPlayerSpeedReward(), 5.0f),
                 WeightedReward(new OffBallAerialPenalty(), 15.0f),
-                WeightedReward(new SecondaryAerialPenalty(), 15.0f),
-                WeightedReward(new NonPrimaryAirPenalty(), 15.0f),
+                //WeightedReward(new SecondaryAerialPenalty(), 15.0f),
+                //WeightedReward(new NonPrimaryAirPenalty(), 15.0f),
 
                 // Ground readiness suite (2026-06-26)
                 // FlipDuringContestPenalty: penalizes mid-flip when another player is near ball
                 //WeightedReward(new FlipDuringContestPenalty(), 0.2f),
                 // GroundedAtContactReward: rewards being grounded when any other player touches ball
-                //WeightedReward(new GroundedAtContactReward(), 0.2f),
+                WeightedReward(new GroundedAtContactReward(), 0.08f),
                 // AirborneOnPossessionLostPenalty: penalizes being airborne when opponent gains ball
-                WeightedReward(new AirborneOnPossessionLostPenalty(), 0.5f),
+                WeightedReward(new AirborneOnPossessionLostPenalty(), 0.8f),
 
                 // NEW: Passing rewards
                 //WeightedReward(new ZeroSumReward(new BackPassReward(), 1.0f), 4.0f),
-                WeightedReward(new ZeroSumReward(new PassingLaneNetworkReward(), 1.0f), 15.0f),
-                WeightedReward(new ZeroSumReward(new SpatialFakeReward(), 1.0f), 15.0f),
-                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 65.0f),
-                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 32.0f),
+                //WeightedReward(new ZeroSumReward(new PassingLaneNetworkReward(), 1.0f), 9.0f),
+                //WeightedReward(new ZeroSumReward(new SpatialFakeReward(), 1.0f), 9.0f),
+                WeightedReward(new ZeroSumReward(new PassingSetupReward(), 1.0f), 24.0f),
+                WeightedReward(new ZeroSumReward(new ReceivingPassReward(), 1.0f), 12.0f),
+                WeightedReward(new InfieldPassReward(), 25.0f),
+                WeightedReward(new DownfieldPassReward(), 25.0f),
                 //WeightedReward(new PassToOpponentPenalty(), 60.0f),
 
                 // Rotation handled entirely by ProgressiveRotationReward (includes spacing + retreat internally)
                 //WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 2.0f),
-                WeightedReward(new InstantSpacingReward(RotationPhase::CHAMPION_PLUS), 6.0f),  // UPGRADED
-                WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 4.0f),  // UPGRADED
-                //WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 20.0f),
-                WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 4.0f),
+                //WeightedReward(new InstantSpacingReward(RotationPhase::CHAMPION_PLUS), 4.0f),  // UPGRADED
+                //WeightedReward(new RetreatAfterTouchReward(RotationPhase::CHAMPION_PLUS), 2.0f),  // UPGRADED
+                //WeightedReward(new ProgressiveRotationReward(RotationPhase::CHAMPION_PLUS), 10.0f),
+                //WeightedReward(new BoostAwareRotationReward(RotationPhase::CHAMPION_PLUS), 3.0f),
 
                 // Positioning — 2v2/3v3 zone discipline (promoted from Champion-only to Diamond,
                 // 2026-07-07): these 5 were fully implemented but only wired in at Phase 6+, so
                 // they were dormant during Diamond training. Weights copied unchanged from the
                 // Champion block (the only validated setting we have) rather than guessed fresh —
                 // see Reward_Change_Log.md.
-                //WeightedReward(new AntiLayeringPenalty(), 15.0f),
+                //WeightedReward(new AntiLayeringPenalty(), 10.0f),
                 //WeightedReward(new DefensiveZoneOverlapPenalty(), 10.0f),
-                //WeightedReward(new OverflipPenalty(), 20.0f),
-                //WeightedReward(new DiagonalZoneCoverageReward(), 15.0f),
-                //WeightedReward(new NoMansLandPenalty(), 20.0f),
+                //WeightedReward(new OverflipPenalty(), 10.0f),
+                //WeightedReward(new DiagonalZoneCoverageReward(), 2.0f),
+                //WeightedReward(new NoMansLandPenalty(), 6.0f),
 
                 // NEW: Numerical advantage attacking (2v1+ situations)
-                //WeightedReward(new ZeroSumReward(new NumericalAdvantageAttackingReward(), 1.0f), 100.0f),
+                //WeightedReward(new ZeroSumReward(new NumericalAdvantageAttackingReward(), 1.0f), 50.0f),
                 //WeightedReward(new ZeroSumReward(new BallSideNumericalAdvantageReward(), 1.0f), 2.0f),  // Press when opponent over-advances past ball
                 //WeightedReward(new ZeroSumReward(new CounterAttackReward(), 1.0f), 10.0f),  // Fast-break bonus: capitalize on turnovers when opponents caught upfield
-                WeightedReward(new GoalsideReward(), 0.25f),  // Goalside fundamental: +1 between ball and own net, -0.4 offside (smooth 800uu ramp)
+                WeightedReward(new GoalsideReward(), 0.05f),  // Goalside fundamental: +1 between ball and own net, -0.4 offside (smooth 800uu ramp)
 
                 // ShotLaneCoverageReward (Rev 1.0, 2026-07-24): general, outcome-based
                 // alternative to the hardcoded zone-discipline set above (AntiLayeringPenalty
@@ -815,28 +846,35 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 // actual ball->goal shot lane, not a fixed zone or slot. One variable this
                 // iteration per Reward_Change_Log.md. W&B: shot_lane_coverage_frac,
                 // shot_lane_uncovered_frac via ShotLaneCoverageReward::GetAndResetMetrics().
-                WeightedReward(new ZeroSumReward(new ShotLaneCoverageReward(), 0.3f), 6.0f),
+                //WeightedReward(new ZeroSumReward(new ShotLaneCoverageReward(), 0.3f), 8.0f),
 
                 //WeightedReward(new DemoAwarenessReward(), 2.0f),
-                //WeightedReward(new ZeroSumReward(new BumpReward(), 1.0f), 400.0f),
+                WeightedReward(new ZeroSumReward(new BumpReward(), 1.0f), 400.0f),
                 //WeightedReward(new BumpedPenalty(), 80.0f),
-                //WeightedReward(new ZeroSumReward(new DemoReward(), 1.0f), 600.0f),
-                WeightedReward(new ZeroSumReward(new RolvDemoReward(1.0f, 1.0f, 1.0f), 0.5f), 1000.0f),
-                WeightedReward(new DemoLeadApproachReward(), 60.0f),
-                WeightedReward(new ZeroSumReward(new DemoInterceptLeadReward(), 1.0f), 60.0f),
+                WeightedReward(new ZeroSumReward(new DemoReward(), 1.0f), 600.0f),
+                WeightedReward(new ZeroSumReward(new RolvDemoReward(1.0f, 1.0f, 1.0f), 0.5f), 1200.0f),
+                //WeightedReward(new DemoLeadApproachReward(), 60.0f),
+                //WeightedReward(new ZeroSumReward(new DemoInterceptLeadReward(), 1.0f), 60.0f),
                 //WeightedReward(new ZeroSumReward(new DemoOpportunityReward(), 1.0f), 100.0f),
                 //WeightedReward(new ThirdManDemoReward(), 240.0f),
                 //WeightedReward(new ZeroSumReward(new DemoAdvantageReward(), 1.0f), 60.0f),
                 // Source: https://github.com/RLGym/rlgym-tools/blob/main/rlgym_tools/rocket_league/reward_functions/demo_reward.py
 
                     //WeightedReward(new ZeroSumReward(new PlayerVelocityToOpponentReward(), 1.0f), 5.0f),
-
-                WeightedReward(new ZeroSumReward(new SpeedScaledShotReward(), 0.5f), 120.0f),
-                WeightedReward(new ZeroSumReward(new ShotReward(), 1.0f), 600.0f),
-                WeightedReward(new ZeroSumReward(new ShotPassReward(), 1.0f), 300.0f),
-                WeightedReward(new ZeroSumReward(new AssistReward(), 1.0f), 200.0f),
-                WeightedReward(new GoalReward(-0.8f), 2500.0f),
-                WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 300.0f)
+                WeightedReward(new ZeroSumReward(new ShotPlacementReward(), 0.5f), 200.0f),
+                WeightedReward(new ZeroSumReward(new SpeedScaledShotReward(), 0.5f), 200.0f),
+                WeightedReward(new ZeroSumReward(new ShotReward(), 1.0f), 200.0f),
+                // FreeShotConversionReward (Rev 1.0, 2026-08-02): rewards converting a shot
+                // quickly and cleanly when no living opponent can reach the shot lane in time
+                // to block it (all overcommitted/out of position), including give-and-go setups
+                // (shooter-only credit — see Mechanic Spec / ClaudeFiles for scenario coverage).
+                // W&B: FreeShot/WindowsOpened, FreeShot/WindowsConverted,
+                // FreeShot/AvgTimeToConvert, FreeShot/RewardSum via GetAndResetMetrics().
+                WeightedReward(new ZeroSumReward(new FreeShotConversionReward(), 0.5f), 80.0f),
+                //WeightedReward(new ZeroSumReward(new ShotPassReward(), 1.0f), 100.0f),
+                WeightedReward(new ZeroSumReward(new AssistReward(), 1.0f), 100.0f),
+                WeightedReward(new GoalReward(-0.8f), 1900.0f),
+                WeightedReward(new ZeroSumReward(new SaveReward(), 1.0f), 100.0f)
         };
     }
     case TrainingPhase::PHASE_6_CHAMPION:
@@ -884,7 +922,10 @@ std::vector<WeightedReward> GetPhasedRewards() {
                 //WeightedReward(new SimpleFlipResetReward(), 400.0f),
                 WeightedReward(new UnifiedAirDribbleReward(), 30.0f),
 				WeightedReward(new FlipResetReward(), 50.0f), // new reward for achieving flip reset state (car regains jump after touching ball in air)
-                WeightedReward(new SimpleFlipResetReward(), 350.0f),
+                // SimpleFlipResetReward retired 2026-08-01: replaced by RolvFlipResetReward in
+                // PHASE_5_DIAMOND (facing-gated touch trigger + productive-use validation is a
+                // stricter superset of this flat trigger). See Reward_Change_Log.md.
+                //WeightedReward(new SimpleFlipResetReward(), 350.0f),
                 WeightedReward(new ZeroSumReward(new UnifiedDoubleTapReward(), 0.3f), 150.0f),
                 //WeightedReward(new AirReward(), 0.25f),   // or whatever weight fits your phase
                 WeightedReward(new AirRollReward(), 5.0f),   // or whatever weight fits your phase
@@ -1130,7 +1171,7 @@ std::vector<WeightedReward> GetPhasedRewards() {
             WeightedReward(new ZeroSumReward(new AirDribbleSetupReward(), 0.5f), 20.0f),  // Rev 2.1
             WeightedReward(new ZeroSumReward(new UnifiedAirDribbleReward(), 0.5f), 60.0f),
             WeightedReward(new ZeroSumReward(new AirDribbleBumpReward(), 1.0f), 20.0f),  // Reward bumping opponent during air dribble toward goal
-            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.5f), 25.0f),
+            WeightedReward(new ZeroSumReward(new HighBallTouchReward(), 0.3f), 5.0f), // restored taper (was 25 — contradicted "covered by AerialFirstTouchReward" comment elsewhere; AerialFirstTouchReward is active here too)
             WeightedReward(new ZeroSumReward(new ReverseAerialReward(), 0.3f), 12.0f),
             WeightedReward(new ZeroSumReward(new WallTouchReward(), 0.3f), 20.0f),
             WeightedReward(new ZeroSumReward(new WallShotReward(), 0.3f), 20.0f),

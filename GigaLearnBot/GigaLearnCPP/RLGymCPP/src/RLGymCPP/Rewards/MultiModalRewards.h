@@ -441,16 +441,42 @@ namespace RLGC {
     // - Check if velocity points toward teammate space (not opponent space)
     // - Trace ball trajectory 1-2 bounces ahead
     // - Reward if teammates are in better position than opponents along trajectory
-    // - Light reward for just creating good ball velocity toward team half
     //
     // Reward structure:
-    // - +2.0: Ball moving toward teammate, teammate closer than closest opponent
-    // - +0.8: Ball moving toward team half even if no clear teammate position yet
-    // - +1.5: Bonus when pass trajectory avoids heavy wall/ceiling bounces
-    // - -0.2: Penalty if ball moving toward opponent space
+    // - +0.0 to +2.0: continuous, scaled by how much closer a teammate is to the
+    //   predicted landing point than the nearest opponent (was a hard 2-tier
+    //   binary; now interpolates smoothly, matching the old values exactly at
+    //   the old thresholds)
+    // - +1.5 / +0.8: bonus for a clean (0 or 1 bounce) trajectory within 2s,
+    //   or +1.0 for an intentional surface (wall/ceiling/backboard) redirect
+    //   ending near a teammate
+    // - up to ~+0.75: zone-accuracy bonus for landing near a teammate's
+    //   geometric "optimal pass zone"
+    // - -0.2: penalty only if the ball is heading toward neither the
+    //   opponent's goal NOR any living teammate (a genuinely aimless hit)
     //
     // Rev 1.0 (2025-01-21, NJH)
     // Rev 2.0 (2026-02-18, NJH) - Migrated to BallPred::Cache
+    // Rev 3.0 (2026-08-04, NJH + Claude) - Scenario-review fix pass (see
+    // Reward_Change_Log.md for the full 10-scenario investigation):
+    //   - Direction penalty no longer fires on a legitimate backward/lateral
+    //     pass to a teammate -- was conflating "toward a teammate" (this
+    //     class's own stated goal) with "toward the opponent's goal," which
+    //     actively punished reset/pressure-release passes.
+    //   - Added a living-teammate existence gate so ordinary shots/clears in
+    //     1v1 (or with a demoed sole teammate) no longer bank pass-setup
+    //     credit -- previously only the primary tier was gated.
+    //   - isSurfacePass now scoped to the same <2.0s window as the ground-
+    //     bounce check below (was scanning the full 4s prediction window,
+    //     misclassifying ordinary passes whose far-future trajectory
+    //     happened to eventually clip a wall).
+    //   - Removed the old "secondary reward" -- it was computed from the
+    //     exact same vector as the direction gate, no independent signal.
+    //   - Primary reward is now continuous instead of a hard 2-tier binary,
+    //     so a coin-flip pass into a crowd scores visibly less than a
+    //     comfortably open one.
+    //   - Removed the passer's-own-boost multiplier in the zone bonus (was a
+    //     backwards incentive: rewarding the passer for being low on boost).
     class PassingSetupReward : public Reward {
     private:
         BallPred::Cache _ballCache;
@@ -466,6 +492,30 @@ namespace RLGC {
                 if (distToPos < proximityRadius) {
                     return true;
                 }
+            }
+            return false;
+        }
+
+        // Does any living, non-demoed teammate exist for this player?
+        bool HasLivingTeammate(const Player& player, const GameState& state) const {
+            for (const auto& teammate : state.players) {
+                if (teammate.team != player.team) continue;
+                if (teammate.carId == player.carId) continue;
+                if (teammate.isDemoed) continue;
+                return true;
+            }
+            return false;
+        }
+
+        // Is the ball heading toward any living, non-demoed teammate right now?
+        bool IsBallHeadingTowardTeammate(const Vec& ballVelNorm, const Player& player, const GameState& state) const {
+            for (const auto& teammate : state.players) {
+                if (teammate.team != player.team) continue;
+                if (teammate.carId == player.carId) continue;
+                if (teammate.isDemoed) continue;
+
+                Vec toTeammate = (teammate.pos - state.ball.pos).Normalized();
+                if (ballVelNorm.Dot(toTeammate) > 0.3f) return true;
             }
             return false;
         }
@@ -555,16 +605,17 @@ namespace RLGC {
             // Only reward if WE just touched the ball (setting up the pass)
             if (!player.ballTouchedStep) return 0.0f;
 
+            // No living teammate to pass to -- this is just an ordinary shot/clear,
+            // not a pass setup of any kind. Previously only the primary reward tier
+            // checked this, so 1v1 (or a demoed sole teammate) could still bank
+            // secondary/trajectory/zone credit for a plain shot.
+            if (!HasLivingTeammate(player, state)) return 0.0f;
+
             // Check ball velocity direction
             Vec ballVel = state.ball.vel;
             if (ballVel.Length() < 400.0f) return 0.0f;  // Ball too slow to be a pass (was 100)
 
             Vec ballVelNorm = ballVel.Normalized();
-
-            // Get our goal (which direction is "forward" for us)
-            Vec ourGoal = (player.team == Team::BLUE)
-                ? CommonValues::BLUE_GOAL_CENTER
-                : CommonValues::ORANGE_GOAL_CENTER;
 
             Vec theirGoal = (player.team == Team::BLUE)
                 ? CommonValues::ORANGE_GOAL_CENTER
@@ -575,15 +626,21 @@ namespace RLGC {
             Vec towardTheirGoal = (theirGoal - state.ball.pos).Normalized();
 
             // Use the pre-computed ball prediction cache (populated in PreStep).
-            // Check for surface redirects across the full prediction window.
-            bool isSurfacePass = _ballCache.HitAnySurface();
+            // Scoped to the first 2s only, matching the ground-bounce check below --
+            // avoids misclassifying an ordinary pass whose far-future (>2s, long
+            // after any real teammate would've received it) trajectory happens to
+            // eventually clip a wall.
+            bool isSurfacePass = _ballCache.HitSurfaceBy(2.0f);
 
-            // Check if ball is moving generally toward their goal (not back to our goal).
-            // For surface-bounce passes the ball may initially travel upward or toward our
-            // back wall, so only penalize if there is no surface redirect predicted.
+            // Check if ball is moving generally toward their goal OR toward a living
+            // teammate. Only penalize when it's heading toward neither -- a
+            // deliberate backward/lateral reset pass to a teammate is good,
+            // disciplined play and should not be penalized just because it isn't
+            // goalward.
             float goalwardComponent = ballVelNorm.Dot(towardTheirGoal);
-            if (goalwardComponent < 0.2f && !isSurfacePass) {
-                // Ball moving backward and no surface redirect - not a good pass setup
+            bool towardTeammate = IsBallHeadingTowardTeammate(ballVelNorm, player, state);
+            if (goalwardComponent < 0.2f && !isSurfacePass && !towardTeammate) {
+                // Ball moving backward, no surface redirect, and not toward any teammate either
                 return -0.2f;
             }
 
@@ -597,22 +654,14 @@ namespace RLGC {
 
             float reward = 0.0f;
 
-            // PRIMARY REWARD: Ball trajectory favors teammates
+            // PRIMARY REWARD: Ball trajectory favors teammates. Continuous in the
+            // margin (oppDist - tmDist) rather than a hard binary -- reproduces the
+            // old 2.0/1.0/0.0 tiers exactly at margin=500/0/<=-500 and interpolates
+            // smoothly between/beyond, so a coin-flip pass into a crowd scores
+            // visibly less than a comfortably open one.
             if (tmDist < 1e6f && oppDist < 1e6f) {
-                if (tmDist < oppDist - 500.0f) {
-                    // Teammate is significantly closer - good pass setup!
-                    reward += 2.0f;
-                }
-                else if (tmDist < oppDist) {
-                    // Teammate slightly closer - decent pass
-                    reward += 1.0f;
-                }
-            }
-
-            // SECONDARY REWARD: Ball moving toward team half (even if no clear receiver)
-            Vec teamHalfDir = (theirGoal - state.ball.pos).Normalized();
-            if (ballVelNorm.Dot(teamHalfDir) > 0.5f) {
-                reward += 0.8f;
+                float margin = oppDist - tmDist;
+                reward += 2.0f * RS_CLAMP((margin + 500.0f) / 1000.0f, 0.0f, 1.0f);
             }
 
             // TRAJECTORY QUALITY BONUS: reward clean passes and intentional surface redirects.
@@ -656,13 +705,12 @@ namespace RLGC {
 
                 float bonus = 0.5f * zoneScore;
 
-                // Weight by teammate quality (favor passes to teammates with more boost)
+                // Weight by teammate quality (favor passes to teammates with more boost --
+                // they can do more with the ball once received). The old passer's-own-boost
+                // multiplier was removed here (Rev 3.0): rewarding the passer for having LOW
+                // boost is a backwards incentive, not a real tactical signal.
                 float boostWeight = 1.0f + (teammate.boost / 100.0f) * 0.2f;  // 1.0-1.2x
                 bonus *= boostWeight;
-
-                // Low-boost teamplay multiplier: encourage passing when low on boost
-                float lowBoostTeamplayMultiplier = 1.5f - (player.boost / 100.0f) * 0.5f;  // 1.0-1.5x
-                bonus *= lowBoostTeamplayMultiplier;
 
                 zoneAccuracyBonus = RS_MAX(zoneAccuracyBonus, bonus);
             }
@@ -697,9 +745,26 @@ namespace RLGC {
     // - -0.3: Missing a pass opportunity (ball flies past without touch)
     //
     // Rev 1.0 (2025-01-21, NJH)
+    // Rev 2.0 (2026-08-04, NJH + Claude) - Scenario-review fix pass (see
+    // Reward_Change_Log.md for the full 10-scenario investigation):
+    //   - Replaced the buggy single-slot `lastBallTouchBy[0]` tracking
+    //     (declared as a map, but only ever read/wrote the constant key 0,
+    //     and was never cleared except at Reset()) with a proper PreStep
+    //     pass that arms `recentPassToMe` ONCE, at the actual moment of a
+    //     teammate's touch, keyed correctly per receiving player.
+    //   - An opponent touching the ball now clears the receiver's armed
+    //     state -- a pass that gets intercepted no longer counts as "still
+    //     expecting a pass" if the ball later drifts back toward the
+    //     original target.
+    //   - `recentPassToMe`/`passReceiveTime` no longer re-arm on every
+    //     qualifying step (previously any step where the ball's velocity
+    //     happened to point roughly at the player would reset the window) --
+    //     "time since pass" now measures real elapsed time since the actual
+    //     touch.
+    //   - REWARD 1 / REWARD 2 / PENALTY point values and thresholds are
+    //     unchanged -- only the arming mechanism was fixed.
     class ReceivingPassReward : public Reward {
     private:
-        mutable std::unordered_map<uint32_t, uint32_t> lastBallTouchBy;
         mutable std::unordered_map<uint32_t, float> passReceiveTime;
         mutable std::unordered_map<uint32_t, bool> recentPassToMe;
         mutable std::unordered_map<uint32_t, bool> surfacePassActive;  // Pass via wall/ceiling/backboard
@@ -722,40 +787,57 @@ namespace RLGC {
     public:
         ReceivingPassReward() {}
 
+        // Arms/clears recentPassToMe exactly once per step, at the moment of an
+        // actual touch -- not recomputed (and potentially re-armed on stale data)
+        // inside every player's own GetReward call.
+        virtual void PreStep(const GameState& state) override {
+            float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+            for (const auto& p : state.players) {
+                elapsedTime[p.carId] += dt;
+            }
+
+            for (const auto& p : state.players) {
+                if (!p.ballTouchedStep) continue;
+
+                for (const auto& other : state.players) {
+                    if (other.carId == p.carId) continue;
+                    uint32_t id = other.carId;
+
+                    if (other.team == p.team) {
+                        // p just touched the ball -- potential pass to teammate `other`.
+                        if (other.isDemoed) continue;
+
+                        Vec ballVel = state.ball.vel;
+                        if (ballVel.Length() <= 200.0f) continue;
+
+                        Vec toOther = (other.pos - state.ball.pos).Normalized();
+                        float towardComponent = ballVel.Normalized().Dot(toOther);
+
+                        // For surface-bounce passes the ball may be heading toward a wall/ceiling,
+                        // not directly at `other` yet. Relax the threshold when ball is near a surface.
+                        bool nearSurface = IsBallNearSurface(state.ball.pos);
+                        float dirThreshold = nearSurface ? 0.1f : 0.3f;
+
+                        if (towardComponent > dirThreshold) {
+                            recentPassToMe[id] = true;
+                            surfacePassActive[id] = nearSurface;
+                            passReceiveTime[id] = elapsedTime[id];
+                        }
+                    } else {
+                        // p is an opponent of `other` and just touched the ball -- any pass
+                        // `other` was expecting has been intercepted.
+                        recentPassToMe[id] = false;
+                        surfacePassActive[id] = false;
+                    }
+                }
+            }
+        }
+
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
             if (player.isDemoed) return 0.0f;
 
             uint32_t id = player.carId;
-            elapsedTime[id] += state.deltaTime;
-
             float reward = 0.0f;
-
-            // TRACK WHO LAST TOUCHED THE BALL
-            for (const auto& p : state.players) {
-                if (p.ballTouchedStep && p.team == player.team && p.carId != player.carId) {
-                    lastBallTouchBy[0] = p.carId;  // Teammate touched ball
-                }
-            }
-
-            // Check if this is a pass intended for us
-            if (lastBallTouchBy[0] != 0 && lastBallTouchBy[0] != player.carId) {
-                Vec ballVel = state.ball.vel;
-                if (ballVel.Length() > 200.0f) {
-                    Vec toUs = (player.pos - state.ball.pos).Normalized();
-                    float towardComponent = ballVel.Normalized().Dot(toUs);
-
-                    // For surface-bounce passes the ball may be heading toward a wall/ceiling,
-                    // not directly at us yet.  Relax the threshold when ball is near a surface.
-                    bool nearSurface = IsBallNearSurface(state.ball.pos);
-                    float dirThreshold = nearSurface ? 0.1f : 0.3f;
-
-                    if (towardComponent > dirThreshold) {
-                        recentPassToMe[id] = true;
-                        surfacePassActive[id] = nearSurface;
-                        passReceiveTime[id] = elapsedTime[id];
-                    }
-                }
-            }
 
             // REWARD 1: Positioning relative to incoming pass
             if (recentPassToMe[id]) {
@@ -838,7 +920,6 @@ namespace RLGC {
         }
 
         virtual void Reset(const GameState& initialState) override {
-            lastBallTouchBy.clear();
             passReceiveTime.clear();
             recentPassToMe.clear();
             surfacePassActive.clear();

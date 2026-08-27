@@ -147,17 +147,64 @@ struct RotationConfig {
 // =========================================================================
 // Defined here (before reward classes) so all classes that include this
 // header can use DetermineRoleCommon without forward-declaration issues.
+//
+// Rev 2.0 (2026-07-31 | NJH): role is now GOALSIDE-GATED, not pure
+// distance-to-ball. There are 4 roles, not 3:
+//   FIRST         - closest to ball among GOALSIDE teammates (engaging/offense)
+//   SECOND        - support, goalside, closer to home net (Y) than FIRST.
+//                   Does not exist as a separate slot in 2v2 - folds into LAST.
+//   LAST          - deepest of the goalside teammates; last line of defense.
+//   TRANSITIONING - NOT goalside (ball is between the player and their own
+//                   net - beaten / caught upfield). Should be minimized.
+// While any teammate is TRANSITIONING, the remaining goalside teammate(s)
+// condense into just FIRST/LAST (no SECOND) - this falls out naturally of
+// ranking only among currently-goalside players, no special-casing needed.
+//
+// Goalside convention matches GoalsideReward.h: margin = ball.y - player.y
+// (Blue; flipped for Orange), with the same 200uu offside deadzone so
+// dribble-carry (car slightly ahead of the ball plane) doesn't spuriously
+// flip a player to TRANSITIONING every step.
 
 // Role type enum - single source of truth for role determination
 enum class RoleType {
-	CLOSEST,      // Closest to ball
-	MIDDLE,       // Middle distance
-	FURTHEST      // Furthest from ball
+	FIRST,          // Closest to ball among goalside teammates
+	SECOND,         // Goalside support, between FIRST and LAST (3v3 only)
+	LAST,           // Deepest goalside teammate - last line of defense
+	TRANSITIONING   // Not goalside - beaten / caught upfield
 };
 
+namespace RoleDetection {
+	constexpr float OFFSIDE_DEADZONE = 200.0f;  // matches GoalsideReward.h
+
+	// Positive margin = player is goalside (between ball and own net, Y-only)
+	inline float GoalsideMargin(const Player& p, const Vec& ballPos) {
+		return (p.team == Team::BLUE) ? (ballPos.y - p.pos.y) : (p.pos.y - ballPos.y);
+	}
+
+	inline bool IsGoalside(const Player& p, const Vec& ballPos) {
+		return GoalsideMargin(p, ballPos) >= -OFFSIDE_DEADZONE;
+	}
+}
+
+// Number of living teammates currently goalside (excludes self, demoed, and
+// transitioning teammates). Used to know whether a SECOND slot exists right now.
+inline int CountGoalsideTeammates(const Player& player, const GameState& state) {
+	int count = 0;
+	for (const auto& p : state.players) {
+		if (p.team != player.team || p.carId == player.carId || p.isDemoed) continue;
+		if (RoleDetection::IsGoalside(p, state.ball.pos)) count++;
+	}
+	return count;
+}
+
 // Unified role detection function - eliminates code duplication
-// Computes velocity-adjusted distances and determines player's role relative to teammates
+// Computes velocity-adjusted distances and determines player's role relative to
+// GOALSIDE teammates only. See Rev 2.0 note above.
 inline RoleType DetermineRoleCommon(const Player& player, const GameState& state) {
+	if (!RoleDetection::IsGoalside(player, state.ball.pos)) {
+		return RoleType::TRANSITIONING;
+	}
+
 	float distToBall = (player.pos - state.ball.pos).Length();
 	Vec ballVel = state.ball.vel;
 	Vec toPlayer = (player.pos - state.ball.pos).Normalized();
@@ -169,57 +216,80 @@ inline RoleType DetermineRoleCommon(const Player& player, const GameState& state
 
 	float adjustedDist = distToBall * (1.0f - velocityAlignment * 0.25f);
 
-	std::vector<float> adjustedTeammateDists;
+	int livingTeammateCount = 0;
+	std::vector<float> adjustedGoalsideTeammateDists;
 	for (const auto& p : state.players) {
-		if (p.team == player.team && p.carId != player.carId && !p.isDemoed) {
-			float dist = (p.pos - state.ball.pos).Length();
-			Vec toTeammate = (p.pos - state.ball.pos).Normalized();
-			float tmateAlignment = 0.0f;
-			if (ballVel.Length() > 100.0f) {
-				tmateAlignment = ballVel.Normalized().Dot(toTeammate);
-			}
-			float adjustedTmateDist = dist * (1.0f - tmateAlignment * 0.25f);
-			adjustedTeammateDists.push_back(adjustedTmateDist);
+		if (p.team != player.team || p.carId == player.carId || p.isDemoed) continue;
+		livingTeammateCount++;
+
+		if (!RoleDetection::IsGoalside(p, state.ball.pos)) continue;  // transitioning teammate excluded from ranking pool
+
+		float dist = (p.pos - state.ball.pos).Length();
+		Vec toTeammate = (p.pos - state.ball.pos).Normalized();
+		float tmateAlignment = 0.0f;
+		if (ballVel.Length() > 100.0f) {
+			tmateAlignment = ballVel.Normalized().Dot(toTeammate);
 		}
+		float adjustedTmateDist = dist * (1.0f - tmateAlignment * 0.25f);
+		adjustedGoalsideTeammateDists.push_back(adjustedTmateDist);
 	}
 
-	if (adjustedTeammateDists.empty()) {
-		return RoleType::CLOSEST;
+	if (livingTeammateCount == 0) {
+		// 1v1 (or no living teammates) - no rotation concept, preserve prior default
+		return RoleType::FIRST;
 	}
 
-	std::sort(adjustedTeammateDists.begin(), adjustedTeammateDists.end());
-
-	if (adjustedDist < adjustedTeammateDists[0]) {
-		return RoleType::CLOSEST;
+	if (adjustedGoalsideTeammateDists.empty()) {
+		// Sole goalside player on a beaten team - net-cover priority
+		return RoleType::LAST;
 	}
-	else if (adjustedTeammateDists.size() >= 2 && adjustedDist > adjustedTeammateDists[1]) {
-		return RoleType::FURTHEST;
+
+	std::sort(adjustedGoalsideTeammateDists.begin(), adjustedGoalsideTeammateDists.end());
+
+	if (adjustedDist < adjustedGoalsideTeammateDists[0]) {
+		return RoleType::FIRST;
+	}
+	else if (adjustedGoalsideTeammateDists.size() >= 2 && adjustedDist > adjustedGoalsideTeammateDists[1]) {
+		return RoleType::LAST;
+	}
+	else if (adjustedGoalsideTeammateDists.size() == 1) {
+		// Only 2 goalside players total (2v2, or 3v3 with one teammate
+		// transitioning) - condensed to FIRST/LAST, no SECOND slot exists.
+		return RoleType::LAST;
 	}
 	else {
-		return RoleType::MIDDLE;
+		return RoleType::SECOND;
 	}
 }
 
 inline bool IsSecondManRole(const Player& player, const GameState& state) {
-	return DetermineRoleCommon(player, state) == RoleType::MIDDLE;
+	return DetermineRoleCommon(player, state) == RoleType::SECOND;
 }
 
+// Returns the teammate currently playing FIRST man (goalside, closest to ball).
+// Falls back to the closest-to-ball teammate if no teammate is currently FIRST
+// (e.g. everyone transitioning) so callers still get a sensible reference point.
 inline Player* GetFirstManTeammate(const Player& player, const GameState& state) {
-	float closestDistToBall = FLT_MAX;
 	Player* firstMan = nullptr;
+	Player* fallback = nullptr;
+	float closestDistToBall = FLT_MAX;
 
 	for (const auto& p : state.players) {
 		if (p.carId == player.carId) continue;
 		if (p.team != player.team) continue;
 
+		if (DetermineRoleCommon(p, state) == RoleType::FIRST) {
+			firstMan = const_cast<Player*>(&p);
+		}
+
 		float distToBall = (p.pos - state.ball.pos).Length();
 		if (distToBall < closestDistToBall) {
 			closestDistToBall = distToBall;
-			firstMan = const_cast<Player*>(&p);
+			fallback = const_cast<Player*>(&p);
 		}
 	}
 
-	return firstMan;
+	return firstMan ? firstMan : fallback;
 }
 
 // =========================================================================
@@ -439,7 +509,7 @@ public:
 			// THIRD MAN BONUS: one-time reward for fully completing rotation to last man (3v3 only)
 			if (!mem.hasGivenThirdManBonus && state.players.size() >= 6) {
 				RoleType role = DetermineRoleCommon(player, state);
-				if (role == RoleType::FURTHEST) {
+				if (role == RoleType::LAST) {
 					reward += THIRD_MAN_BONUS;
 					mem.hasGivenThirdManBonus = true;
 				}
@@ -473,41 +543,57 @@ namespace PhaseC {
 // =========================================================================
 // ROLE AWARENESS REWARD (PPO-FRIENDLY)
 // =========================================================================
-// SHORT-TERM role tracking with INSTANT rewards
+// Rev 2.0 (2026-07-31 | NJH): rebuilt around the goalside-gated 4-role model
+// (see the ROLE DETECTION HELPERS block above). Enforces the actual rotation
+// CYCLE, not just "any label change":
+//   3v3: FIRST -> LAST -> SECOND -> FIRST (repeat)
+//   2v2: FIRST -> LAST -> FIRST (repeat, SECOND never exists)
+// Condenses automatically when a teammate is TRANSITIONING (beaten) —
+// DetermineRoleCommon already excludes them from the ranking pool, so the
+// remaining goalside player(s) naturally fall into FIRST/LAST only.
 //
-// Event reward: +0.3 for successful role transition (INSTANT)
-// Penalty: -0.2 per step for staying too long in role (INSTANT feedback)
+// Event reward: +0.3 for a lateral FIRST/SECOND/LAST transition (INSTANT)
+// Cycle bonus: +0.4 for completing the correct next leg of the cycle
+// Recovery bonus: +0.4 for going TRANSITIONING -> goalside (replaces the
+//   flat +0.3 for that leg; getting CAUGHT transitioning pays nothing —
+//   GoalsideReward already penalizes that continuously, no need to double up)
+// Penalty: -0.08/step for stalling at SECOND instead of completing the
+//   retreat to LAST, but ONLY while the ball is in our own half (staying
+//   forward to support the attack is often correct otherwise)
+// Penalty: -0.05/step for camping in FIRST/SECOND/LAST past maxRoleTime
+//   (never while TRANSITIONING — that's GoalsideReward's signal, not ours)
 //
 // Platinum: Basic role awareness (very short times)
 // Diamond+: Proper role cycling
 
 class RoleAwarenessReward : public Reward {
 private:
-	enum class SimpleRole {
-		CLOSEST,      // Closest to ball
-		MIDDLE,       // Middle distance
-		FURTHEST      // Furthest from ball
+	enum class CycleStage {
+		NONE,
+		AWAITING_RETREAT,  // was FIRST, must reach LAST next
+		AWAITING_ADVANCE   // reached LAST after FIRST, must reach SECOND next (3v3 only)
 	};
 
 	struct RoleMemory {
-		SimpleRole lastRole = SimpleRole::FURTHEST;
+		RoleType lastRole = RoleType::TRANSITIONING;
 		float timeInRole = 0.0f;
-		bool justTransitioned = false;
 
 		// Event tracking for hybrid (time + event) role transitions
 		bool lastFrameHadPossession = false;
 
-		// Post-first-man enforcement: track when player exits CLOSEST and enforce full retreat
-		bool wasRecentlyFirstMan = false;
-		float timePostFirstMan = 0.0f;   // elapsed seconds since leaving CLOSEST role
+		CycleStage cycleStage = CycleStage::NONE;
+		float cycleStageTime = 0.0f;
 	};
 
 	std::unordered_map<uint32_t, RoleMemory> memory;
 	RotationConfig config;
 
-	static constexpr float POST_FIRST_MAN_WINDOW   = 5.0f;   // seconds to enforce full retreat after being first man
-	static constexpr float POST_FIRST_MAN_PENALTY  = 0.08f;  // per-step penalty for camping at MIDDLE post-first-man
-	static constexpr float POST_FIRST_MAN_BONUS    = 0.4f;   // one-time bonus for reaching FURTHEST after first-man
+	static constexpr float RETREAT_WINDOW  = 5.0f;   // seconds to complete FIRST -> LAST
+	static constexpr float RETREAT_PENALTY = 0.08f;  // per-step penalty for stalling at SECOND (own half only)
+	static constexpr float RETREAT_BONUS   = 0.4f;   // one-time bonus for reaching LAST after FIRST
+	static constexpr float ADVANCE_WINDOW  = 5.0f;   // seconds to complete LAST -> SECOND (3v3 only)
+	static constexpr float ADVANCE_BONUS   = 0.4f;   // one-time bonus for reaching SECOND after LAST
+	static constexpr float RECOVERY_BONUS  = 0.4f;   // one-time bonus for recovering from TRANSITIONING
 
 	// Check for events that should trigger immediate role transition
 	bool CheckEventTriggers(const Player& player, const GameState& state, RoleMemory& mem) const {
@@ -521,16 +607,6 @@ private:
 		// TODO: Event 2 (demo detection via velocity spike) was too noisy, disabled
 
 		return false;  // No events triggered
-	}
-
-	SimpleRole DetermineRole(const Player& player, const GameState& state) const {
-		// Use unified role detection helper to ensure consistency across all rewards
-		RoleType roleType = DetermineRoleCommon(player, state);
-
-		// Convert RoleType to SimpleRole enum (same role, different type names)
-		if (roleType == RoleType::CLOSEST) return SimpleRole::CLOSEST;
-		if (roleType == RoleType::FURTHEST) return SimpleRole::FURTHEST;
-		return SimpleRole::MIDDLE;
 	}
 
 public:
@@ -547,73 +623,116 @@ public:
 			return 0.0f;
 		}
 
+		// Kickoff gate — matches InstantSpacingReward's convention. Role
+		// churn during a kickoff scramble isn't real rotation.
+		if (state.ball.pos.Length() < 200.0f && state.ball.vel.Length() < 150.0f) {
+			return 0.0f;
+		}
+
 		auto& mem = memory[player.carId];
 		float reward = 0.0f;
+		float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
 
-		// NEW: Check for event-based role transition triggers
+		// Check for event-based role transition triggers
 		bool eventTriggered = CheckEventTriggers(player, state, mem);
 		if (eventTriggered) {
 			// Force immediate role transition capability
 			mem.timeInRole = 0.0f;
 		}
 
-		SimpleRole currentRole = DetermineRole(player, state);
+		RoleType currentRole = DetermineRoleCommon(player, state);
+		RoleType previousRole = mem.lastRole;  // previous frame's role — mem.lastRole is updated below
 
-		// POST-FIRST-MAN ENFORCEMENT (3v3 only — MIDDLE role is meaningless in 1v1/2v2)
-		// mem.lastRole still holds the PREVIOUS frame's role here; it is updated below.
-		if (state.players.size() >= 6) {
-			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
+		// Ball in this player's own half? (same convention as RetreatAfterTouchReward)
+		bool ballInOwnHalf = (player.team == Team::BLUE) ? (state.ball.pos.y < 0.0f) : (state.ball.pos.y > 0.0f);
 
-			if (mem.lastRole == SimpleRole::CLOSEST && currentRole != SimpleRole::CLOSEST) {
-				mem.wasRecentlyFirstMan = true;
-				mem.timePostFirstMan = 0.0f;
-			}
-
-			if (mem.wasRecentlyFirstMan) {
-				mem.timePostFirstMan += dt;
-
-				if (currentRole == SimpleRole::FURTHEST) {
-					reward += POST_FIRST_MAN_BONUS;
-					mem.wasRecentlyFirstMan = false;
-					mem.timePostFirstMan = 0.0f;
-				}
-				else if (currentRole == SimpleRole::CLOSEST) {
-					// New first-man opportunity — clear without bonus
-					mem.wasRecentlyFirstMan = false;
-					mem.timePostFirstMan = 0.0f;
-				}
-				else if (mem.timePostFirstMan > POST_FIRST_MAN_WINDOW) {
-					// Timed out without completing rotation — clear, no bonus
-					mem.wasRecentlyFirstMan = false;
-					mem.timePostFirstMan = 0.0f;
-				}
-				else {
-					// Still at MIDDLE within window — penalize cutting rotation
-					reward -= POST_FIRST_MAN_PENALTY;
-				}
-			}
+		// Enter the cycle when leaving FIRST for another goalside role
+		if (previousRole == RoleType::FIRST && currentRole != RoleType::FIRST && currentRole != RoleType::TRANSITIONING) {
+			mem.cycleStage = CycleStage::AWAITING_RETREAT;
+			mem.cycleStageTime = 0.0f;
 		}
 
-		// Detect role change
-		if (currentRole != mem.lastRole) {
-			// Allow transition if: minRoleTime satisfied OR event triggered
-			if (mem.timeInRole >= config.minRoleTime || eventTriggered) {
-				// EVENT REWARD: Successful transition (INSTANT)
+		if (currentRole == RoleType::TRANSITIONING) {
+			// The retreat/advance cycle doesn't apply while out of position.
+			mem.cycleStage = CycleStage::NONE;
+			mem.cycleStageTime = 0.0f;
+		}
+		else if (mem.cycleStage == CycleStage::AWAITING_RETREAT) {
+			mem.cycleStageTime += dt;
+
+			if (currentRole == RoleType::LAST) {
+				reward += RETREAT_BONUS;
+				// A SECOND slot only exists right now if >=2 teammates are goalside.
+				mem.cycleStage = (CountGoalsideTeammates(player, state) >= 2)
+					? CycleStage::AWAITING_ADVANCE
+					: CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			else if (currentRole == RoleType::FIRST) {
+				// New first-man opportunity — clear without bonus
+				mem.cycleStage = CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			else if (mem.cycleStageTime > RETREAT_WINDOW) {
+				// Timed out without completing the retreat — clear, no bonus
+				mem.cycleStage = CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			else if (ballInOwnHalf) {
+				// Still at SECOND within the window while the ball is in our
+				// own half — penalize cutting the rotation short. No penalty
+				// when the ball is in the opponent's half (staying forward
+				// to support the attack is often correct there).
+				reward -= RETREAT_PENALTY;
+			}
+		}
+		else if (mem.cycleStage == CycleStage::AWAITING_ADVANCE) {
+			mem.cycleStageTime += dt;
+
+			if (currentRole == RoleType::SECOND) {
+				reward += ADVANCE_BONUS;
+				mem.cycleStage = CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			else if (currentRole == RoleType::FIRST) {
+				mem.cycleStage = CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			else if (mem.cycleStageTime > ADVANCE_WINDOW) {
+				mem.cycleStage = CycleStage::NONE;
+				mem.cycleStageTime = 0.0f;
+			}
+			// No per-step penalty for staying at LAST — holding last-man
+			// position is often correct (boost-constrained or deliberate),
+			// and penalizing it would fight BoostAwareRotationReward.
+		}
+
+		// Detect role change and pay the base transition reward
+		if (currentRole != previousRole) {
+			if (previousRole == RoleType::TRANSITIONING) {
+				// Recovering to goalside — bonus instead of the flat transition reward
+				reward += RECOVERY_BONUS;
+			}
+			else if (currentRole == RoleType::TRANSITIONING) {
+				// Getting caught out of position — no reward. GoalsideReward
+				// already penalizes this continuously; don't reward the
+				// event itself, and don't double-penalize here either.
+			}
+			else if (mem.timeInRole >= config.minRoleTime || eventTriggered) {
+				// FIRST/SECOND/LAST -> a different one of FIRST/SECOND/LAST
 				reward += 0.3f;
-				mem.justTransitioned = true;
 			}
 
 			mem.lastRole = currentRole;
 			mem.timeInRole = 0.0f;
 		}
 		else {
-			float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
 			mem.timeInRole += dt;
-			mem.justTransitioned = false;
 		}
 
-		// INSTANT PENALTY for staying too long (per-step feedback)
-		if (mem.timeInRole > config.maxRoleTime) {
+		// INSTANT PENALTY for camping too long in FIRST/SECOND/LAST (never
+		// while TRANSITIONING — that's scored by GoalsideReward, not here).
+		if (currentRole != RoleType::TRANSITIONING && mem.timeInRole > config.maxRoleTime) {
 			reward -= 0.05f;  // Small per-step penalty
 		}
 
@@ -909,12 +1028,17 @@ private:
 	static constexpr float HIGH_BOOST_THRESHOLD = 70.0f;  // was 100 (unreachable, max boost is 100)
 	static constexpr float BOOST_DISPARITY_THRESHOLD = 30.0f;
 
-	// Determine player's role using the shared ball-centric helper for consistency with RoleAwarenessReward
-	BoostRole DeterminePlayerRole(const Player& player, const GameState& state) const {
+	// Determine player's role using the shared ball-centric helper for consistency with RoleAwarenessReward.
+	// Returns false if the player is TRANSITIONING (not goalside) — boost-role
+	// correctness doesn't mean anything while beaten; that's GoalsideReward's
+	// signal to punish, not this reward's.
+	bool DeterminePlayerRole(const Player& player, const GameState& state, BoostRole& outRole) const {
 		RoleType role = DetermineRoleCommon(player, state);
-		if (role == RoleType::CLOSEST)  return BoostRole::CLOSEST;
-		if (role == RoleType::FURTHEST) return BoostRole::FURTHEST;
-		return BoostRole::MIDDLE;
+		if (role == RoleType::TRANSITIONING) return false;
+		if (role == RoleType::FIRST) outRole = BoostRole::CLOSEST;
+		else if (role == RoleType::LAST) outRole = BoostRole::FURTHEST;
+		else outRole = BoostRole::MIDDLE;  // SECOND
+		return true;
 	}
 
 	// Get boost disparity: average teammate boost minus player boost.
@@ -994,7 +1118,11 @@ public:
 
 		float dt = (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
 
-		BoostRole currentRole = DeterminePlayerRole(player, state);
+		BoostRole currentRole;
+		if (!DeterminePlayerRole(player, state, currentRole)) {
+			// TRANSITIONING — skip boost-correctness scoring entirely this step
+			return 0.0f;
+		}
 		float boostDisparity = GetBoostDisparity(player, state);
 		mem.lastBoostDisparity = boostDisparity;
 

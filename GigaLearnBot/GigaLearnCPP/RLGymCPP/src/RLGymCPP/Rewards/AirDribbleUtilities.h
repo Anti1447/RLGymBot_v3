@@ -35,18 +35,22 @@ namespace AirDribbleUtils {
 	/// </summary>
 	inline float GetOptimalContactAngleForPosition(Team playerTeam, const Vec& ballPos) {
 		// Determine position relative to goals
-		Vec ownGoal = (playerTeam == Team::BLUE) ?
-			CommonValues::BLUE_GOAL_BACK : CommonValues::ORANGE_GOAL_BACK;
+		// Rev 1.1: was measuring distance to OWN goal while the branches/comments below
+		// assumed distance to the OPPONENT's goal (e.g. "distToOwnGoal < 5000 // Close to
+		// opponent goal"), inverting the desired angle in both the attacking and defensive
+		// thirds. Fixed to measure distance to the opponent's goal, matching the intent.
+		Vec oppGoal = (playerTeam == Team::BLUE) ?
+			CommonValues::ORANGE_GOAL_BACK : CommonValues::BLUE_GOAL_BACK;
 
-		float distToOwnGoal = (ballPos - ownGoal).Length();
+		float distToOppGoal = (ballPos - oppGoal).Length();
 
 		// At opponent goal: prefer 6 o'clock (directly below) = 0 radians
 		// At midfield: prefer 5-6 o'clock or 6-7 o'clock = ~0.26-0.52 radians (15-30°)
 		// At own goal: prefer 4-5 o'clock or 7-8 o'clock = ~0.7-1.0 radians (40-60°)
 
-		if (distToOwnGoal < 5000.0f) {  // Close to opponent goal
+		if (distToOppGoal < 5000.0f) {  // Close to opponent goal
 			return 0.0f;  // 6 o'clock - directly below
-		} else if (distToOwnGoal < 8000.0f) {  // Midfield
+		} else if (distToOppGoal < 8000.0f) {  // Midfield
 			return 0.35f;  // ~20° off vertical (between 5-6 and 6-7 o'clock)
 		} else {  // Own goal area
 			return 0.7f;  // ~40° off vertical (between 4-5 and 7-8 o'clock)

@@ -57,7 +57,7 @@ def on_checkpoint_saved(checkpoint_path, checkpoints_root, total_timesteps):
 			checkpoint_path=checkpoint_path,
 			checkpoints_root=checkpoints_root,
 			total_timesteps=total_timesteps,
-			wandb_run=wandb_run
+			wandb_run=None  # reward analysis stays local-only; never pushed to wandb
 		)
 	except Exception as e:
 		print(f"[RewardAnalysis] WARNING: Analysis failed (non-fatal): {e}")

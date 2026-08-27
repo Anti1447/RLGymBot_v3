@@ -558,12 +558,18 @@ namespace RLGC {
     // MULTI-AIR TOUCH REWARD
     // Rewards multiple consecutive touches on the ball in the air before it hits ground.
     // Teaches combo plays, aerial control, and ball possession in the air.
+    //
+    // Rev 1.1: Cross-player sequence intent (deliberate, not an oversight) — a
+    // TEAMMATE touching the ball mid-sequence does NOT invalidate a player's own
+    // touchCount; only an opponent touch (state.lastTouchCarID going to the other
+    // team) or the ball grounding does. This matches "ball possession in the air"
+    // above rather than treating this as a strictly-solo juggling reward.
     // ============================================================================
     class MultiAirTouchReward : public Reward {
     private:
         struct AirTouchMemory {
             int touchCount = 0;           // Number of touches in current air sequence
-            int lastTouchStep = 0;        // Step number of last touch
+            float lastTouchTime = 0.0f;   // currentTime value at last touch (seconds)
             float highestAltitude = 0.0f; // Highest altitude reached
             bool ballWasInAir = false;    // Was ball in air on last frame?
 
@@ -579,12 +585,16 @@ namespace RLGC {
         };
 
         std::unordered_map<uint32_t, AirTouchMemory> memory;
-        int currentStep = 0;
+        // Rev 1.1: was an int incremented once per PreStep call (~15Hz post-tick-skip,
+        // not the 120Hz the old TOUCH_TIMEOUT_STEPS/MIN_TOUCH_DELAY_STEPS comments
+        // assumed) — switched to float seconds via state.deltaTime per the house
+        // timing convention (CLAUDE.md §7C).
+        float currentTime = 0.0f;
 
         static constexpr float BALL_GROUND_THRESHOLD = 150.0f;  // Height considered "on ground"
         static constexpr float MIN_TOUCH_HEIGHT = 300.0f;       // Only count touches above this height
-        static constexpr float TOUCH_TIMEOUT_STEPS = 1200;        // Reset if no touch for 1 sec (at 120 ticks/sec)
-        static constexpr float MIN_TOUCH_DELAY_STEPS = 24;       // Minimum 0.5 sec between touches (at 120 ticks/sec)
+        static constexpr float TOUCH_TIMEOUT_SECONDS = 1.0f;      // Reset if no touch for 1 real second
+        static constexpr float MIN_TOUCH_DELAY_SECONDS = 0.5f;  // Minimum 0.5 real seconds between counted touches
         static constexpr float SINGLE_TOUCH_REWARD = 0.1f;
         static constexpr float DOUBLE_TOUCH_REWARD = 0.4f;
         static constexpr float TRIPLE_PLUS_REWARD = 0.7f;
@@ -625,7 +635,7 @@ namespace RLGC {
     public:
         virtual void Reset(const GameState& initialState) override {
             memory.clear();
-            currentStep = 0;
+            currentTime = 0.0f;
         }
 
         virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
@@ -644,20 +654,37 @@ namespace RLGC {
             }
 
             // Check if touch timeout exceeded (too long without touch)
-            if (mem.touchCount > 0 && (currentStep - mem.lastTouchStep) > TOUCH_TIMEOUT_STEPS) {
+            if (mem.touchCount > 0 && (currentTime - mem.lastTouchTime) > TOUCH_TIMEOUT_SECONDS) {
                 // Reset if we haven't touched in a while (ball likely hit ground or sequence broke)
                 mem.touchCount = 0;
                 mem.highestAltitude = 0.0f;
+            }
+
+            // Rev 1.1: Opponent-touch invalidation — if the ball's last toucher is on the
+            // opposing team while our sequence is open, a turnover happened mid-air; clear
+            // the sequence so a later retouch starts fresh instead of banking "combo" credit
+            // across the interruption. A teammate holding last-touch is deliberately a no-op
+            // (see class header). Modeled on AirborneOnPossessionLostPenalty.h's team lookup.
+            if (mem.touchCount > 0 && state.lastTouchCarID >= 0
+                && (uint32_t)state.lastTouchCarID != player.carId) {
+                for (const auto& p : state.players) {
+                    if (p.carId != (uint32_t)state.lastTouchCarID) continue;
+                    if (p.team != player.team) {
+                        mem.touchCount = 0;
+                        mem.highestAltitude = 0.0f;
+                    }
+                    break;
+                }
             }
 
             // Detect NEW touch
             if (player.ballTouchedStep && ballInAir && player.pos.z > MIN_TOUCH_HEIGHT) {
                 // Check if this is a new touch (not the same touch as last frame)
                 // AND ensure minimum 0.5s delay between touches
-                if (currentStep != mem.lastTouchStep &&
-                    (currentStep - mem.lastTouchStep) >= MIN_TOUCH_DELAY_STEPS) {
+                if (currentTime != mem.lastTouchTime &&
+                    (currentTime - mem.lastTouchTime) >= MIN_TOUCH_DELAY_SECONDS) {
                     mem.touchCount++;
-                    mem.lastTouchStep = currentStep;
+                    mem.lastTouchTime = currentTime;
 
                     // NEW: Capture boost on first touch of sequence
                     if (mem.touchCount == 1) {
@@ -667,26 +694,30 @@ namespace RLGC {
                     // Track highest altitude of touches
                     mem.highestAltitude = RS_MAX(mem.highestAltitude, player.pos.z);
 
-                    // Reward based on touch count
+                    // Reward based on touch count — base tier, deliberately NOT boost-scaled
+                    // (Rev 1.1: see boostMultiplier below, which now only scales bonusReward)
+                    float baseTouchReward = 0.0f;
                     if (mem.touchCount == 1) {
-                        reward = SINGLE_TOUCH_REWARD;
+                        baseTouchReward = SINGLE_TOUCH_REWARD;
                     }
                     else if (mem.touchCount == 2) {
-                        reward = DOUBLE_TOUCH_REWARD;
+                        baseTouchReward = DOUBLE_TOUCH_REWARD;
                     }
                     else if (mem.touchCount >= 3) {
-                        reward = TRIPLE_PLUS_REWARD;
+                        baseTouchReward = TRIPLE_PLUS_REWARD;
                     }
+
+                    float bonusReward = 0.0f;
 
                     // Bonus for well-spaced touches (consistency)
                     // We want touches spread out, not rapid-fire
                     if (mem.touchCount >= 2) {
-                        reward += CONSISTENCY_BONUS * 0.3f;  // Small bonus per touch
+                        bonusReward += CONSISTENCY_BONUS * 0.3f;  // Small bonus per touch
                     }
 
                     // Bonus for high altitude touches
                     if (mem.highestAltitude > 1500.0f) {
-                        reward += HEIGHT_BONUS;
+                        bonusReward += HEIGHT_BONUS;
                     }
 
                     // ========== NEW: ENHANCED TOUCH QUALITY BONUSES ==========
@@ -706,7 +737,7 @@ namespace RLGC {
                         mem.lastContactAngleFactor = AirDribbleUtils::CalculateContactAngleFactor(
                             desiredAngle, actualAngle, ANGLE_TOLERANCE);
 
-                        reward += CONTACT_ANGLE_BONUS * mem.lastContactAngleFactor;
+                        bonusReward += CONTACT_ANGLE_BONUS * mem.lastContactAngleFactor;
                     }
 
                     // 2. SOFTNESS BONUS - Reward softer first touches
@@ -719,7 +750,7 @@ namespace RLGC {
 
                         // First touch gets full softness bonus, second touch gets reduced bonus
                         float softnessMultiplier = (mem.touchCount == 1) ? 1.0f : 0.5f;
-                        reward += SOFTNESS_BONUS * mem.lastSoftnessScore * softnessMultiplier;
+                        bonusReward += SOFTNESS_BONUS * mem.lastSoftnessScore * softnessMultiplier;
                     }
 
                     // 3. Z-VELOCITY GAIN BONUS - Reward lifting the ball higher
@@ -732,9 +763,19 @@ namespace RLGC {
 
                         // Only reward if ball is actually gaining height
                         if (mem.ballZVelocityGainLast > 0.0f) {
-                            reward += Z_VELOCITY_BONUS * RS_CLAMP(mem.ballZVelocityGainLast / 500.0f, 0.0f, 1.0f);
+                            bonusReward += Z_VELOCITY_BONUS * RS_CLAMP(mem.ballZVelocityGainLast / 500.0f, 0.0f, 1.0f);
                         }
                     }
+
+                    // Rev 1.1: boost multiplier now scoped to bonus components only — a
+                    // legitimate low-boost defensive clear still banks its base touch-tier
+                    // reward, only the "extra polish" bonuses get discounted.
+                    if (bonusReward > 0.0f) {
+                        float boostMultiplier = RS_CLAMP(mem.sequenceStartBoost / 50.0f, 0.0f, 1.0f);
+                        bonusReward *= boostMultiplier;
+                    }
+
+                    reward = baseTouchReward + bonusReward;
 
                     // Store ball state for next frame
                     mem.lastBallPos = state.ball.pos;
@@ -744,12 +785,6 @@ namespace RLGC {
 
             mem.ballWasInAir = ballInAir;
 
-            // NEW: Apply boost multiplier to all touch bonuses
-            if (mem.touchCount > 0 && reward > 0.0f) {
-                float boostMultiplier = RS_CLAMP(mem.sequenceStartBoost / 50.0f, 0.0f, 1.0f);
-                reward *= boostMultiplier;
-            }
-
             // Horizontal speed cap: penalize ball horiz speed > 1900 uu/s (car can't keep up)
             if (reward > 0.0f)
                 reward *= GetHorizVelPenaltyMul(player, state);
@@ -758,7 +793,7 @@ namespace RLGC {
         }
 
         void PreStep(const GameState& state) override {
-            currentStep++;
+            currentTime += (state.deltaTime > 0.0f) ? state.deltaTime : (1.0f / 120.0f);
         }
 
         // Helper to get current touch count for a player (useful for debugging/logging)
