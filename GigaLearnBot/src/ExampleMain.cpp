@@ -360,6 +360,97 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
     }
 
     // ========================================================================
+    // POSSESSION TRANSITION REWARD — Possession-Gain Event Metrics
+    // ========================================================================
+    {
+        auto m = PossessionTransitionReward::GetAndResetMetrics();
+        if (m.blueGains > 0 || m.orangeGains > 0) {
+            report.AddAvg("PossessionTransition/BlueGains",   (float)m.blueGains);
+            report.AddAvg("PossessionTransition/OrangeGains", (float)m.orangeGains);
+            report.AddAvg("PossessionTransition/RewardSum",   (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // DRIBBLE CARRY TRANSITION REWARD — Clean-Carry / Steal Event Metrics
+    // ========================================================================
+    {
+        auto m = DribbleCarryTransitionReward::GetAndResetMetrics();
+        if (m.cleanEntries > 0 || m.stealEntries > 0) {
+            report.AddAvg("DribbleCarryTransition/CleanEntries", (float)m.cleanEntries);
+            report.AddAvg("DribbleCarryTransition/StealEntries", (float)m.stealEntries);
+            report.AddAvg("DribbleCarryTransition/RewardSum",    (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // INSTANT SPACING TRANSITION REWARD — Pairwise Zone-Change Event Metrics
+    // ========================================================================
+    {
+        auto m = InstantSpacingTransitionReward::GetAndResetMetrics();
+        if (m.goodEntries > 0 || m.closeEntries > 0 || m.farEntries > 0) {
+            report.AddAvg("InstantSpacingTransition/GoodEntries",  (float)m.goodEntries);
+            report.AddAvg("InstantSpacingTransition/CloseEntries", (float)m.closeEntries);
+            report.AddAvg("InstantSpacingTransition/FarEntries",   (float)m.farEntries);
+            report.AddAvg("InstantSpacingTransition/RewardSum",    (float)m.rewardSum);
+            // Rev 1.1 (2026-08-30): sustained CLOSE/FAR trickle, separate from the
+            // entry/exit event sum above so camping-cost vs. transition-event signal
+            // is diagnosable independently.
+            report.AddAvg("InstantSpacingTransition/SustainedPenaltySum", (float)m.sustainedPenaltySum);
+        }
+    }
+
+    // ========================================================================
+    // ROLE CYCLE TRANSITION REWARD — Rotation Leg Completion Event Metrics
+    // ========================================================================
+    {
+        auto m = RoleCycleTransitionReward::GetAndResetMetrics();
+        if (m.retreatCompletions > 0 || m.advanceCompletionsViaSecond > 0 ||
+            m.advanceCompletionsNoSlot > 0 || m.advanceCompletionsSkipped > 0) {
+            report.AddAvg("RoleCycleTransition/RetreatCompletions",          (float)m.retreatCompletions);
+            report.AddAvg("RoleCycleTransition/AdvanceCompletionsViaSecond", (float)m.advanceCompletionsViaSecond);
+            report.AddAvg("RoleCycleTransition/AdvanceCompletionsNoSlot",    (float)m.advanceCompletionsNoSlot);
+            report.AddAvg("RoleCycleTransition/AdvanceCompletionsSkipped",   (float)m.advanceCompletionsSkipped);
+            report.AddAvg("RoleCycleTransition/RewardSum",                   (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // MOMENTUM MAINTAIN REWARD — Turn/Landing/Jump-Boost Retention Event Metrics
+    // ========================================================================
+    {
+        auto m = MomentumMaintainReward::GetAndResetMetrics();
+        if (m.turnCompletions > 0 || m.landingCompletions > 0 || m.jumpBoostCompletions > 0) {
+            report.AddAvg("MomentumMaintain/TurnCompletions",      (float)m.turnCompletions);
+            report.AddAvg("MomentumMaintain/LandingCompletions",   (float)m.landingCompletions);
+            report.AddAvg("MomentumMaintain/JumpBoostCompletions", (float)m.jumpBoostCompletions);
+            report.AddAvg("MomentumMaintain/RewardSum",            (float)m.rewardSum);
+        }
+    }
+
+    // ========================================================================
+    // GOAL SPEED REWARD — Speed-Scaled Goal Bonus Metrics
+    // ========================================================================
+    {
+        auto m = GoalSpeedReward::GetAndResetMetrics();
+        if (m.avgGoalSpeedKph > 0.0f) {
+            report.AddAvg("GoalSpeed/AvgGoalSpeedKph", m.avgGoalSpeedKph);
+            report.AddAvg("GoalSpeed/AvgReward",       m.avgReward);
+        }
+    }
+
+    // ========================================================================
+    // SIMPLE AERIAL TOUCH REWARD — Discrete AerialFirstTouchReward Comparison Metrics
+    // ========================================================================
+    {
+        auto m = SimpleAerialTouchReward::GetAndResetMetrics();
+        if (m.fireCount > 0) {
+            report.AddAvg("SimpleAerialTouch/FireCount", (float)m.fireCount);
+            report.AddAvg("SimpleAerialTouch/AvgReward",  m.avgReward);
+        }
+    }
+
+    // ========================================================================
     // POSSESSION CONTROL v2 — Threat-gated possession metrics
     // ========================================================================
     {
@@ -436,6 +527,18 @@ void StepCallback(Learner* learner, const std::vector<GameState>& states, Report
             report.AddAvg("Penalty/DoubleCommit/AvgOverlapCount",
                 (float)m.commitCountSum / (float)m.penaltyFrames);
             report.AddAvg("Penalty/DoubleCommit/PenaltySum",     (float)m.penaltySum);
+        }
+    }
+    {
+        // Discrete comparison sibling of DoubleCommitPenalty (2026-08-29) — fires once
+        // per double-commit episode instead of every qualifying step. TransitionCount
+        // here vs. PenaltyFrames above is the direct architecture-comparison signal.
+        auto m = DoubleCommitTransitionPenalty::GetAndResetMetrics();
+        if (m.transitionCount > 0) {
+            report.AddAvg("Penalty/DoubleCommitTransition/TransitionCount", (float)m.transitionCount);
+            report.AddAvg("Penalty/DoubleCommitTransition/AvgOverlapCount",
+                (float)m.commitCountSum / (float)m.transitionCount);
+            report.AddAvg("Penalty/DoubleCommitTransition/PenaltySum", (float)m.penaltySum);
         }
     }
     {

@@ -868,6 +868,33 @@ public:
 //   rebounds that are still redirectable; 0.0 only rejects rebounds heading
 //   straight back toward own goal. The inAttackHalf check on the intercept
 //   position handles the real quality filtering.
+//
+// 2026-08-28 - Rev 4 (NJH) — real bounce detection + metrics
+//   Bug fix: the reactive touch layer only checked ball PROXIMITY to the
+//   backboard (within 300uu of the wall), never an actual bounce. A ball
+//   drifting near the wall without contacting it could still arm the touch
+//   bonus. Replaced with a real bounce detector in PreStep(): ball
+//   Y-velocity sign flip between state.prev->ball.vel and state.ball.vel
+//   while within range of a back wall — an actual physical event instead
+//   of a proximity guess.
+//
+//   Bug fix: attribution was dead code. `boardStates` was keyed by the
+//   OBSERVING player's own carId, so `bs.lastBackboardPlayerId != player.carId`
+//   could never be false for that player's own entry — every player who
+//   merely witnessed the ball near their opponent's backboard could claim
+//   the touch bonus on their own later qualifying touch, regardless of who
+//   actually set up the rebound. Replaced the per-player `boardStates` map
+//   with a single ball-level BoardState (there is only one backboard and
+//   one active bounce sequence at a time), gated by which team's attack the
+//   bounce serves. The first touch that clears the full scoring-zone/speed/
+//   alignment gate now consumes the bounce, so one physical rebound can't
+//   be double-credited across sequential touches.
+//
+//   Added BackboardReboundMetricsCollector (BackboardReboundMetricsCollector.h)
+//   so both layers' health (predicted-vs-actual bounce accuracy, touch/goal
+//   conversion) is visible in W&B, and BallPredictionValidator
+//   (BallPredictionValidator.h) so the underlying BallPred::Cache physics
+//   model itself is checked against reality rather than assumed correct.
 // ============================================================================
 class BackboardReboundReward : public Reward {
 private:
@@ -883,13 +910,18 @@ private:
     static constexpr float TRAJ_CHECK_TIME  = 0.75f;   // seconds ahead to sample ball position
     static constexpr float TRAJ_SCALE       = 1000.0f; // UU of goal-approach for full ±0.5 factor
 
-    struct BoardState {
-        float lastBackboardTime = -1.0f;
-        Vec lastBackboardPos;
-        uint32_t lastBackboardPlayerId = 0;  // Track which player triggered backboard rebound
-    };
+    // ---- Reactive touch layer: real-bounce detection constants (Rev 4) ----
+    static constexpr float BOUNCE_WALL_MARGIN = 300.0f; // max dist from back wall to count as a bounce (UU)
+    static constexpr float BOUNCE_VEL_EPS     = 50.0f;  // min |vel.y| on each side of the flip, rejects noise (UU/s)
+    static constexpr float BOUNCE_TIMEOUT     = 2.5f;   // window to follow up with a qualifying touch (s)
 
-    mutable std::map<uint32_t, BoardState> boardStates;  // Per-player tracking instead of per-team
+    // Ball-level bounce state. There is only ever one backboard and one
+    // active bounce sequence at a time, so this is not per-player.
+    struct BoardState {
+        float lastBounceTime = -1.0f;
+        Team  lastBounceTeam = Team::BLUE;  // which team's attack this bounce serves
+    };
+    BoardState _boardState;
 
     // ---- Layer 1 shaping cap state (per bounce sequence) ----
     struct ShapingState { int seqId = -1; float spent = 0.0f; };
@@ -898,14 +930,6 @@ private:
     float _prevPredBounceTime = -1.0f;  // updated in PreStep to detect new sequences
 
     BallPred::Cache _ballCache;  // Updated once per step in PreStep()
-
-    bool IsNearOpponentBackboard(const Vec& pos, Team playerTeam) const {
-        // Opponent back wall Y
-        float oppY = (playerTeam == Team::BLUE) ? CommonValues::BACK_WALL_Y
-            : -CommonValues::BACK_WALL_Y;
-        // Close in Y, above ground a bit, but not too high (avoid ceiling bounces)
-        return (std::fabs(pos.y - oppY) < 300.0f && pos.z > 300.0f && pos.z < CommonValues::CEILING_Z - CommonValues::WALL_BOTTOM_RAMP_RADIUS_APPROX);
-    }
 
     bool IsInScoringZone(const Vec& pos, Team playerTeam) const {
         float goalY = (playerTeam == Team::BLUE) ? CommonValues::BACK_WALL_Y
@@ -917,7 +941,7 @@ private:
 public:
     virtual void Reset(const GameState& initialState) override {
         currentTime = 0.0f;
-        boardStates.clear();
+        _boardState = BoardState();
         _shapingState.clear();
         _shapingSeqId = 0;
         _prevPredBounceTime = -1.0f;
@@ -942,20 +966,31 @@ public:
         if (curBounceTime > _prevPredBounceTime + 0.5f)
             _shapingSeqId++;
         _prevPredBounceTime = curBounceTime;
+
+        // Real (not merely predicted) backboard bounce detection (Rev 4): the
+        // ball's Y-velocity flips sign while within range of a back wall. This
+        // is ball-level and computed once per step here, not per-player in
+        // GetReward — same reasoning as the Rev 3 currentTime fix.
+        if (state.prev) {
+            float prevVelY = state.prev->ball.vel.y;
+            float curVelY  = state.ball.vel.y;
+            bool velocityReversed = (prevVelY > BOUNCE_VEL_EPS && curVelY < -BOUNCE_VEL_EPS)
+                                 || (prevVelY < -BOUNCE_VEL_EPS && curVelY > BOUNCE_VEL_EPS);
+            bool nearBackWall = std::fabs(std::fabs(state.ball.pos.y) - CommonValues::BACK_WALL_Y) < BOUNCE_WALL_MARGIN;
+            bool aboveGoalHeight = state.ball.pos.z > (CommonValues::GOAL_HEIGHT - CommonValues::BALL_RADIUS);
+            if (velocityReversed && nearBackWall && aboveGoalHeight) {
+                _boardState.lastBounceTime = currentTime;
+                // A bounce at +Y is behind Orange's goal (Blue's attacking target);
+                // a bounce at -Y is behind Blue's goal (Orange's attacking target).
+                _boardState.lastBounceTeam = (state.ball.pos.y > 0.0f) ? Team::BLUE : Team::ORANGE;
+            }
+        }
     }
 
     virtual float GetReward(const Player& player, const GameState& state, bool isFinal) override {
         float dt = (state.deltaTime > 0.0f) ? state.deltaTime : 0.016f;
 
         Team playerTeam = player.team;
-        auto& bs = boardStates[player.carId];  // Per-player state
-
-        // Reactive tracking: record when ball is near opponent backboard
-        if (IsNearOpponentBackboard(state.ball.pos, playerTeam)) {
-            bs.lastBackboardTime = currentTime;
-            bs.lastBackboardPos = state.ball.pos;
-            bs.lastBackboardPlayerId = player.carId;
-        }
 
         // ----------------------------------------------------------------
         // Layer 1: Predictive positioning reward
@@ -1036,17 +1071,17 @@ public:
         }
 
         // ----------------------------------------------------------------
-        // Existing touch-based reward (all gates unchanged from Rev 1)
+        // Reactive touch-based reward — requires a REAL bounce (Rev 4)
         // ----------------------------------------------------------------
         if (!player.ballTouchedStep)
             return positioningReward;
 
-        // Require recent backboard contact AND same player who triggered it
-        if (bs.lastBackboardTime < 0.0f || (currentTime - bs.lastBackboardTime) > 2.5f)
+        // Require a recent, real backboard bounce
+        if (_boardState.lastBounceTime < 0.0f || (currentTime - _boardState.lastBounceTime) > BOUNCE_TIMEOUT)
             return positioningReward;
 
-        // Only credit the player who initiated the backboard rebound
-        if (bs.lastBackboardPlayerId != player.carId)
+        // Only the team the bounce serves (their attacking backboard) can claim it
+        if (_boardState.lastBounceTeam != playerTeam)
             return positioningReward;
 
         // Player touch after backboard: check if near scoring zone
@@ -1090,6 +1125,10 @@ public:
         if (state.goalScored) {
             reward += 3.0f;
         }
+
+        // Consume the bounce (Rev 4): this physical rebound has now been
+        // credited, so a later touch within BOUNCE_TIMEOUT can't claim it again.
+        _boardState.lastBounceTime = -1.0f;
 
         return positioningReward + RS_CLAMP(reward, 0.0f, 8.0f);
     }
@@ -3112,8 +3151,8 @@ private:
     // SEQUENCE GATE + RESOLUTION (Rev 4.0) — continuous angle taper (no hard
     // cliff, no time-based grace), and outcome-gated travel-bonus release.
     // ========================================================================
-    const float HARD_FAIL_UNDERSIDE_Z = 0.05f;   // ~87° — only truly bad angles end the sequence
-    const float IDEAL_UNDERSIDE_Z     = 0.34f;   // old 70° line — now just "full quality," not pass/fail
+    const float HARD_FAIL_UNDERSIDE_Z = 0.00f;   // ~90° — only truly bad angles end the sequence
+    const float IDEAL_UNDERSIDE_Z     = 0.30f;   // old 70° line — now just "full quality," not pass/fail
     const float MAX_CONTROL_DIST      = 1100.0f;  // UU — beyond this, no plausible dribble contact remains
     const float SCORING_TOUCH_BONUS   = 3.5f;    // flat bonus when a cap-exhausted sequence's scoring touch is bypassed through
 
@@ -3122,7 +3161,7 @@ private:
     // refinement on top of undersideMul: also reward contacting the ball on
     // the side opposite the intended travel direction (behind, not just under).
     // ========================================================================
-    const float BEHIND_ALIGN_TOLERANCE = 0.3f;  // dot-product slack before behind-quality starts climbing
+    const float BEHIND_ALIGN_TOLERANCE = 0.25f;  // dot-product slack before behind-quality starts climbing
     const float BEHIND_MUL_MIN         = 0.8f;  // floor: car in front of / orthogonal to travel direction
     const float BEHIND_MUL_MAX         = 1.2f;  // ceiling: contact directly behind, opposite travel direction
 
@@ -3220,7 +3259,12 @@ private:
         if (!_ballCache.valid) return false;
         constexpr float BALL_R      = 91.25f;
         constexpr float MOUTH_W     = 892.755f - BALL_R;   // 801.505 UU half-width
-        constexpr float MOUTH_H_MAX = 642.775f - BALL_R;   // 551.525 UU top
+        // 2026-08-28 (NJH): lowered 200 UU (was 642.775-BALL_R=551.525, right under the
+        // crossbar) — bot was consistently air-dribbling into the crossbar/just over the
+        // goal line because trajectories aimed that high were already fully credited as
+        // "goal-bound" by this check. 351.525 now requires aiming meaningfully lower for
+        // max ComputeOutcomeScore()/boost-conservation-waiver credit.
+        constexpr float MOUTH_H_MAX = 642.775f - BALL_R - 200.0f;   // 351.525 UU top
         float goalPlaneY = (player.team == Team::BLUE)
                             ?  CommonValues::BACK_WALL_Y
                             : -CommonValues::BACK_WALL_Y;

@@ -53,9 +53,9 @@ PhaseConfig GetPhaseConfig() {
         break;
 
     case TrainingPhase::PHASE_5_DIAMOND:
-        cfg.entropyScale = 0.015f;
-        cfg.policyLR = 1.18e-4f;
-        cfg.criticLR = 1.18e-4f;
+        cfg.entropyScale = 0.0125f;
+        cfg.policyLR = 1.15e-4f;
+        cfg.criticLR = 1.15e-4f;
         cfg.noTouchTimeout = 15.0f;
         cfg.useRandomState = true;
         cfg.randomStateChance = 0.65f;
@@ -182,7 +182,7 @@ void ConfigureLearnerConfig(LearnerConfig& cfg, const PhaseConfig& phaseCfg) {
 
     // Phase-specific learning parameters
     cfg.ppo.entropyScale = phaseCfg.entropyScale;
-    cfg.ppo.gaeGamma = 0.99785f;
+    cfg.ppo.gaeGamma = 0.998f;
     cfg.ppo.policyLR = phaseCfg.policyLR;
     cfg.ppo.criticLR = phaseCfg.criticLR;
 

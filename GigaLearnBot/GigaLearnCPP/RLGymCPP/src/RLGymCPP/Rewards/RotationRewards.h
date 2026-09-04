@@ -552,11 +552,16 @@ namespace PhaseC {
 // DetermineRoleCommon already excludes them from the ranking pool, so the
 // remaining goalside player(s) naturally fall into FIRST/LAST only.
 //
-// Event reward: +0.3 for a lateral FIRST/SECOND/LAST transition (INSTANT)
-// Cycle bonus: +0.4 for completing the correct next leg of the cycle
-// Recovery bonus: +0.4 for going TRANSITIONING -> goalside (replaces the
-//   flat +0.3 for that leg; getting CAUGHT transitioning pays nothing —
-//   GoalsideReward already penalizes that continuously, no need to double up)
+// Rev 3.0 (2026-08-27 | NJH): all 4 discrete one-time bonuses (the +0.3
+// generic lateral-transition reward, the +0.4 retreat/advance cycle bonuses,
+// and the +0.4 recovery bonus) were REMOVED and moved to the new standalone
+// RoleCycleTransitionReward.h — that class now owns the discrete
+// cycle-completion signal exclusively (extended through LAST->FIRST directly,
+// with SECOND as an optional waypoint, rather than stopping at SECOND). This
+// class now scores ONLY the 2 continuous per-step penalties below; the
+// CycleStage/timeInRole bookkeeping is kept only because those 2 penalties
+// still depend on it.
+//
 // Penalty: -0.08/step for stalling at SECOND instead of completing the
 //   retreat to LAST, but ONLY while the ball is in our own half (staying
 //   forward to support the attack is often correct otherwise)
@@ -590,10 +595,8 @@ private:
 
 	static constexpr float RETREAT_WINDOW  = 5.0f;   // seconds to complete FIRST -> LAST
 	static constexpr float RETREAT_PENALTY = 0.08f;  // per-step penalty for stalling at SECOND (own half only)
-	static constexpr float RETREAT_BONUS   = 0.4f;   // one-time bonus for reaching LAST after FIRST
 	static constexpr float ADVANCE_WINDOW  = 5.0f;   // seconds to complete LAST -> SECOND (3v3 only)
-	static constexpr float ADVANCE_BONUS   = 0.4f;   // one-time bonus for reaching SECOND after LAST
-	static constexpr float RECOVERY_BONUS  = 0.4f;   // one-time bonus for recovering from TRANSITIONING
+	// RETREAT_BONUS/ADVANCE_BONUS/RECOVERY_BONUS removed Rev 3.0 — see RoleCycleTransitionReward.h
 
 	// Check for events that should trigger immediate role transition
 	bool CheckEventTriggers(const Player& player, const GameState& state, RoleMemory& mem) const {
@@ -661,7 +664,7 @@ public:
 			mem.cycleStageTime += dt;
 
 			if (currentRole == RoleType::LAST) {
-				reward += RETREAT_BONUS;
+				// RETREAT_BONUS removed Rev 3.0 — see RoleCycleTransitionReward.h
 				// A SECOND slot only exists right now if >=2 teammates are goalside.
 				mem.cycleStage = (CountGoalsideTeammates(player, state) >= 2)
 					? CycleStage::AWAITING_ADVANCE
@@ -690,7 +693,7 @@ public:
 			mem.cycleStageTime += dt;
 
 			if (currentRole == RoleType::SECOND) {
-				reward += ADVANCE_BONUS;
+				// ADVANCE_BONUS removed Rev 3.0 — see RoleCycleTransitionReward.h
 				mem.cycleStage = CycleStage::NONE;
 				mem.cycleStageTime = 0.0f;
 			}
@@ -707,22 +710,11 @@ public:
 			// and penalizing it would fight BoostAwareRotationReward.
 		}
 
-		// Detect role change and pay the base transition reward
+		// Note: this block previously paid RECOVERY_BONUS / a flat 0.3f transition
+		// reward here — removed Rev 3.0 (see RoleCycleTransitionReward.h). The
+		// lastRole/timeInRole bookkeeping below is still required input to the
+		// surviving maxRoleTime camping penalty further down.
 		if (currentRole != previousRole) {
-			if (previousRole == RoleType::TRANSITIONING) {
-				// Recovering to goalside — bonus instead of the flat transition reward
-				reward += RECOVERY_BONUS;
-			}
-			else if (currentRole == RoleType::TRANSITIONING) {
-				// Getting caught out of position — no reward. GoalsideReward
-				// already penalizes this continuously; don't reward the
-				// event itself, and don't double-penalize here either.
-			}
-			else if (mem.timeInRole >= config.minRoleTime || eventTriggered) {
-				// FIRST/SECOND/LAST -> a different one of FIRST/SECOND/LAST
-				reward += 0.3f;
-			}
-
 			mem.lastRole = currentRole;
 			mem.timeInRole = 0.0f;
 		}

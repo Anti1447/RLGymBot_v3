@@ -69,7 +69,6 @@ PROBLEMS WITH ChatGPT'S IMPLEMENTATION:
 class TimeToBalPossessionReward : public Reward {
 private:
     // Per-player state tracking (immutable in GetReward, updated in PreStep)
-    std::map<uint32_t, float> possessionScoreHistory;
     std::map<uint32_t, float> possessionDuration;
 
     // Calculate actual time-to-ball considering physics
@@ -210,7 +209,6 @@ private:
 
 public:
     virtual void Reset(const GameState& initialState) override {
-        possessionScoreHistory.clear();
         possessionDuration.clear();
     }
 
@@ -242,9 +240,6 @@ public:
             float pressure = CalculateOpponentPressure(player, state, state.ball.pos);
             possessionScore *= (1.0f - pressure * pressure); // Quadratic penalty: small pressure = minimal impact, high pressure = severe impact
 
-            // Update possession state for next GetReward call
-            possessionScoreHistory[player.carId] = possessionScore;
-
             // Update duration tracking
             if (possessionScore > 0.3f) {
                 possessionDuration[player.carId] += state.deltaTime;
@@ -258,7 +253,6 @@ public:
         float reward = 0.0f;
 
         // Read-only access to state computed in PreStep
-        float prevScore = possessionScoreHistory.count(player.carId) ? possessionScoreHistory[player.carId] : 0.0f;
         float duration = possessionDuration.count(player.carId) ? possessionDuration[player.carId] : 0.0f;
 
         // Recalculate current score (from PreStep, it should match)
@@ -274,7 +268,7 @@ public:
         float timeDiff = oppMinTimeToReach - myTimeToReach;
         float possessionScore = RS_CLAMP(timeDiff / 2.0f, -1.0f, 1.0f);
         float controllability = CalculateBallControllability(player, state);
-        possessionScore *= (0.5f + 0.5f * controllability);
+        possessionScore *= (0.7f + 0.3f * controllability); // Matches PreStep's weighting (time-based dominates)
         float pressure = CalculateOpponentPressure(player, state, state.ball.pos);
         possessionScore *= (1.0f - pressure * pressure); // Quadratic penalty: matches PreStep calculation
 
@@ -298,15 +292,8 @@ public:
             }
         }
 
-        // Reward gaining possession (transition from not having to having)
-        if (prevScore < 0.0f && possessionScore > 0.3f) {
-            reward += 2.0f; // Won possession
-        }
-
-        // Penalize losing possession (transition from having to not having)
-        if (prevScore > 0.3f && possessionScore < 0.0f) {
-            reward -= 1.0f; // Lost possession
-        }
+        // Note: possession-transition (gain/loss) signal is owned by
+        // PossessionTransitionReward, not this class — see Reward_Change_Log.md 2026-08-27.
 
         return reward;
     }

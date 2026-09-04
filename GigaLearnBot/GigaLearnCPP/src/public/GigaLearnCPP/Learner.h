@@ -5,6 +5,8 @@
 #include <RLGymCPP/Rewards/RewardMetricsCollector.h>
 #include <RLGymCPP/Rewards/RewardDiagnostician.h>
 #include <RLGymCPP/Rewards/FlipResetMetricsCollector.h>
+#include <RLGymCPP/Rewards/BallPredictionValidator.h>
+#include <RLGymCPP/Rewards/BackboardReboundMetricsCollector.h>
 #include "RLGymCPP/Utils/KickoffController.h"
 #include "Util/MetricSender.h"
 #include "Util/RenderSender.h"
@@ -61,6 +63,12 @@ namespace GGL {
 
 		// Flip reset metrics collection
 		FlipResetMetricsCollector flipResetMetricsCollector;
+
+		// BallPred::Cache prediction-accuracy validation (all rewards that use it)
+		RLGC::BallPredictionValidator ballPredictionValidator;
+
+		// Backboard rebound reward health metrics
+		RLGC::BackboardReboundMetricsCollector backboardReboundMetricsCollector;
 
 		// MuZero reanalysis components
 		ReanalysisBuffer* reanalysisBuffer = nullptr;

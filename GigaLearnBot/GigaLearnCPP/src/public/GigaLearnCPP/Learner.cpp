@@ -640,6 +640,8 @@ void GGL::Learner::Start() {
 
 			// Reset flip reset metrics for this iteration
 			flipResetMetricsCollector.Reset();
+			ballPredictionValidator.Reset();
+			backboardReboundMetricsCollector.Reset();
 
 			bool isFirstIteration = (totalTimesteps == 0);
 
@@ -827,6 +829,8 @@ void GGL::Learner::Start() {
 						float deltaTime = (float)config.tickSkip / 120.0f;
 						for (const auto& gameState : envSet->state.gameStates) {
 							flipResetMetricsCollector.Step(gameState, deltaTime);
+							ballPredictionValidator.Step(gameState, deltaTime);
+							backboardReboundMetricsCollector.Step(gameState, deltaTime);
 						}
 
 						// Now that we've inferred and stepped the env, we can add that stuff to the trajectories
@@ -1145,6 +1149,25 @@ void GGL::Learner::Start() {
 				report.AddAvg("FlipReset/PostReset/Shot%", flipResetStats.GetPostResetShotRate());
 				report.AddAvg("FlipReset/PostReset/Clear%", flipResetStats.GetPostResetClearRate());
 				report.AddAvg("FlipReset/PostReset/Neutral%", flipResetStats.GetPostResetNeutralRate());
+
+				// Report BallPred::Cache prediction accuracy (all rewards that use it)
+				const auto& ballPredStats = ballPredictionValidator.GetStats();
+				report.AddAvg("BallPred/PosErrMean_0.5s", ballPredStats.at0_5s.GetPosErrMean());
+				report.AddAvg("BallPred/PosErrMean_1.0s", ballPredStats.at1_0s.GetPosErrMean());
+				report.AddAvg("BallPred/PosErrMean_2.0s", ballPredStats.at2_0s.GetPosErrMean());
+				report.AddAvg("BallPred/PosErrStd_1.0s", ballPredStats.at1_0s.GetPosErrStd());
+				report.AddAvg("BallPred/PosErrMax_2.0s", ballPredStats.at2_0s.posErrMax);
+				report.AddAvg("BallPred/VelErrMean_1.0s", ballPredStats.at1_0s.GetVelErrMean());
+				report.AddAvg("BallPred/SampleCount", (float)ballPredStats.at1_0s.count);
+
+				// Report BackboardReboundReward health metrics
+				const auto& backboardStats = backboardReboundMetricsCollector.GetStats();
+				report.AddAvg("BackboardRebound/PredictedApproachCount", (float)backboardStats.predictedApproachCount);
+				report.AddAvg("BackboardRebound/ActualBounceCount", (float)backboardStats.actualBounceCount);
+				report.AddAvg("BackboardRebound/PredictionConfirmedRate", backboardStats.GetPredictionConfirmedRate());
+				report.AddAvg("BackboardRebound/QualifyingTouchCount", (float)backboardStats.qualifyingTouchCount);
+				report.AddAvg("BackboardRebound/TouchToGoalRate", backboardStats.GetTouchToGoalRate());
+				report.AddAvg("BackboardRebound/AvgBounceToTouchSec", backboardStats.GetAvgBounceToTouch());
 
 				report.Finish();
 
