@@ -2,6 +2,16 @@
 #include <RLGymCPP/Gamestates/StateUtil.h>
 #include <algorithm>
 #include <numeric>
+#include <array>
+
+// 1.0 for the six big (100 boost, 10s respawn) pads, 0.0 for the 28 small (12 boost, 4s respawn) pads.
+// Big pads map to big pads under the 180-degree mirror (3<->30, 4<->29, 15<->18), so one table serves both teams.
+static const std::array<float, RLGC::CommonValues::BOOST_LOCATIONS_AMOUNT> BIG_PAD_FLAGS = [] {
+	std::array<float, RLGC::CommonValues::BOOST_LOCATIONS_AMOUNT> flags = {};
+	for (int i = 0; i < RLGC::CommonValues::NUM_LARGE_BOOSTS; i++)
+		flags[RLGC::CommonValues::LARGE_BOOST_INDICES[i]] = 1.f;
+	return flags;
+}();
 
 void RLGC::AdvancedObsPadded::Reset(const GameState& initialState) {
 	// Initialize demo timers for all players (0 = not demoed)
@@ -77,6 +87,12 @@ RLGC::FList RLGC::AdvancedObsPadded::BuildObs(const Player& player, const GameSt
 			obs += 1.f / (1.f + padTimers[i]);  // Respawn progress
 		}
 	}
+
+	// =========================================================================
+	// BOOST PAD SIZE (1 = big, 0 = small) — same slot order as the pad state above
+	// =========================================================================
+	for (int i = 0; i < CommonValues::BOOST_LOCATIONS_AMOUNT; i++)
+		obs += BIG_PAD_FLAGS[i];
 
 	// =========================================================================
 	// SELF PLAYER OBSERVATION (GLOBAL + LOCAL PERSPECTIVE + DEMO TIMER)

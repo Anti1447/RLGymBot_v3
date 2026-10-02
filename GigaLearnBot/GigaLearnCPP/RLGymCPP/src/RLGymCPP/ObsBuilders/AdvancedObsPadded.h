@@ -5,7 +5,7 @@
 namespace RLGC {
 	// Advanced obs that supports variable player counts (1v1, 2v2, 3v3, etc.)
 	// Combines the benefits of AdvancedObs with Nexto-inspired enhancements:
-	// - Boost pad timers (respawn progress)
+	// - Boost pad timers (respawn progress) and a big/small flag per pad (34 extra floats)
 	// - Demo timers (respawn countdown)
 	// - Relative coordinates (in car's local frame)
 	// - Local angular velocity
