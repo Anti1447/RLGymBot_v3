@@ -37,6 +37,16 @@ namespace GGL {
 			return GetRating(GetModeName(state), defaultRating);
 		}
 
+		// Mean rating across all modes (defaultRating if no modes have been rated yet)
+		float GetMeanRating(float defaultRating) const {
+			if (data.empty())
+				return defaultRating;
+			float sum = 0;
+			for (auto& pair : data)
+				sum += pair.second;
+			return sum / data.size();
+		}
+
 		nlohmann::json ToJSON() {
 			nlohmann::json j = {};
 			for (auto pair : data)
@@ -95,6 +105,10 @@ namespace GGL {
 		void LoadVersions(ModelSet modelsTemplate, uint64_t curTimesteps);
 
 		void SortVersions();
+
+		// Picks an opponent version, skewed toward versions rated higher than the current policy.
+		// If none are rated higher, picks among the highest-rated versions instead.
+		int SampleOpponentIndex() const;
 
 		void RunSkillMatches(struct PPOLearner* ppo, Report& report);
 

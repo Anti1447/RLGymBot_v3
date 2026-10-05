@@ -151,6 +151,37 @@ void GGL::PolicyVersionManager::SortVersions() {
 	std::sort(versions.begin(), versions.end(), fnCompareVersions);
 }
 
+int GGL::PolicyVersionManager::SampleOpponentIndex() const {
+	RG_ASSERT(!versions.empty());
+
+	// How many top-rated versions to sample from when nothing is rated above the current policy
+	constexpr int TOP_FALLBACK_COUNT = 8;
+
+	float initialRating = skill.config.initialRating;
+	float curRating = skill.curRatings.GetMeanRating(initialRating);
+
+	std::vector<float> ratings;
+	for (auto& version : versions)
+		ratings.push_back(version.ratings.GetMeanRating(initialRating));
+
+	std::vector<int> pool;
+	for (int i = 0; i < ratings.size(); i++)
+		if (ratings[i] > curRating)
+			pool.push_back(i);
+
+	if (pool.empty()) {
+		// Nothing is harder than us, use the top-rated versions (ties included, so unrated runs stay uniform)
+		std::vector<float> sorted = ratings;
+		std::sort(sorted.begin(), sorted.end(), std::greater<float>());
+		float cutoff = sorted[RS_MIN((int)sorted.size(), TOP_FALLBACK_COUNT) - 1];
+		for (int i = 0; i < ratings.size(); i++)
+			if (ratings[i] >= cutoff)
+				pool.push_back(i);
+	}
+
+	return pool[Math::RandInt(0, pool.size())];
+}
+
 /////////////////////////////////////////////////////////////////////
 
 void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report) {
@@ -178,7 +209,7 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 		newTeam = skill.prevNewTeam;
 		totalSimTime = skill.prevSimTime;
 	} else {
-		oldVersionIndex = Math::RandInt(0, versions.size());
+		oldVersionIndex = SampleOpponentIndex();
 		newTeam = (Team)Math::RandInt(0, 2);
 		totalSimTime = 0;
 

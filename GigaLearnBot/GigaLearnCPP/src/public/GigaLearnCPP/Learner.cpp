@@ -664,7 +664,7 @@ void GGL::Learner::Start() {
 				if (shouldTrainAgainstOld) {
 					// Set up training against old versions
 
-					int oldVersionIdx = RocketSim::Math::RandInt(0, versionMgr->versions.size());
+					int oldVersionIdx = versionMgr->SampleOpponentIndex();
 					oldVersion = &versionMgr->versions[oldVersionIdx];
 
 					Team oldVersionTeam = Team(RocketSim::Math::RandInt(0, 2)); 
