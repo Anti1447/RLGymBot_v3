@@ -154,28 +154,34 @@ void GGL::PolicyVersionManager::SortVersions() {
 int GGL::PolicyVersionManager::SampleOpponentIndex() const {
 	RG_ASSERT(!versions.empty());
 
-	// How many top-rated versions to sample from when nothing is rated above the current policy
-	constexpr int TOP_FALLBACK_COUNT = 8;
-
 	float initialRating = skill.config.initialRating;
-	float curRating = skill.curRatings.GetMeanRating(initialRating);
 
 	std::vector<float> ratings;
 	for (auto& version : versions)
 		ratings.push_back(version.ratings.GetMeanRating(initialRating));
 
+	float mean = 0;
+	for (float r : ratings)
+		mean += r;
+	mean /= ratings.size();
+
+	float variance = 0;
+	for (float r : ratings)
+		variance += (r - mean) * (r - mean);
+	float stdDev = sqrtf(variance / ratings.size());
+
+	// Only sample versions at least 1 standard deviation above the mean (everything qualifies if all ratings tie)
+	float cutoff = mean + stdDev;
 	std::vector<int> pool;
 	for (int i = 0; i < ratings.size(); i++)
-		if (ratings[i] > curRating)
+		if (ratings[i] >= cutoff)
 			pool.push_back(i);
 
 	if (pool.empty()) {
-		// Nothing is harder than us, use the top-rated versions (ties included, so unrated runs stay uniform)
-		std::vector<float> sorted = ratings;
-		std::sort(sorted.begin(), sorted.end(), std::greater<float>());
-		float cutoff = sorted[RS_MIN((int)sorted.size(), TOP_FALLBACK_COUNT) - 1];
+		// Outliers pulled the cutoff above every version, fall back to the highest-rated ones
+		float best = *std::max_element(ratings.begin(), ratings.end());
 		for (int i = 0; i < ratings.size(); i++)
-			if (ratings[i] >= cutoff)
+			if (ratings[i] >= best)
 				pool.push_back(i);
 	}
 

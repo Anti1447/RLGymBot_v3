@@ -106,8 +106,7 @@ namespace GGL {
 
 		void SortVersions();
 
-		// Picks an opponent version, skewed toward versions rated higher than the current policy.
-		// If none are rated higher, picks among the highest-rated versions instead.
+		// Picks an opponent version from those whose mean rating is at least 1 standard deviation above the mean of all versions.
 		int SampleOpponentIndex() const;
 
 		void RunSkillMatches(struct PPOLearner* ppo, Report& report);
