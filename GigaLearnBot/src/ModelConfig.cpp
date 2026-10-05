@@ -61,6 +61,8 @@ PhaseConfig GetPhaseConfig() {
         cfg.randomStateChance = 0.65f;
         cfg.useAerialTraining = false;
         cfg.aerialTrainingChance = 0.0f;  // 0% aerial training Not working well yet
+        cfg.useFlipResetTraining = true;
+        cfg.flipResetTrainingChance = 0.05f;  // 5% flip reset scenarios
         break;
 
     case TrainingPhase::PHASE_6_CHAMPION:

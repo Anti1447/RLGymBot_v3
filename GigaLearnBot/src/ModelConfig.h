@@ -18,6 +18,8 @@ struct PhaseConfig {
     float randomStateChance;
     bool useAerialTraining;
     float aerialTrainingChance;
+    bool useFlipResetTraining = false;
+    float flipResetTrainingChance = 0.0f;
     bool enableProfiling = false;  // Enable environment profiling
 };
 

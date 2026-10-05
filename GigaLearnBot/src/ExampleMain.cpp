@@ -11,6 +11,7 @@
 #include <RLGymCPP/StateSetters/RandomState.h>
 #include <RLGymCPP/StateSetters/CombinedState.h>
 #include <RLGymCPP/StateSetters/AerialTrainingState.h>
+#include <RLGymCPP/StateSetters/FlipResetState.h>
 #include <RLGymCPP/ActionParsers/DefaultAction.h>
 #include <RLGymCPP/ActionParsers/AdvancedAction.h>
 #include <RLGymCPP/Gamestates/GameState.h>
@@ -109,6 +110,13 @@ EnvCreateResult EnvCreateFunc(int index) {
     // Add aerial training state if enabled
     if (phaseCfg.useAerialTraining) {
         stateSetters.push_back({ new AerialTrainingState(), phaseCfg.aerialTrainingChance });
+    }
+
+    // Add flip reset state if enabled. The weights above sum to 1, so w = chance / (1 - chance)
+    // makes this setter fire on exactly `chance` of episodes after CombinedState normalizes.
+    if (phaseCfg.useFlipResetTraining) {
+        float chance = phaseCfg.flipResetTrainingChance;
+        stateSetters.push_back({ new FlipResetState(), chance / (1.0f - chance) });
     }
 
     // Use CombinedState to randomly choose between the state setters
