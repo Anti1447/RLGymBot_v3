@@ -82,7 +82,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
     <div class="panel ctrl" aria-label="Controls">
       <div class="presets" id="presets"><span class="lab">Presets</span></div>
       <div class="field"><span class="lab">Place the ball by</span>
-        <div class="seg" id="place"><button type="button" data-v="face" aria-pressed="true">Car face</button><button type="button" data-v="ball" aria-pressed="false">Point on ball</button><button type="button" data-v="musty" aria-pressed="false">Musty setup</button></div></div>
+        <div class="seg" id="place"><button type="button" data-v="face" aria-pressed="true">Car face</button><button type="button" data-v="ball" aria-pressed="false">Point on ball</button><button type="button" data-v="musty" aria-pressed="false">Ball above car</button></div></div>
       <div class="field" id="faceField"><span class="lab">Contact face</span>
         <select id="face"></select></div>
       <div class="field" id="ballField" hidden><div class="row"><label for="ballPt">Point on the ball that is hit</label><span class="val" id="ballPtV"></span></div>
@@ -380,16 +380,22 @@ const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra,T:0.9});
 function setup(){
   const f=$('face'); Object.entries(FACES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.label;f.appendChild(o)});
   const presets=[
-    ['Musty orientation, back flip, CM through ball center',{face:'underside',nose:135,d:0,dir:-1}],
+    ['Musty orientation, back flip, CM through ball center',{face:'underside',nose:135,d:0,dir:-1,grp:'Setups'}],
     ['Wheels straight up at the ball (nose 180°)',{face:'underside',nose:180,d:0,dir:-1}],
     ['Musty orientation, contact near the nose',{face:'underside',nose:135,d:60,dir:-1}],
     ['Musty orientation, contact near the tail',{face:'underside',nose:135,d:-40,dir:-1}],
     ['Nose −135° front flip, held against the ball',{face:'underside',nose:-135,d:74,dir:1}],
     ['Roof contact, back flip, ball ahead and below',{face:'roof',nose:-135,d:-40,dir:-1,vh:1000}],
     ['Hit the ball bottom (0°) at nose 135°, back flip',{ballPt:0,face:'underside',nose:135,d:0,dir:-1}],
-    ['Musty: roof contact, ball above and ahead, gravity on',{place:'musty',nose:-100,dir:-1,vh:1000,bh:100,bx:150,bvx:0,bvz:0,grav:true}]
+    ['Musty default: ball 100 above, 150 ahead',{grp:'Ball above the car (gravity on)',place:'musty',nose:-100,dir:-1,vh:1000,bh:100,bx:150,bvx:0,bvz:0,grav:true}],
+    ['Musty: max exit speed and horizontal velocity',{place:'musty',nose:-95,dir:-1,vh:1000,bh:55,bx:150,bvx:10,bvz:-30,grav:true,grp:'Searched flicks',note:'Best of a search over nose angle, ball height and distance ahead, with the roof as first contact, car spin at least 5 rad/s at first contact, and the ball within 25 uu/s horizontally and 30 uu/s vertically of the car. Speed keeps rising toward the low, far-ahead edge of those ranges. 3% of nearby setups lose the roof contact.'}],
+    ['Musty: sensitive peak speed',{place:'musty',nose:-94,dir:-1,vh:1000,bh:55,bx:145,bvx:10,bvz:-30,grav:true,note:'A sharp spike next to the preset above. Moving the nose by 1° or the ball by 5 uu drops it to about 1150 uu/s, and 19% of nearby setups lose the roof contact. Shown to see how narrow the best case is.'}],
+    ['Musty: max vertical velocity',{place:'musty',nose:-100,dir:-1,vh:1000,bh:115,bx:140,bvx:10,bvz:0,grav:true,note:'Higher ball and later contact (150 ms) send it up about 50° above horizontal. Nearby setups give a median of about 720 uu/s upward, so this is also a narrow peak, but none of them lose the roof contact.'}],
+    ['Normal flick: max exit speed and horizontal velocity',{place:'musty',nose:-30,dir:1,vh:1000,bh:110,bx:120,bvx:0,bvz:-10,grav:true,grp:'Normal flick (front flip)',note:'Front flip with the nose within ±30° (it sits at the nose-down limit of that range), ball 110 uu above the center of mass and 120 uu ahead. Stable: nearby setups all keep the roof contact and give about 800 to 810 uu/s. Speed and horizontal velocity peak at the same setup.'}],
+    ['Normal flick: max vertical velocity',{place:'musty',nose:-10,dir:1,vh:1000,bh:140,bx:25,bvx:-20,bvz:0,grav:true,note:'Ball almost directly above the car and a little ahead, popped up about 59° above horizontal by the tail corner of the roof 50 ms into the flip. Nearby setups keep the roof contact and give about 510 uu/s upward.'}]
   ];
-  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,{bvx:0,bvz:0,grav:false},v);S.place=v.place||(v.ballPt!=null?'ball':'face');S.closing=v.closing||0;S.gap=v.gap||0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
+  $('presets').firstElementChild.textContent='Presets';$('presets').insertAdjacentHTML('afterend','<small class="src" id="presetNote"></small>');
+  presets.forEach(([n,v])=>{if(v.grp){const l=document.createElement('span');l.className='lab';l.style.marginTop='8px';l.textContent=v.grp;$('presets').appendChild(l)}const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{$('presetNote').textContent=v.note||'';Object.assign(S,{bvx:0,bvz:0,grav:false},v);S.place=v.place||(v.ballPt!=null?'ball':'face');S.closing=v.closing||0;S.gap=v.gap||0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
   ['nose','ballPt','bh','bx','bvx','bvz','d','closing','gap','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
   $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
   [['tgT','torque'],['tgL','lin'],['tgE','extra'],['tgG','grav']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
