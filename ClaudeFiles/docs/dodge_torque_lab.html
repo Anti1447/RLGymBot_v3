@@ -91,6 +91,9 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
         <div class="seg" id="dir"><button type="button" data-v="-1" aria-pressed="true">Back flip</button><button type="button" data-v="1" aria-pressed="false">Front flip</button></div></div>
       <div class="field"><div class="row"><label for="closing">Closing speed</label><span class="val" id="closingV"></span></div>
         <input id="closing" type="range" min="0" max="1500" step="25" value="0"></div>
+      <div class="field"><div class="row"><label for="vh">Travel speed (car and ball)</label><span class="val" id="vhV"></span></div>
+        <input id="vh" type="range" min="-2300" max="2300" step="50" value="0">
+        <small class="src">Both move together, so the contact does not change. It sets the dodge kick, which RocketSim scales by the car's speed along its nose.</small></div>
       <div class="field"><div class="row"><label for="w0">Car spin when dodge is pressed</label><span class="val" id="w0V"></span></div>
         <input id="w0" type="range" min="-5.5" max="5.5" step="0.5" value="0">
         <small class="src">Existing angular velocity from air roll or the approach. Positive is counter-clockwise.</small></div>
@@ -98,7 +101,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
         <input id="mu" type="range" min="0" max="2" step="0.1" value="2"></div>
       <div class="field"><span class="lab">Mechanisms</span>
         <label class="chk"><input id="tgT" type="checkbox" checked><span>Dodge spin torque<small>224 rad/s² for 0.65 s, capped at 5.5 rad/s</small></span></label>
-        <label class="chk"><input id="tgL" type="checkbox" checked><span>Dodge horizontal kick<small>500 uu/s along the car's horizontal heading</small></span></label>
+        <label class="chk"><input id="tgL" type="checkbox" checked><span>Dodge horizontal kick<small>500 uu/s along the nose's horizontal direction, scaled up when dodging against the nose-axis speed</small></span></label>
         <label class="chk"><input id="tgE" type="checkbox" checked><span>RocketSim extra impulse<small>0.65 × relative speed, along the CM-to-ball line</small></span></label></div>
     </div>
 
@@ -160,6 +163,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
       <li><b>The car's spin is not constant, and it is small during a short contact.</b> The dodge adds 224 rad/s² (260 for a side flip) every tick for 0.65 s, so the car's spin ramps from zero to the 5.5 rad/s cap over three ticks, 1.9 and 3.7 rad/s on the first two. At the defaults the extra impulse separates the ball after two ticks, so the car's spin never gets past 3.7 rad/s while touching and changes the result very little. When the car keeps pushing, the ball also pushes back on the car: at tilt −45°, front flip, offset at the nose end, the contact first reverses the car's spin for several ticks, and the spin that finally builds raises ball speed from about 540 to 1220 uu/s.</li>
       <li><b>Ball spin comes from friction on the sliding face.</b> With the car's 500 uu/s kick sliding along a tilted underside, the high contact friction (2.0) grips and spins the ball at about 2.8 rad/s even with the torque switched off. Set friction to 0 and the spin goes to zero.</li>
       <li><b>Moving the contact point shifts the result predictably.</b> At the default setup, sliding the contact from the tail end to the nose end of the underside (back flip) drops ball speed from about 680 to 455 uu/s and lifts the launch angle from 22° to 47°.</li>
+      <li><b>The kick follows the nose's horizontal direction, so past ±90° of nose pitch a back flip kicks forward.</b> That is the musty flick orientation, and it is the default here (45° ball direction on the underside puts the nose at 135°). There the car's speed along its nose is negative, so RocketSim uses the plain 500 uu/s with no speed scaling. A front flip in the same orientation gets the large backward-dodge scaling instead, up to about 1330 uu/s directed backward.</li>
       <li><b>Repeated extra impulses compound.</b> RocketSim reapplies the extra impulse every second tick while contact persists, using the current relative speed. A ball held against a moving face can gain speed geometrically. That is the rule as written in <span class="mono">Arena.cpp</span>, and this page follows it.</li>
     </ul>
   </section>
@@ -218,13 +222,22 @@ function simulate(p, o) {
   const pl = F.n[1] !== 0 ? [d, F.n[1] < 0 ? RS.box.z0 : RS.box.z1] : [F.n[0] > 0 ? RS.box.x1 : RS.box.x0, d];
   const pw = rot(pl, psi);
   const car = { x: 0, z: 0, ang: psi, vx: nW[0] * (p.closing || 0), vz: nW[1] * (p.closing || 0), w: p.w0 || 0 };
-  const ball = { x: pw[0] + nW[0] * (RS.R + 0.05), z: pw[1] + nW[1] * (RS.R + 0.05), vx: 0, vz: 0, w: 0 };
+  const gapD = RS.R + 0.05 + (p.gap || 0);
+  const ball = { x: pw[0] + nW[0] * gapD + (p.dx || 0), z: pw[1] + nW[1] * gapD, vx: p.bvx || 0, vz: p.bvz || 0, w: 0 };
   const fwd0 = rot([1, 0], psi);
   const hs = fwd0[0] >= 0 ? 1 : -1; // horizontal sign of the car's forward vector
   let linDv = 0;
-  if (o.lin) { linDv = p.dir * hs * RS.flipImpulse * (p.dir < 0 ? RS.backScale : 1); car.vx += linDv; }
+  let kick = null;
+  if (o.lin) {
+    // Car.cpp: speed along the nose picks the scaling; direction is the nose's horizontal heading.
+    const fs = ((p.vh || 0) + car.vx) * fwd0[0] + car.vz * fwd0[1];
+    const ratio = Math.min(1, Math.abs(fs) / 2300), front = p.dir > 0;
+    const back = Math.abs(fs) < 100 ? !front : (front !== (fs >= 0));
+    linDv = p.dir * hs * RS.flipImpulse * (((back ? 2.5 : 1) - 1) * ratio + 1) * (back ? RS.backScale : 1);
+    car.vx += linDv; kick = { fs, back };
+  }
   const alphaSign = -p.dir * RS.flipAlphaPitch; // front flip = clockwise on screen
-  const acc = { N: [0, 0], F: [0, 0], E: [0, 0], spinF: 0, spinN: 0, extraHits: 0, contactTicks: 0, JN: 0, JF: 0, carDW: 0 };
+  const acc = { Lc: 0, LcAbs: 0, N: [0, 0], F: [0, 0], E: [0, 0], spinF: 0, spinN: 0, extraHits: 0, contactTicks: 0, JN: 0, JF: 0, carDW: 0 };
   const frames = [];
   let lastExtra = -99, tick = 0, first = -1, last = -1;
   const n_ticks = Math.round(o.T / RS.dt);
@@ -232,8 +245,13 @@ function simulate(p, o) {
   snap(false);
   for (tick = 1; tick <= n_ticks; tick++) {
     const t = tick * RS.dt;
-    if (o.torque && t <= RS.flipTime) car.w += alphaSign * RS.dt;
-    else if (t > RS.flipTime) car.w -= RS.airDamp * car.w * RS.dt; // air-control damping resumes after the flip torque ends
+    const tf = t + (p.tau || 0); // dodge timer value at this tick
+    if (p.grav) {
+      ball.vz -= 650 * RS.dt; car.vz -= 650 * RS.dt;
+      if (tf <= RS.flipTime && tf >= 0.15 && (car.vz < 0 || tf < 0.21)) car.vz *= Math.pow(1 - 0.35, 1); // FLIP_Z_DAMP_120 each 120 Hz tick
+    }
+    if (o.torque && tf <= RS.flipTime) car.w += alphaSign * RS.dt;
+    else if (tf > RS.flipTime) car.w -= RS.airDamp * car.w * RS.dt; // air-control damping resumes after the flip torque ends
     // contact query (ball centre in car frame, closest point on box)
     const q = rot([ball.x - car.x, ball.z - car.z], -car.ang);
     const cp = [clamp(q[0], RS.box.x0, RS.box.x1), clamp(q[1], RS.box.z0, RS.box.z1)];
@@ -275,6 +293,7 @@ function simulate(p, o) {
         const I = [J * dir[0], J * dir[1]];
         ball.vx += I[0] / RS.mB; ball.vz += I[1] / RS.mB; ball.w += cross(rb, I) / RS.IB;
         car.vx -= I[0] / RS.mC; car.vz -= I[1] / RS.mC; car.w -= cross(rc, I) / RS.IC;
+        acc.Lc -= cross(rc, I); acc.LcAbs += Math.abs(cross(rc, I));
       };
       for (let it = 0; it < 20; it++) {
         let vr = vrel();
@@ -301,29 +320,29 @@ function simulate(p, o) {
   }
   const speed = len([ball.vx, ball.vz]);
   return {
-    frames, acc, psi, linDv, nW, contactPoint: pw,
+    frames, acc, psi, linDv, kick, nW, contactPoint: pw,
     out: { vx: ball.vx, vz: ball.vz, speed, angle: Math.atan2(ball.vz, ball.vx) * 180 / Math.PI, spin: ball.w, ticks: acc.contactTicks, firstTick: first, lastTick: last }
   };
 }
 const $=id=>document.getElementById(id);
-const S={face:'underside',tilt:45,d:0,dir:-1,closing:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
+const S={face:'underside',tilt:45,d:0,dir:-1,closing:0,vh:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
 let RUN=null, frame=0, playing=false, lastTs=0, acc=0;
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt=(x,n=0)=>(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n);
-const P=()=>({face:S.face,tilt:S.tilt,d:S.d,dir:S.dir,closing:S.closing,w0:S.w0,mu:S.mu});
+const P=()=>({face:S.face,tilt:S.tilt,d:S.d,dir:S.dir,closing:S.closing,vh:S.vh,w0:S.w0,mu:S.mu});
 const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra});
 
 function setup(){
   const f=$('face'); Object.entries(FACES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.label;f.appendChild(o)});
   const presets=[
-    ['45° reset flick, CM through ball center',{face:'underside',tilt:45,d:0,dir:-1}],
+    ['45° reset flick, CM through ball center (musty orientation)',{face:'underside',tilt:45,d:0,dir:-1}],
     ['Straight below the ball (0°)',{face:'underside',tilt:0,d:0,dir:-1}],
     ['45°, contact near the nose',{face:'underside',tilt:45,d:60,dir:-1}],
     ['45°, contact near the tail',{face:'underside',tilt:45,d:-40,dir:-1}],
     ['−45° front flip, held against the ball',{face:'underside',tilt:-45,d:74,dir:1}]
   ];
-  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
-  ['tilt','d','closing','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
+  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;S.vh=0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
+  ['tilt','d','closing','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
   $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
   [['tgT','torque'],['tgL','lin'],['tgE','extra']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
   $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.dir=+b.dataset.v;syncUI();update(true)});
@@ -337,7 +356,7 @@ function setup(){
 }
 function syncUI(){
   const F=FACES[S.face];
-  $('face').value=S.face; $('tilt').value=S.tilt; $('closing').value=S.closing;$('w0').value=S.w0;$('w0V').textContent=(+S.w0).toFixed(1)+' rad/s'; $('mu').value=S.mu;
+  $('face').value=S.face; $('tilt').value=S.tilt; $('closing').value=S.closing;$('w0').value=S.w0;$('vh').value=S.vh;$('vhV').textContent=S.vh+' uu/s';$('w0V').textContent=(+S.w0).toFixed(1)+' rad/s'; $('mu').value=S.mu;
   const d=$('d'); d.min=Math.ceil(F.lo); d.max=Math.floor(F.hi); S.d=Math.max(+d.min,Math.min(+d.max,S.d)); d.value=S.d;
   $('dLab').textContent=F.n[1]!==0?'Contact offset along face (x)':'Contact offset along face (z)';
   $('dNote').textContent=S.face==='underside'||S.face==='roof'?'0 puts the car\'s center of mass on the line through the ball\'s center. Positive is toward the nose.':'Height of the contact point above the center of mass. The nose and tail faces start 1.4 uu above it, so the line through the center of mass just misses the face.';
@@ -421,7 +440,8 @@ function renderResults(){
     ['Launch angle',fmt(o.angle)+'°','above horizontal, +X side is 0°'],
     ['Ball spin',fmt(o.spin,2)+' rad/s',Math.abs(o.spin)>=5.95?'at the 6.0 rad/s cap':(o.spin>0?'counter-clockwise':o.spin<0?'clockwise':'none')],
     ['Contact',o.ticks+' ticks',`${fmt(o.ticks*1000/120)} ms of touching`],
-    ['Dodge kick',(RUN.linDv>=0?'+':'')+fmt(RUN.linDv)+' uu/s','car horizontal ΔV (X)']
+    ['Dodge kick',(RUN.linDv>=0?'+':'')+fmt(RUN.linDv)+' uu/s',RUN.kick?(RUN.kick.back?'backward-dodge scaling':'forward-dodge scaling')+', along +X':'kick switched off'],
+    ['Nose angle',fmt(((RUN.psi*180/Math.PI+540)%360)-180)+'°',Math.abs(((RUN.psi*180/Math.PI+540)%360)-180)>90?'past ±90°: back flip kicks forward':'within ±90°: back flip kicks backward']
   ];
   $('tiles').innerHTML=items.map(([k,v,s])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
   const rows=[['Normal impulse','nrm',a.N],['Friction impulse','fric',a.F],['Extra impulse','xtra',a.E]];
