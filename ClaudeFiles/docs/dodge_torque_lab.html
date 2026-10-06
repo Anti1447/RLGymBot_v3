@@ -55,6 +55,7 @@ canvas{display:block;width:100%;border-radius:4px;background:var(--bg)}
 .tile .s{font-size:12px;color:var(--mute)}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 @media (max-width:860px){.two{grid-template-columns:minmax(0,1fr)}}
+.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -83,7 +84,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
         <select id="face"></select></div>
       <div class="field"><div class="row"><label for="tilt">Ball direction from CM</label><span class="val" id="tiltV"></span></div>
         <input id="tilt" type="range" min="-180" max="180" step="1" value="45">
-        <small class="src">Full circle, measured from straight up. Positive is toward the travel direction, ±180° is straight below. 45° means the ball touches the car at the point 45° from directly below the ball.</small></div>
+        <small class="src">At the moment the flip starts. Full circle, measured from straight up. Positive is toward the travel direction, ±180° is straight below. 45° means the ball touches the car at the point 45° from directly below the ball.</small></div>
       <div class="field"><div class="row"><label for="d" id="dLab">Contact offset along face</label><span class="val" id="dV"></span></div>
         <input id="d" type="range" min="-46" max="74" step="1" value="0">
         <small class="src" id="dNote">0 puts the car's center of mass on the line through the ball's center.</small></div>
@@ -91,6 +92,9 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
         <div class="seg" id="dir"><button type="button" data-v="-1" aria-pressed="true">Back flip</button><button type="button" data-v="1" aria-pressed="false">Front flip</button></div></div>
       <div class="field"><div class="row"><label for="closing">Closing speed</label><span class="val" id="closingV"></span></div>
         <input id="closing" type="range" min="0" max="1500" step="25" value="0"></div>
+      <div class="field"><div class="row"><label for="gap">Gap when the flip starts</label><span class="val" id="gapV"></span></div>
+        <input id="gap" type="range" min="0" max="300" step="5" value="0">
+        <small class="src" id="gapNote"></small></div>
       <div class="field"><div class="row"><label for="vh">Travel speed (car and ball)</label><span class="val" id="vhV"></span></div>
         <input id="vh" type="range" min="-2300" max="2300" step="50" value="0">
         <small class="src">Both move together, so the contact does not change. It sets the dodge kick, which RocketSim scales by the car's speed along its nose.</small></div>
@@ -138,7 +142,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
       <div class="scroll"><table id="cmp"></table></div>
       <div class="lab" style="margin:16px 0 6px">Spin over time</div>
       <canvas id="wchart" style="aspect-ratio:16/8" role="img" aria-label="Car and ball angular velocity over time"></canvas>
-      <div class="legend" style="margin-top:8px"><span><i style="border-color:var(--car)"></i>car</span><span><i style="border-color:var(--ball)"></i>ball</span><span>shaded: ball touching car</span></div>
+      <div class="legend" style="margin-top:8px"><span><i style="border-color:var(--car)"></i>car</span><span><i style="border-color:var(--ball)"></i>ball</span><span>shaded: ball touching car</span><span>top bar: torque ramp, torque on, torque off</span></div>
       <p class="src" style="margin-top:12px" id="Lnote"></p>
     </div>
   </section>
@@ -147,11 +151,12 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
     <h2>Sweeps</h2>
     <div class="chartbar">
       <span class="lab">Plot</span>
-      <div class="seg" id="metric"><button type="button" data-v="speed" aria-pressed="true">Ball speed</button><button type="button" data-v="angle" aria-pressed="false">Launch angle</button><button type="button" data-v="spin" aria-pressed="false">Ball spin</button></div>
+      <div class="seg" id="metric"><button type="button" data-v="speed" aria-pressed="true">Ball speed</button><button type="button" data-v="angle" aria-pressed="false">Launch angle</button><button type="button" data-v="spin" aria-pressed="false">Ball spin</button><button type="button" data-v="tc" aria-pressed="false">Contact time</button></div>
     </div>
-    <div class="two">
-      <div><div class="lab" style="margin-bottom:6px">Versus ball direction from CM (offset held)</div><canvas id="chA" class="chart"></canvas></div>
-      <div><div class="lab" style="margin-bottom:6px">Versus contact offset along face (direction held)</div><canvas id="chB" class="chart"></canvas></div>
+    <div class="three">
+      <div><div class="lab" style="margin-bottom:6px">Versus ball direction from CM</div><canvas id="chA" class="chart"></canvas></div>
+      <div><div class="lab" style="margin-bottom:6px">Versus contact offset along face</div><canvas id="chB" class="chart"></canvas></div>
+      <div><div class="lab" style="margin-bottom:6px">Versus gap when the flip starts</div><canvas id="chC" class="chart"></canvas></div>
     </div>
     <div class="legend" style="margin-top:10px" id="chLegend"></div>
   </section>
@@ -164,6 +169,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
       <li><b>Ball spin comes from friction on the sliding face.</b> With the car's 500 uu/s kick sliding along a tilted underside, the high contact friction (2.0) grips and spins the ball at about 2.8 rad/s even with the torque switched off. Set friction to 0 and the spin goes to zero.</li>
       <li><b>Moving the contact point shifts the result predictably.</b> At the default setup, sliding the contact from the tail end to the nose end of the underside (back flip) drops ball speed from about 680 to 455 uu/s and lifts the launch angle from 22° to 47°.</li>
       <li><b>The kick follows the nose's horizontal direction, so past ±90° of nose pitch a back flip kicks forward.</b> That is the musty flick orientation, and it is the default here (45° ball direction on the underside puts the nose at 135°). There the car's speed along its nose is negative, so RocketSim uses the plain 500 uu/s with no speed scaling. A front flip in the same orientation gets the large backward-dodge scaling instead, up to about 1330 uu/s directed backward.</li>
+      <li><b>When in the dodge the ball is touched matters through four things.</b> The car's spin is 3.7 rad/s at 25 ms and at the 5.5 cap from about 40 ms. With the contact geometry held fixed, the gain from spin stays flat from about 25 ms until roughly 510 to 620 ms and then collapses, because once the torque stops (650 ms) the ball drains the car's spin with nothing to restore it. The car also keeps rotating at about 315° per second, so every 10 ms of delay turns the nose another 3°, which steers the launch angle. In the musty setup with a 500 uu/s approach, starting the flip 25 ms before contact launched the ball at 35° and 1290 uu/s, and 400 ms before launched it at 92° and 880 uu/s. Finally, the kick and the approach move the ball relative to the car while the car rotates.</li>
       <li><b>Repeated extra impulses compound.</b> RocketSim reapplies the extra impulse every second tick while contact persists, using the current relative speed. A ball held against a moving face can gain speed geometrically. That is the rule as written in <span class="mono">Arena.cpp</span>, and this page follows it.</li>
     </ul>
   </section>
@@ -321,16 +327,16 @@ function simulate(p, o) {
   const speed = len([ball.vx, ball.vz]);
   return {
     frames, acc, psi, linDv, kick, nW, contactPoint: pw,
-    out: { vx: ball.vx, vz: ball.vz, speed, angle: Math.atan2(ball.vz, ball.vx) * 180 / Math.PI, spin: ball.w, ticks: acc.contactTicks, firstTick: first, lastTick: last }
+    out: { tc: first < 0 ? NaN : first * RS.dt * 1000, wc: first < 1 ? NaN : frames[first - 1].car.w, vx: ball.vx, vz: ball.vz, speed, angle: Math.atan2(ball.vz, ball.vx) * 180 / Math.PI, spin: ball.w, ticks: acc.contactTicks, firstTick: first, lastTick: last }
   };
 }
 const $=id=>document.getElementById(id);
-const S={face:'underside',tilt:45,d:0,dir:-1,closing:0,vh:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
+const S={face:'underside',tilt:45,d:0,dir:-1,closing:0,gap:0,vh:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
 let RUN=null, frame=0, playing=false, lastTs=0, acc=0;
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt=(x,n=0)=>(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n);
-const P=()=>({face:S.face,tilt:S.tilt,d:S.d,dir:S.dir,closing:S.closing,vh:S.vh,w0:S.w0,mu:S.mu});
-const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra});
+const P=()=>({face:S.face,tilt:S.tilt,d:S.d,dir:S.dir,closing:S.closing,gap:S.gap,vh:S.vh,w0:S.w0,mu:S.mu});
+const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra,T:0.9});
 
 function setup(){
   const f=$('face'); Object.entries(FACES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.label;f.appendChild(o)});
@@ -342,8 +348,8 @@ function setup(){
     ['−45° front flip, held against the ball',{face:'underside',tilt:-45,d:74,dir:1}],
     ['Roof contact, back flip, ball ahead and below',{face:'roof',tilt:135,d:-40,dir:-1,vh:1000}]
   ];
-  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
-  ['tilt','d','closing','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
+  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=v.closing||0;S.gap=v.gap||0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
+  ['tilt','d','closing','gap','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
   $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
   [['tgT','torque'],['tgL','lin'],['tgE','extra']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
   $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.dir=+b.dataset.v;syncUI();update(true)});
@@ -357,7 +363,7 @@ function setup(){
 }
 function syncUI(){
   const F=FACES[S.face];
-  $('face').value=S.face; $('tilt').value=S.tilt; $('closing').value=S.closing;$('w0').value=S.w0;$('vh').value=S.vh;$('vhV').textContent=S.vh+' uu/s';$('w0V').textContent=(+S.w0).toFixed(1)+' rad/s'; $('mu').value=S.mu;
+  $('face').value=S.face; $('tilt').value=S.tilt; $('closing').value=S.closing;$('w0').value=S.w0;$('vh').value=S.vh;$('gap').value=S.gap;$('gapV').textContent=S.gap+' uu';$('gapNote').textContent=S.closing>0?(S.gap>0?'About '+Math.round(S.gap/S.closing*1000)+' ms of approach before the ball would be touched at this closing speed, so the flip starts that long before contact.':'Raise the gap to start the flip before the ball is touched.'):'Needs a closing speed above 0 so the car reaches the ball after the flip starts.';$('vhV').textContent=S.vh+' uu/s';$('w0V').textContent=(+S.w0).toFixed(1)+' rad/s'; $('mu').value=S.mu;
   const d=$('d'); d.min=Math.ceil(F.lo); d.max=Math.floor(F.hi); S.d=Math.max(+d.min,Math.min(+d.max,S.d)); d.value=S.d;
   $('dLab').textContent=F.n[1]!==0?'Contact offset along face (x)':'Contact offset along face (z)';
   $('dNote').textContent=S.face==='underside'||S.face==='roof'?'0 puts the car\'s center of mass on the line through the ball\'s center. Positive is toward the nose.':'Height of the contact point above the center of mass. The nose and tail faces start 1.4 uu above it, so the line through the center of mass just misses the face.';
@@ -440,6 +446,7 @@ function renderResults(){
     ['Ball speed',fmt(o.speed)+' uu/s',`vx ${fmt(o.vx)} · vz ${fmt(o.vz)}`],
     ['Launch angle',fmt(o.angle)+'°','above horizontal, +X side is 0°'],
     ['Ball spin',fmt(o.spin,2)+' rad/s',Math.abs(o.spin)>=5.95?'at the 6.0 rad/s cap':(o.spin>0?'counter-clockwise':o.spin<0?'clockwise':'none')],
+    ['First contact',isNaN(o.tc)?'none':fmt(o.tc)+' ms',isNaN(o.tc)?'ball never touched':(o.tc/1000<=0.025?'spin still ramping':o.tc/1000<=0.65?'torque on':'torque off')+`, car spin ${fmt(o.wc,1)} rad/s`],
     ['Contact',o.ticks+' ticks',`${fmt(o.ticks*1000/120)} ms of touching`],
     ['Dodge kick',(RUN.linDv>=0?'+':'')+fmt(RUN.linDv)+' uu/s',RUN.kick?(RUN.kick.back?'backward-dodge scaling':'forward-dodge scaling')+', along +X':'kick switched off'],
     ['Nose angle',fmt(((RUN.psi*180/Math.PI+540)%360)-180)+'°',Math.abs(((RUN.psi*180/Math.PI+540)%360)-180)>90?'past ±90°: back flip kicks forward':'within ±90°: back flip kicks backward']
@@ -448,7 +455,7 @@ function renderResults(){
   const rows=[['Normal impulse','nrm',a.N],['Friction impulse','fric',a.F],['Extra impulse','xtra',a.E]];
   $('budgetT').innerHTML='<tr><th>Source</th><th>Δvx</th><th>Δvz</th><th>|Δv|</th></tr>'+rows.map(([n,c,v])=>`<tr><td><span class="sw" style="background:var(--${c})"></span>${n}</td><td class="m">${fmt(v[0])}</td><td class="m">${fmt(v[1])}</td><td class="m">${fmt(Math.hypot(v[0],v[1]))}</td></tr>`).join('')+`<tr class="cur"><td>Total</td><td class="m">${fmt(o.vx)}</td><td class="m">${fmt(o.vz)}</td><td class="m">${fmt(o.speed)}</td></tr>`;
   const variants=[['All mechanisms on',{torque:true,lin:true,extra:true}],['Spin torque off',{torque:false,lin:true,extra:true}],['Spin only, no horizontal kick',{torque:true,lin:false,extra:true}],['No extra impulse',{torque:true,lin:true,extra:false}],['Spin only, no kick, no extra impulse',{torque:true,lin:false,extra:false}]];
-  $('cmp').innerHTML='<tr><th>Variant</th><th>Speed</th><th>Angle</th><th>Spin</th><th>Ticks</th></tr>'+variants.map(([n,v])=>{const r=simulate(P(),v).out;const cur=v.torque===S.torque&&v.lin===S.lin&&v.extra===S.extra;return `<tr class="${cur?'cur':''}"><td>${n}</td><td class="m">${fmt(r.speed)}</td><td class="m">${r.speed<20?'–':fmt(r.angle)+'°'}</td><td class="m">${fmt(r.spin,2)}</td><td class="m">${r.ticks}</td></tr>`}).join('');
+  $('cmp').innerHTML='<tr><th>Variant</th><th>Speed</th><th>Angle</th><th>Spin</th><th>Ticks</th></tr>'+variants.map(([n,v])=>{const r=simulate(P(),Object.assign({T:0.9},v)).out;const cur=v.torque===S.torque&&v.lin===S.lin&&v.extra===S.extra;return `<tr class="${cur?'cur':''}"><td>${n}</td><td class="m">${fmt(r.speed)}</td><td class="m">${r.speed<20?'–':fmt(r.angle)+'°'}</td><td class="m">${fmt(r.spin,2)}</td><td class="m">${r.ticks}</td></tr>`}).join('');
   const Lc=RS.IC*RS.wMaxCar,Lb=Math.abs(RS.IB*o.spin);
   const fr=RUN.frames,f0=fr[Math.max(o.firstTick,0)],f1=fr[Math.max(o.lastTick,0)];
   $('Lnote').textContent=o.ticks?`Car spin after the first contact tick: ${fmt(f0.car.w,1)} rad/s; after the last: ${fmt(f1.car.w,1)} rad/s (cap 5.5). The ball leaves with spin ${fmt(o.spin,2)} rad/s, ${fmt(Lb/1000)}k of angular momentum (uu²·kg·rad/s), ${fmt(100*Lb/Lc)}% of the ${fmt(Lc/1000)}k the car holds at the cap. Contact with the ball can push the car's spin back, and the dodge torque restores at most 1.87 rad/s per tick.`:'No contact in this setup.';
@@ -476,13 +483,13 @@ function drawBudget(){
 
 // ---------- sweeps ----------
 const SER=[['All mechanisms on',{torque:true,lin:true,extra:true},'--car',[]],['Spin torque off',{torque:false,lin:true,extra:true},'--mute',[5,4]],['No extra impulse',{torque:true,lin:true,extra:false},'--xtra',[2,3]]];
-function metricVal(r){const o=r.out;return S.metric==='speed'?o.speed:S.metric==='angle'?(o.speed<20?NaN:o.angle):o.spin}
+function metricVal(r){const o=r.out;return S.metric==='speed'?(o.ticks?o.speed:NaN):S.metric==='angle'?(o.speed<20?NaN:o.angle):S.metric==='tc'?o.tc:o.spin}
 function drawChart(id,xs,key,cur,xlabel){
   const {x,w,h}=fitCanvas($(id));const col={grid:cssv('--grid'),ink:cssv('--ink'),mute:cssv('--mute'),line:cssv('--line')};
   x.clearRect(0,0,w,h);
-  const data=SER.map(([n,v])=>xs.map(xv=>metricVal(simulate(Object.assign(P(),{[key]:xv}),v))));
+  const data=SER.map(([n,v])=>xs.map(xv=>metricVal(simulate(Object.assign(P(),{[key]:xv}),Object.assign({T:0.9},v)))));
   let lo=Infinity,hi=-Infinity;data.forEach(s=>s.forEach(v=>{if(!isNaN(v)){lo=Math.min(lo,v);hi=Math.max(hi,v)}}));
-  if(S.metric==='speed')lo=0; if(S.metric==='spin'){lo=Math.min(lo,-1);hi=Math.max(hi,1)} if(!isFinite(lo)){lo=0;hi=1}
+  if(S.metric==='speed'||S.metric==='tc')lo=0; if(S.metric==='spin'){lo=Math.min(lo,-1);hi=Math.max(hi,1)} if(!isFinite(lo)){lo=0;hi=1}
   const rg=hi-lo||1;const st=niceStep(rg/4);lo=Math.floor(lo/st)*st;hi=Math.ceil(hi/st)*st;
   const L=48,R=12,Tp=12,Bt=34,X=v=>L+(v-xs[0])/(xs[xs.length-1]-xs[0])*(w-L-R),Y=v=>Tp+(1-(v-lo)/(hi-lo))*(h-Tp-Bt);
   x.font='11px '+cssv('--f-mono');x.fillStyle=col.mute;x.strokeStyle=col.grid;x.lineWidth=1;
@@ -500,20 +507,23 @@ function drawCharts(){
   const F=FACES[S.face],Bd=[];const nS=30;for(let i=0;i<=nS;i++)Bd.push(Math.round(F.lo+(F.hi-F.lo)*i/nS));
   drawChart('chA',A,'tilt',S.tilt,'ball direction from CM (degrees from straight up)');
   drawChart('chB',Bd,'d',S.d,'contact offset (uu)');
-  const unit=S.metric==='speed'?'uu/s':S.metric==='angle'?'degrees':'rad/s';
-  $('chLegend').innerHTML=`<span>Y axis: ${S.metric==='speed'?'ball speed':S.metric==='angle'?'launch angle':'ball spin'} (${unit}). Vertical line marks the current setting. Gaps in the angle plot mean the ball barely moved.</span>`+SER.map(s=>`<span><i style="border-color:var(${s[2]});border-top-style:${s[3].length?'dashed':'solid'}"></i>${s[0]}</span>`).join('');
+  const G=[];for(let g=0;g<=300;g+=10)G.push(g);
+  drawChart('chC',G,'gap',S.gap,'gap when the flip starts (uu); lead ≈ gap ÷ closing speed');
+  const unit=S.metric==='speed'?'uu/s':S.metric==='angle'?'degrees':S.metric==='tc'?'ms after the flip starts':'rad/s';
+  $('chLegend').innerHTML=`<span>Y axis: ${S.metric==='speed'?'ball speed':S.metric==='angle'?'launch angle':S.metric==='tc'?'first contact time':'ball spin'} (${unit}). Vertical line marks the current setting. Gaps mean the ball was not touched or barely moved.</span>`+SER.map(s=>`<span><i style="border-color:var(${s[2]});border-top-style:${s[3].length?'dashed':'solid'}"></i>${s[0]}</span>`).join('');
 }
 setup(); update(true);
 
 function drawW(){
   if(!RUN)return;const {x,w,h}=fitCanvas($('wchart'));const col={grid:cssv('--grid'),mute:cssv('--mute'),car:cssv('--car'),ball:cssv('--ball'),ink:cssv('--ink'),nrm:cssv('--nrm')};
-  x.clearRect(0,0,w,h);const fr=RUN.frames,n=fr.length-1,tmax=Math.min(fr[n].t,0.3),k=Math.round(tmax/RS.dt);
+  x.clearRect(0,0,w,h);const fr=RUN.frames,n=fr.length-1,tmax=Math.min(fr[n].t,0.8),k=Math.round(tmax/RS.dt);
   const L=40,R=10,Tp=10,Bt=26,X=t=>L+t/tmax*(w-L-R),Y=v=>Tp+(1-(v+6)/12)*(h-Tp-Bt);
   x.font='11px '+cssv('--f-mono');x.textAlign='right';x.fillStyle=col.mute;x.strokeStyle=col.grid;x.lineWidth=1;
   for(const v of [-5.5,0,5.5]){x.beginPath();x.moveTo(L,Y(v));x.lineTo(w-R,Y(v));x.stroke();x.fillText(String(v),L-6,Y(v)+4)}
   x.globalAlpha=.16;x.fillStyle=col.nrm;for(let i=1;i<=k;i++)if(fr[i].contact)x.fillRect(X(fr[i-1].t),Tp,X(fr[i].t)-X(fr[i-1].t),h-Tp-Bt);x.globalAlpha=1;
-  x.textAlign='center';x.fillStyle=col.mute;for(const ms of [0,50,100,150,200,250,300]){if(ms/1000<tmax-0.02)x.fillText(ms+' ms',X(ms/1000),h-8)}
+  x.textAlign='center';x.fillStyle=col.mute;for(const ms of [0,100,200,300,400,500,600,700,800]){if(ms/1000<tmax-0.02)x.fillText(ms+' ms',X(ms/1000),h-8)}
   for(const [key,c,wd] of [['car',col.car,2.5],['ball',col.ball,2.5]]){x.strokeStyle=c;x.lineWidth=wd;x.beginPath();for(let i=0;i<=k;i++){const px=X(fr[i].t),py=Y(fr[i][key].w);i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()}
+  x.globalAlpha=.9;x.fillStyle=col.mute;x.fillRect(X(0),Tp,X(0.025)-X(0),5);x.fillStyle=col.car;x.fillRect(X(0.025),Tp,X(Math.min(0.65,tmax))-X(0.025),5);if(tmax>0.65){x.fillStyle=col.grid;x.fillRect(X(0.65),Tp,X(tmax)-X(0.65),5)}x.globalAlpha=1;
   const cf=Math.min(frame,k);x.strokeStyle=col.ink;x.lineWidth=1;x.beginPath();x.moveTo(X(fr[cf].t),Tp);x.lineTo(X(fr[cf].t),h-Bt);x.stroke();
 }
 </script>
