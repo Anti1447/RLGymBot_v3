@@ -82,8 +82,8 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
       <div class="field"><span class="lab">Contact face</span>
         <select id="face"></select></div>
       <div class="field"><div class="row"><label for="tilt">Ball direction from CM</label><span class="val" id="tiltV"></span></div>
-        <input id="tilt" type="range" min="-90" max="90" step="1" value="45">
-        <small class="src">Measured from straight up. 45° means the ball touches the car at the point 45° from directly below the ball.</small></div>
+        <input id="tilt" type="range" min="-180" max="180" step="1" value="45">
+        <small class="src">Full circle, measured from straight up. Positive is toward the travel direction, ±180° is straight below. 45° means the ball touches the car at the point 45° from directly below the ball.</small></div>
       <div class="field"><div class="row"><label for="d" id="dLab">Contact offset along face</label><span class="val" id="dV"></span></div>
         <input id="d" type="range" min="-46" max="74" step="1" value="0">
         <small class="src" id="dNote">0 puts the car's center of mass on the line through the ball's center.</small></div>
@@ -339,9 +339,10 @@ function setup(){
     ['Straight below the ball (0°)',{face:'underside',tilt:0,d:0,dir:-1}],
     ['45°, contact near the nose',{face:'underside',tilt:45,d:60,dir:-1}],
     ['45°, contact near the tail',{face:'underside',tilt:45,d:-40,dir:-1}],
-    ['−45° front flip, held against the ball',{face:'underside',tilt:-45,d:74,dir:1}]
+    ['−45° front flip, held against the ball',{face:'underside',tilt:-45,d:74,dir:1}],
+    ['Roof contact, back flip, ball ahead and below',{face:'roof',tilt:135,d:-40,dir:-1,vh:1000}]
   ];
-  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;S.vh=0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
+  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
   ['tilt','d','closing','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
   $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
   [['tgT','torque'],['tgL','lin'],['tgE','extra']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
@@ -495,7 +496,7 @@ function drawChart(id,xs,key,cur,xlabel){
 function niceStep(r){const p=Math.pow(10,Math.floor(Math.log10(r))),f=r/p;return (f<1.5?1:f<3.5?2:f<7.5?5:10)*p}
 function drawCharts(){
   if(!RUN)return;
-  const A=[];for(let t=-90;t<=90;t+=5)A.push(t);
+  const A=[];for(let t=-180;t<=180;t+=5)A.push(t);
   const F=FACES[S.face],Bd=[];const nS=30;for(let i=0;i<=nS;i++)Bd.push(Math.round(F.lo+(F.hi-F.lo)*i/nS));
   drawChart('chA',A,'tilt',S.tilt,'ball direction from CM (degrees from straight up)');
   drawChart('chB',Bd,'d',S.d,'contact offset (uu)');
