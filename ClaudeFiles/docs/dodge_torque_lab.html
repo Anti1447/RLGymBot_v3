@@ -1,0 +1,477 @@
+<title>Dodge Torque Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: control rail left, live side-view scene right, then results, sweeps and notes stacked below. Telemetry-sheet feel. */
+:root{
+  --bg:#eef1f4; --surface:#fbfcfd; --ink:#14202b; --mute:#5a6a77; --line:#d3dbe2; --grid:#e3e8ed;
+  --car:#2f6fb3; --ball:#e08a1e; --nrm:#12857a; --fric:#7355c9; --xtra:#d2452f; --focus:#2f6fb3;
+  --f-head:'Barlow Condensed','Arial Narrow',sans-serif; --f-body:'IBM Plex Sans',system-ui,sans-serif; --f-mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e151d; --surface:#151f2a; --ink:#e5ecf2; --mute:#93a3b1; --line:#2a3745; --grid:#1f2b37;
+  --car:#5aa0e6; --ball:#f0a23b; --nrm:#3fc4b0; --fric:#a58bf0; --xtra:#ff6f59; --focus:#5aa0e6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e151d; --surface:#151f2a; --ink:#e5ecf2; --mute:#93a3b1; --line:#2a3745; --grid:#1f2b37;
+  --car:#5aa0e6; --ball:#f0a23b; --nrm:#3fc4b0; --fric:#a58bf0; --xtra:#ff6f59; --focus:#5aa0e6; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--f-body);padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font:700 34px/1 var(--f-head);letter-spacing:.01em;margin:0;text-wrap:balance}
+h2{font:600 20px/1.1 var(--f-head);letter-spacing:.04em;text-transform:uppercase;margin:0 0 10px;text-wrap:balance}
+p{margin:0}
+.lede{color:var(--mute);max-width:70ch;margin-top:8px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;min-width:0}
+.top{display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.top{grid-template-columns:minmax(0,1fr)}}
+.ctrl{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label,.lab{font:600 12px/1 var(--f-head);letter-spacing:.09em;text-transform:uppercase;color:var(--mute);font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.val{font:500 13px var(--f-mono);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--car)}
+select,button{font:500 13px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:7px 9px}
+button{cursor:pointer}
+button:hover{border-color:var(--mute)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button[aria-pressed=true]{background:var(--car);border-color:var(--car);color:#fff}
+.chk{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.chk input{margin-top:3px;accent-color:var(--car)}
+.chk small{display:block;color:var(--mute);font-size:12px}
+.presets{display:flex;flex-direction:column;gap:6px}
+.presets button{text-align:left}
+.sceneWrap{display:flex;flex-direction:column;gap:10px}
+canvas{display:block;width:100%;border-radius:4px;background:var(--bg)}
+#scene{aspect-ratio:16/10}
+.transport{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.transport input[type=range]{flex:1;min-width:140px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--mute)}
+.legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:6px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tile{border:1px solid var(--line);border-radius:6px;padding:10px 12px;min-width:0}
+.tile .k{font:600 13px var(--f-head);letter-spacing:.09em;text-transform:uppercase;color:var(--mute)}
+.tile .v{font:500 24px var(--f-mono);font-variant-numeric:tabular-nums;margin-top:2px}
+.tile .s{font-size:12px;color:var(--mute)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media (max-width:860px){.two{grid-template-columns:minmax(0,1fr)}}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+th{font:600 12px var(--f-head);letter-spacing:.09em;text-transform:uppercase;color:var(--mute);font-size:13px}
+td.m{font-family:var(--f-mono)}
+tr.cur td{font-weight:600}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:baseline}
+#budget{aspect-ratio:4/3;max-height:340px}
+.chartbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.chart{aspect-ratio:16/10}
+ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;max-width:78ch}
+.mono{font-family:var(--f-mono);font-size:12.5px}
+.src{color:var(--mute);font-size:12.5px;max-width:78ch}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+<div class="wrap">
+  <header>
+    <h1>Dodge Torque Lab</h1>
+    <p class="lede">A side-view simulation of what a dodge does to a ball it is touching: the car's spin, its horizontal dodge kick, RocketSim's extra car-ball impulse, and surface friction, each shown separately so you can see which one sets the launch. Constants are read from this repo's RocketSim source.</p>
+  </header>
+
+  <section class="top">
+    <div class="panel ctrl" aria-label="Controls">
+      <div class="presets" id="presets"><span class="lab">Presets</span></div>
+      <div class="field"><span class="lab">Contact face</span>
+        <select id="face"></select></div>
+      <div class="field"><div class="row"><label for="tilt">Ball direction from CM</label><span class="val" id="tiltV"></span></div>
+        <input id="tilt" type="range" min="-90" max="90" step="1" value="45">
+        <small class="src">Measured from straight up. 45° means the ball touches the car at the point 45° from directly below the ball.</small></div>
+      <div class="field"><div class="row"><label for="d" id="dLab">Contact offset along face</label><span class="val" id="dV"></span></div>
+        <input id="d" type="range" min="-46" max="74" step="1" value="0">
+        <small class="src" id="dNote">0 puts the car's center of mass on the line through the ball's center.</small></div>
+      <div class="field"><span class="lab">Flip</span>
+        <div class="seg" id="dir"><button type="button" data-v="-1" aria-pressed="true">Back flip</button><button type="button" data-v="1" aria-pressed="false">Front flip</button></div></div>
+      <div class="field"><div class="row"><label for="closing">Closing speed</label><span class="val" id="closingV"></span></div>
+        <input id="closing" type="range" min="0" max="1500" step="25" value="0"></div>
+      <div class="field"><div class="row"><label for="mu">Contact friction</label><span class="val" id="muV"></span></div>
+        <input id="mu" type="range" min="0" max="2" step="0.1" value="2"></div>
+      <div class="field"><span class="lab">Mechanisms</span>
+        <label class="chk"><input id="tgT" type="checkbox" checked><span>Dodge spin torque<small>224 rad/s² for 0.65 s, capped at 5.5 rad/s</small></span></label>
+        <label class="chk"><input id="tgL" type="checkbox" checked><span>Dodge horizontal kick<small>500 uu/s along the car's horizontal heading</small></span></label>
+        <label class="chk"><input id="tgE" type="checkbox" checked><span>RocketSim extra impulse<small>0.65 × relative speed, along the CM-to-ball line</small></span></label></div>
+    </div>
+
+    <div class="panel sceneWrap">
+      <canvas id="scene" role="img" aria-label="Side view of the car and ball during the dodge"></canvas>
+      <div class="transport">
+        <button type="button" id="play">Play</button>
+        <input id="scrub" type="range" min="0" max="72" step="1" value="0" aria-label="Time">
+        <select id="rate" aria-label="Playback speed"><option value="1">1× real time</option><option value="0.25">¼×</option><option value="0.1" selected>⅒×</option></select>
+        <span class="val" id="tNow"></span>
+      </div>
+      <div class="legend">
+        <span><i style="border-color:var(--nrm)"></i>contact normal</span>
+        <span><i style="border-color:var(--xtra)"></i>extra-impulse direction</span>
+        <span><i style="border-color:var(--mute);border-top-style:dashed"></i>CM to ball line</span>
+        <span><i style="border-color:var(--ball)"></i>ball velocity</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Result</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <h2>Where the ball's velocity came from</h2>
+      <canvas id="budget" role="img" aria-label="Velocity build-up from normal, friction and extra impulse"></canvas>
+      <div class="scroll"><table id="budgetT"></table></div>
+    </div>
+    <div class="panel">
+      <h2>What each mechanism does alone</h2>
+      <div class="scroll"><table id="cmp"></table></div>
+      <p class="src" style="margin-top:12px" id="Lnote"></p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Sweeps</h2>
+    <div class="chartbar">
+      <span class="lab">Plot</span>
+      <div class="seg" id="metric"><button type="button" data-v="speed" aria-pressed="true">Ball speed</button><button type="button" data-v="angle" aria-pressed="false">Launch angle</button><button type="button" data-v="spin" aria-pressed="false">Ball spin</button></div>
+    </div>
+    <div class="two">
+      <div><div class="lab" style="margin-bottom:6px">Versus ball direction from CM (offset held)</div><canvas id="chA" class="chart"></canvas></div>
+      <div><div class="lab" style="margin-bottom:6px">Versus contact offset along face (direction held)</div><canvas id="chB" class="chart"></canvas></div>
+    </div>
+    <div class="legend" style="margin-top:10px" id="chLegend"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Reading the model</h2>
+    <ul class="notes">
+      <li><b>The launch direction comes from the CM-to-ball line, not the contact normal.</b> RocketSim builds the extra impulse from the vector between the car's center of mass and the ball's center, squashes its vertical part to 35%, and removes 35% of its forward component. At the default 45° with the center of mass on the line, that impulse points about 28° above horizontal, not 45°.</li>
+      <li><b>Spin only matters if contact lasts.</b> The dodge torque ramps the car to 5.5 rad/s in about three ticks (25 ms). At the defaults the extra impulse separates the ball after two ticks, so the spin barely changes the result. In geometries where the car keeps pushing it matters a lot: at tilt −45°, front flip, offset at the nose end, the spin raises ball speed from about 540 to 1220 uu/s.</li>
+      <li><b>Ball spin comes from friction on the sliding face.</b> With the car's 500 uu/s kick sliding along a tilted underside, the high contact friction (2.0) grips and spins the ball at about 2.8 rad/s even with the torque switched off. Set friction to 0 and the spin goes to zero.</li>
+      <li><b>Moving the contact point shifts the result predictably.</b> At the default setup, sliding the contact from the tail end to the nose end of the underside (back flip) drops ball speed from about 680 to 455 uu/s and lifts the launch angle from 22° to 47°.</li>
+      <li><b>Repeated extra impulses compound.</b> RocketSim reapplies the extra impulse every second tick while contact persists, using the current relative speed. A ball held against a moving face can gain speed geometrically. That is the rule as written in <span class="mono">Arena.cpp</span>, and this page follows it.</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>Model and limits</h2>
+    <p class="src">Planar (side view, no roll or yaw dodges), no gravity (both bodies fall together), ball at rest before contact unless closing speed is set. Contact is solved per 120 Hz tick with sequential impulses, friction cone 2.0, restitution 0, like RocketSim's car-ball override. Octane hitbox 120.5 × 38.7 uu offset (13.9, 20.8) from the center of mass, car mass 180, ball mass 30 with I = 0.4·m·r², car inertia from the box. Extra impulse follows <span class="mono">Arena::_BtCallback_OnCarBallCollision</span>; dodge constants follow <span class="mono">Car::_UpdateAirTorque</span> and <span class="mono">RLConst.h</span>. This is a re-implementation, not RocketSim itself, and has not been checked against RocketSim runs because the collision meshes are not in the repo. Treat sizes of effects as estimates and directions as reliable.</p>
+  </section>
+</div>
+<script>
+// Planar (side-view) re-creation of RocketSim's car/ball contact with a dodge in progress.
+// Axes: X right, Z up, angles CCW positive. Units: uu, uu/s, rad/s.
+const RS = {
+  R: 91.25, mB: 30, mC: 180,
+  boxL: 120.507, boxH: 38.6591, offX: 13.87566, offZ: 20.755,
+  muCB: 2.0, restCB: 0.0,
+  wMaxCar: 5.5, wMaxBall: 6.0,
+  flipAlphaPitch: 224, flipTime: 0.65, flipImpulse: 500, backScale: 16 / 15,
+  zScale: 0.35, fwdScale: 0.65, maxRel: 4600,
+  dt: 1 / 120
+};
+RS.IB = 0.4 * RS.mB * RS.R * RS.R;
+RS.IC = RS.mC * (RS.boxL ** 2 + RS.boxH ** 2) / 12;
+RS.box = { x0: RS.offX - RS.boxL / 2, x1: RS.offX + RS.boxL / 2, z0: RS.offZ - RS.boxH / 2, z1: RS.offZ + RS.boxH / 2 };
+const FACES = {
+  underside: { n: [0, -1], lo: RS.box.x0, hi: RS.box.x1, label: 'Underside (wheels)' },
+  roof:      { n: [0, 1],  lo: RS.box.x0, hi: RS.box.x1, label: 'Roof' },
+  nose:      { n: [1, 0],  lo: RS.box.z0, hi: RS.box.z1, label: 'Nose' },
+  tail:      { n: [-1, 0], lo: RS.box.z0, hi: RS.box.z1, label: 'Tail' }
+};
+const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
+const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+const len = a => Math.hypot(a[0], a[1]);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+function curve(s) { // BALL_CAR_EXTRA_IMPULSE_FACTOR_CURVE
+  const P = [[0, .65], [500, .65], [2300, .55], [4600, .30]];
+  if (s <= 0) return P[0][1];
+  for (let i = 1; i < P.length; i++) if (s <= P[i][0]) { const t = (s - P[i - 1][0]) / (P[i][0] - P[i - 1][0]); return P[i - 1][1] + t * (P[i][1] - P[i - 1][1]); }
+  return P[3][1];
+}
+function faceRange(face) { return [FACES[face].lo, FACES[face].hi]; }
+
+// p: {face, tilt (deg, ball direction from car CM measured from straight up), d (lateral offset on face, uu),
+//     dir (+1 front flip / -1 back flip), closing (uu/s), mu}
+// o: {torque, lin, extra, T}
+function simulate(p, o) {
+  o = Object.assign({ torque: true, lin: true, extra: true, T: 0.6 }, o || {});
+  const mu = p.mu == null ? RS.muCB : p.mu;
+  const F = FACES[p.face];
+  const a = p.tilt * Math.PI / 180;
+  const nW = [Math.sin(a), Math.cos(a)];
+  const psi = Math.atan2(nW[1], nW[0]) - Math.atan2(F.n[1], F.n[0]);
+  const d = clamp(p.d, F.lo, F.hi);
+  const pl = F.n[1] !== 0 ? [d, F.n[1] < 0 ? RS.box.z0 : RS.box.z1] : [F.n[0] > 0 ? RS.box.x1 : RS.box.x0, d];
+  const pw = rot(pl, psi);
+  const car = { x: 0, z: 0, ang: psi, vx: nW[0] * (p.closing || 0), vz: nW[1] * (p.closing || 0), w: 0 };
+  const ball = { x: pw[0] + nW[0] * (RS.R + 0.05), z: pw[1] + nW[1] * (RS.R + 0.05), vx: 0, vz: 0, w: 0 };
+  const fwd0 = rot([1, 0], psi);
+  const hs = fwd0[0] >= 0 ? 1 : -1; // horizontal sign of the car's forward vector
+  let linDv = 0;
+  if (o.lin) { linDv = p.dir * hs * RS.flipImpulse * (p.dir < 0 ? RS.backScale : 1); car.vx += linDv; }
+  const alphaSign = -p.dir * RS.flipAlphaPitch; // front flip = clockwise on screen
+  const acc = { N: [0, 0], F: [0, 0], E: [0, 0], spinF: 0, spinN: 0, extraHits: 0, contactTicks: 0, JN: 0, JF: 0, carDW: 0 };
+  const frames = [];
+  let lastExtra = -99, tick = 0, first = -1, last = -1;
+  const n_ticks = Math.round(o.T / RS.dt);
+  const snap = (c, hd) => frames.push({ t: tick * RS.dt, car: { ...car }, ball: { ...ball }, contact: c, hit: hd || null });
+  snap(false);
+  for (tick = 1; tick <= n_ticks; tick++) {
+    const t = tick * RS.dt;
+    if (o.torque && t <= RS.flipTime) car.w += alphaSign * RS.dt;
+    // contact query (ball centre in car frame, closest point on box)
+    const q = rot([ball.x - car.x, ball.z - car.z], -car.ang);
+    const cp = [clamp(q[0], RS.box.x0, RS.box.x1), clamp(q[1], RS.box.z0, RS.box.z1)];
+    let dv = [q[0] - cp[0], q[1] - cp[1]], dist = len(dv);
+    let hitDraw = null, contact = dist < RS.R + 0.5 && dist > 1e-6;
+    if (contact) {
+      const nl = [dv[0] / dist, dv[1] / dist];
+      const n = rot(nl, car.ang);
+      const cw = rot(cp, car.ang);
+      const rc = cw, rb = [-n[0] * RS.R, -n[1] * RS.R];
+      acc.contactTicks++; if (first < 0) first = tick; last = tick;
+      // RocketSim extra impulse (direction from car CM to ball CM, z flattened, forward component reduced)
+      let extra = [0, 0];
+      if (o.extra && tick > lastExtra + 1) {
+        lastExtra = tick;
+        const relPos = [ball.x - car.x, ball.z - car.z], relVel = [ball.vx - car.vx, ball.vz - car.vz];
+        const rs = Math.min(len(relVel), RS.maxRel);
+        if (rs > 0) {
+          let h = [relPos[0], relPos[1] * RS.zScale]; let hl = len(h); h = [h[0] / hl, h[1] / hl];
+          const fw = rot([1, 0], car.ang);
+          const adj = dot(h, fw) * (1 - RS.fwdScale);
+          h = [h[0] - fw[0] * adj, h[1] - fw[1] * adj]; hl = len(h); h = [h[0] / hl, h[1] / hl];
+          extra = [h[0] * rs * curve(rs), h[1] * rs * curve(rs)];
+          hitDraw = { dir: h, mag: rs * curve(rs) };
+          acc.extraHits++;
+        }
+      }
+      // sequential impulses: normal then friction, accumulated clamping
+      const kN = 1 / RS.mB + 1 / RS.mC + cross(rb, n) ** 2 / RS.IB + cross(rc, n) ** 2 / RS.IC;
+      const tg = [-n[1], n[0]];
+      const kT = 1 / RS.mB + 1 / RS.mC + cross(rb, tg) ** 2 / RS.IB + cross(rc, tg) ** 2 / RS.IC;
+      let Jn = 0, Jt = 0;
+      const vrel = () => {
+        const vb = [ball.vx - ball.w * rb[1], ball.vz + ball.w * rb[0]];
+        const vc = [car.vx - car.w * rc[1], car.vz + car.w * rc[0]];
+        return [vb[0] - vc[0], vb[1] - vc[1]];
+      };
+      const apply = (J, dir) => { // impulse J along dir on ball, -J on car
+        const I = [J * dir[0], J * dir[1]];
+        ball.vx += I[0] / RS.mB; ball.vz += I[1] / RS.mB; ball.w += cross(rb, I) / RS.IB;
+        car.vx -= I[0] / RS.mC; car.vz -= I[1] / RS.mC; car.w -= cross(rc, I) / RS.IC;
+      };
+      for (let it = 0; it < 20; it++) {
+        let vr = vrel();
+        let dj = -dot(vr, n) / kN, nj = Math.max(0, Jn + dj); dj = nj - Jn; Jn = nj; apply(dj, n);
+        vr = vrel();
+        let dt2 = -dot(vr, tg) / kT, nt = clamp(Jt + dt2, -mu * Jn, mu * Jn); dt2 = nt - Jt; Jt = nt; apply(dt2, tg);
+      }
+      acc.N[0] += Jn * n[0] / RS.mB; acc.N[1] += Jn * n[1] / RS.mB;
+      acc.F[0] += Jt * tg[0] / RS.mB; acc.F[1] += Jt * tg[1] / RS.mB;
+      acc.spinF += cross(rb, [Jt * tg[0], Jt * tg[1]]) / RS.IB;
+      acc.spinN += cross(rb, [Jn * n[0], Jn * n[1]]) / RS.IB;
+      acc.JN += Jn; acc.JF += Jt;
+      const pen = RS.R - dist;
+      if (pen > 0.5) { const s = (pen - 0.5) * 0.8; const wb = RS.mC / (RS.mB + RS.mC); ball.x += n[0] * s * wb; ball.z += n[1] * s * wb; car.x -= n[0] * s * (1 - wb); car.z -= n[1] * s * (1 - wb); }
+      ball._extra = extra;
+    } else ball._extra = null;
+    car.x += car.vx * RS.dt; car.z += car.vz * RS.dt; car.ang += car.w * RS.dt;
+    ball.x += ball.vx * RS.dt; ball.z += ball.vz * RS.dt;
+    if (ball._extra) { ball.vx += ball._extra[0]; ball.vz += ball._extra[1]; acc.E[0] += ball._extra[0]; acc.E[1] += ball._extra[1]; }
+    delete ball._extra;
+    car.w = clamp(car.w, -RS.wMaxCar, RS.wMaxCar);
+    ball.w = clamp(ball.w, -RS.wMaxBall, RS.wMaxBall);
+    snap(contact, hitDraw);
+  }
+  const speed = len([ball.vx, ball.vz]);
+  return {
+    frames, acc, psi, linDv, nW, contactPoint: pw,
+    out: { vx: ball.vx, vz: ball.vz, speed, angle: Math.atan2(ball.vz, ball.vx) * 180 / Math.PI, spin: ball.w, ticks: acc.contactTicks, firstTick: first, lastTick: last }
+  };
+}
+const $=id=>document.getElementById(id);
+const S={face:'underside',tilt:45,d:0,dir:-1,closing:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
+let RUN=null, frame=0, playing=false, lastTs=0, acc=0;
+const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt=(x,n=0)=>(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n);
+const P=()=>({face:S.face,tilt:S.tilt,d:S.d,dir:S.dir,closing:S.closing,mu:S.mu});
+const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra});
+
+function setup(){
+  const f=$('face'); Object.entries(FACES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.label;f.appendChild(o)});
+  const presets=[
+    ['45° reset flick, CM through ball center',{face:'underside',tilt:45,d:0,dir:-1}],
+    ['Straight below the ball (0°)',{face:'underside',tilt:0,d:0,dir:-1}],
+    ['45°, contact near the nose',{face:'underside',tilt:45,d:60,dir:-1}],
+    ['45°, contact near the tail',{face:'underside',tilt:45,d:-40,dir:-1}],
+    ['−45° front flip, held against the ball',{face:'underside',tilt:-45,d:74,dir:1}]
+  ];
+  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=0;syncUI();update(true)};$('presets').appendChild(b)});
+  ['tilt','d','closing','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
+  $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
+  [['tgT','torque'],['tgL','lin'],['tgE','extra']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
+  $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.dir=+b.dataset.v;syncUI();update(true)});
+  $('metric').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.metric=b.dataset.v;syncUI();drawCharts()});
+  $('play').onclick=()=>{playing=!playing; if(playing&&frame>=RUN.frames.length-1)frame=0; $('play').textContent=playing?'Pause':'Play'; lastTs=0; if(playing)requestAnimationFrame(tick)};
+  $('scrub').addEventListener('input',()=>{frame=+$('scrub').value;playing=false;$('play').textContent='Play';drawScene()});
+  addEventListener('resize',()=>{drawScene();drawBudget();drawCharts()});
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{drawScene();drawBudget();drawCharts()});
+  new MutationObserver(()=>{drawScene();drawBudget();drawCharts()}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  syncUI();
+}
+function syncUI(){
+  const F=FACES[S.face];
+  $('face').value=S.face; $('tilt').value=S.tilt; $('closing').value=S.closing; $('mu').value=S.mu;
+  const d=$('d'); d.min=Math.ceil(F.lo); d.max=Math.floor(F.hi); S.d=Math.max(+d.min,Math.min(+d.max,S.d)); d.value=S.d;
+  $('dLab').textContent=F.n[1]!==0?'Contact offset along face (x)':'Contact offset along face (z)';
+  $('dNote').textContent=S.face==='underside'||S.face==='roof'?'0 puts the car\'s center of mass on the line through the ball\'s center. Positive is toward the nose.':'Height of the contact point above the center of mass. The nose and tail faces start 1.4 uu above it, so the line through the center of mass just misses the face.';
+  $('tiltV').textContent=S.tilt+'°'; $('dV').textContent=S.d+' uu'; $('closingV').textContent=S.closing+' uu/s'; $('muV').textContent=(+S.mu).toFixed(1);
+  $('dir').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.v===S.dir)));
+  $('metric').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.metric)));
+  $('tgT').checked=S.torque;$('tgL').checked=S.lin;$('tgE').checked=S.extra;
+}
+function update(resetFrame){
+  syncUI();
+  RUN=simulate(P(),O());
+  const n=RUN.frames.length-1; $('scrub').max=n;
+  if(resetFrame){frame=Math.min(n,Math.max(RUN.out.lastTick,0)+14);playing=false;$('play').textContent='Play';}
+  $('scrub').value=frame;
+  drawScene(); renderResults(); drawBudget(); drawCharts();
+}
+
+// ---------- scene ----------
+function fitCanvas(c){const r=c.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(10,Math.round(r.width*dpr)),h=Math.max(10,Math.round(r.height*dpr));if(c.width!==w||c.height!==h){c.width=w;c.height=h}const x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);return{x,w:r.width,h:r.height}}
+function arrow(x,a,b,col,wd=2,dash){x.save();x.strokeStyle=col;x.fillStyle=col;x.lineWidth=wd;if(dash)x.setLineDash(dash);x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(b[0],b[1]);x.stroke();x.setLineDash([]);const ang=Math.atan2(b[1]-a[1],b[0]-a[0]),L=Math.hypot(b[0]-a[0],b[1]-a[1]);if(L>6){const h=Math.min(9,L*.5);x.beginPath();x.moveTo(b[0],b[1]);x.lineTo(b[0]-h*Math.cos(ang-.4),b[1]-h*Math.sin(ang-.4));x.lineTo(b[0]-h*Math.cos(ang+.4),b[1]-h*Math.sin(ang+.4));x.closePath();x.fill()}x.restore()}
+function drawScene(){
+  if(!RUN)return; const c=$('scene'); const {x,w,h}=fitCanvas(c);
+  const col={bg:cssv('--bg'),grid:cssv('--grid'),ink:cssv('--ink'),mute:cssv('--mute'),car:cssv('--car'),ball:cssv('--ball'),nrm:cssv('--nrm'),xtra:cssv('--xtra'),line:cssv('--line')};
+  x.clearRect(0,0,w,h);
+  // camera bounds from the whole run
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for(const f of RUN.frames){for(const b of [f.ball]){x0=Math.min(x0,b.x-RS.R);x1=Math.max(x1,b.x+RS.R);z0=Math.min(z0,b.z-RS.R);z1=Math.max(z1,b.z+RS.R)} x0=Math.min(x0,f.car.x-130);x1=Math.max(x1,f.car.x+130);z0=Math.min(z0,f.car.z-130);z1=Math.max(z1,f.car.z+130)}
+  const pad=40,sc=Math.min((w-2*pad)/(x1-x0),(h-2*pad)/(z1-z0)),cx=(x0+x1)/2,cz=(z0+z1)/2;
+  const T=p=>[w/2+(p[0]-cx)*sc,h/2-(p[1]-cz)*sc];
+  // grid every 100 uu
+  x.strokeStyle=col.grid;x.lineWidth=1;x.fillStyle=col.mute;x.font='11px '+cssv('--f-mono');
+  for(let gx=Math.ceil((cx-w/2/sc)/100)*100;gx<cx+w/2/sc;gx+=100){const p=T([gx,0]);x.beginPath();x.moveTo(p[0],0);x.lineTo(p[0],h);x.stroke()}
+  for(let gz=Math.ceil((cz-h/2/sc)/100)*100;gz<cz+h/2/sc;gz+=100){const p=T([0,gz]);x.beginPath();x.moveTo(0,p[1]);x.lineTo(w,p[1]);x.stroke()}
+  const f=RUN.frames[Math.min(frame,RUN.frames.length-1)];
+  // ball trail
+  x.fillStyle=col.ball;for(let i=0;i<=frame&&i<RUN.frames.length;i+=2){const p=T([RUN.frames[i].ball.x,RUN.frames[i].ball.z]);x.globalAlpha=.35;x.beginPath();x.arc(p[0],p[1],2,0,7);x.fill()}x.globalAlpha=1;
+  // car
+  const car=f.car,ca=car.ang,L2W=l=>{const r=rot(l,ca);return [car.x+r[0],car.z+r[1]]};
+  const B=RS.box,corners=[[B.x0,B.z0],[B.x1,B.z0],[B.x1,B.z1],[B.x0,B.z1]].map(l=>T(L2W(l)));
+  x.beginPath();corners.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.closePath();x.fillStyle=col.car;x.globalAlpha=.28;x.fill();x.globalAlpha=1;x.strokeStyle=col.car;x.lineWidth=2;x.stroke();
+  // contact face highlight, wheels on underside, nose marker
+  const F=FACES[S.face];const fc=F.n[1]!==0?[[B.x0,F.n[1]<0?B.z0:B.z1],[B.x1,F.n[1]<0?B.z0:B.z1]]:[[F.n[0]>0?B.x1:B.x0,B.z0],[F.n[0]>0?B.x1:B.x0,B.z1]];
+  x.strokeStyle=col.nrm;x.lineWidth=5;x.lineCap='round';x.beginPath();fc.forEach((l,i)=>{const p=T(L2W(l));i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])});x.stroke();x.lineCap='butt';
+  x.fillStyle=col.ink;for(const wx of [-26,52]){const a=T(L2W([wx,B.z0-1])),b=T(L2W([wx,B.z0-11]));x.lineWidth=7;x.strokeStyle=col.ink;x.globalAlpha=.8;x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(b[0],b[1]);x.stroke();x.globalAlpha=1}
+  const nm=T(L2W([B.x1,(B.z0+B.z1)/2])),nm2=T(L2W([B.x1+16,(B.z0+B.z1)/2]));arrow(x,nm,nm2,col.car,3);
+  x.fillStyle=col.mute;x.font='600 11px '+cssv('--f-head');const nl=T(L2W([B.x1+26,(B.z0+B.z1)/2]));x.fillText('NOSE',nl[0]-10,nl[1]+4);
+  // CM
+  const cm=T([car.x,car.z]);x.strokeStyle=col.ink;x.lineWidth=1.5;x.beginPath();x.arc(cm[0],cm[1],5,0,7);x.moveTo(cm[0]-8,cm[1]);x.lineTo(cm[0]+8,cm[1]);x.moveTo(cm[0],cm[1]-8);x.lineTo(cm[0],cm[1]+8);x.stroke();
+  // spin arc
+  if(Math.abs(car.w)>0.05){const r=30,a0=-Math.PI/2,sg=car.w>0?-1:1,span=Math.min(1,Math.abs(car.w)/5.5)*1.6;x.strokeStyle=col.car;x.lineWidth=2.5;x.beginPath();x.arc(cm[0],cm[1],r,a0,a0+sg*span,sg<0);x.stroke();const ea=a0+sg*span;arrow(x,[cm[0]+r*Math.cos(ea-sg*.2),cm[1]+r*Math.sin(ea-sg*.2)],[cm[0]+r*Math.cos(ea),cm[1]+r*Math.sin(ea)],col.car,2.5)}
+  // ball
+  const bp=T([f.ball.x,f.ball.z]),br=RS.R*sc;
+  x.fillStyle=col.ball;x.globalAlpha=.3;x.beginPath();x.arc(bp[0],bp[1],br,0,7);x.fill();x.globalAlpha=1;x.strokeStyle=col.ball;x.lineWidth=2;x.stroke();
+  x.save();x.translate(bp[0],bp[1]);x.rotate(-f.ball.w*0+ -ballAngle(frame));x.lineWidth=1.5;x.beginPath();x.moveTo(-br,0);x.lineTo(br,0);x.moveTo(0,-br);x.lineTo(0,br);x.stroke();x.fillStyle=col.ball;x.beginPath();x.arc(br*.72,0,3.5,0,7);x.fill();x.restore();
+  // CM -> ball line and contact normal
+  x.strokeStyle=col.mute;x.setLineDash([5,4]);x.lineWidth=1.2;x.beginPath();x.moveTo(cm[0],cm[1]);x.lineTo(bp[0],bp[1]);x.stroke();x.setLineDash([]);
+  if(f.contact||frame<=RUN.out.lastTick+1){const n=RUN.nW;const cpw=T(RUN.contactPoint);if(frame===0||f.contact){arrow(x,cpw,[cpw[0]+n[0]*70*sc*1.6,cpw[1]-n[1]*70*sc*1.6],col.nrm,2.5)}}
+  // extra impulse arrow (hold last hit)
+  let hit=null;for(let i=Math.min(frame,RUN.frames.length-1);i>=0;i--){if(RUN.frames[i].hit){hit=RUN.frames[i].hit;break}}
+  if(hit){const L=Math.max(40,hit.mag*.3)*sc;arrow(x,bp,[bp[0]+hit.dir[0]*L,bp[1]-hit.dir[1]*L],col.xtra,3)}
+  // ball velocity
+  const sp=Math.hypot(f.ball.vx,f.ball.vz);if(sp>20){arrow(x,bp,[bp[0]+f.ball.vx*.18*sc,bp[1]-f.ball.vz*.18*sc],col.ball,3,[2,3])}
+  // scale bar + HUD
+  const sb=T([x0+10,z0+10]);x.strokeStyle=col.ink;x.lineWidth=2;x.beginPath();x.moveTo(12,h-16);x.lineTo(12+100*sc,h-16);x.stroke();x.fillStyle=col.ink;x.font='11px '+cssv('--f-mono');x.fillText('100 uu',16+100*sc,h-12);
+  x.textAlign='right';x.fillText(`t ${(f.t*1000).toFixed(0)} ms   ball ${fmt(sp)} uu/s   spin ${fmt(f.ball.w,1)} rad/s   car ω ${fmt(f.car.w,1)} rad/s`,w-12,h-12);x.textAlign='left';
+  $('tNow').textContent=`${(f.t*1000).toFixed(0)} ms · tick ${Math.round(f.t*120)}`;
+  $('scrub').value=frame;
+}
+function ballAngle(k){let a=0;for(let i=1;i<=k&&i<RUN.frames.length;i++)a+=RUN.frames[i].ball.w*RS.dt;return a}
+function tick(ts){
+  if(!playing)return; if(!lastTs)lastTs=ts; const rate=+$('rate').value; acc+=(ts-lastTs)/1000*rate; lastTs=ts;
+  while(acc>=RS.dt){acc-=RS.dt;frame++} 
+  if(frame>=RUN.frames.length-1){frame=RUN.frames.length-1;playing=false;$('play').textContent='Play'}
+  drawScene(); if(playing)requestAnimationFrame(tick);
+}
+
+// ---------- results ----------
+function renderResults(){
+  const o=RUN.out,a=RUN.acc;
+  const items=[
+    ['Ball speed',fmt(o.speed)+' uu/s',`vx ${fmt(o.vx)} · vz ${fmt(o.vz)}`],
+    ['Launch angle',fmt(o.angle)+'°','above horizontal, +X side is 0°'],
+    ['Ball spin',fmt(o.spin,2)+' rad/s',Math.abs(o.spin)>=5.95?'at the 6.0 rad/s cap':(o.spin>0?'counter-clockwise':o.spin<0?'clockwise':'none')],
+    ['Contact',o.ticks+' ticks',`${fmt(o.ticks*1000/120)} ms of touching`],
+    ['Dodge kick',(RUN.linDv>=0?'+':'')+fmt(RUN.linDv)+' uu/s','car horizontal ΔV (X)']
+  ];
+  $('tiles').innerHTML=items.map(([k,v,s])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+  const rows=[['Normal impulse','nrm',a.N],['Friction impulse','fric',a.F],['Extra impulse','xtra',a.E]];
+  $('budgetT').innerHTML='<tr><th>Source</th><th>Δvx</th><th>Δvz</th><th>|Δv|</th></tr>'+rows.map(([n,c,v])=>`<tr><td><span class="sw" style="background:var(--${c})"></span>${n}</td><td class="m">${fmt(v[0])}</td><td class="m">${fmt(v[1])}</td><td class="m">${fmt(Math.hypot(v[0],v[1]))}</td></tr>`).join('')+`<tr class="cur"><td>Total</td><td class="m">${fmt(o.vx)}</td><td class="m">${fmt(o.vz)}</td><td class="m">${fmt(o.speed)}</td></tr>`;
+  const variants=[['All mechanisms on',{torque:true,lin:true,extra:true}],['Spin torque off',{torque:false,lin:true,extra:true}],['Spin only, no horizontal kick',{torque:true,lin:false,extra:true}],['No extra impulse',{torque:true,lin:true,extra:false}],['Spin only, no kick, no extra impulse',{torque:true,lin:false,extra:false}]];
+  $('cmp').innerHTML='<tr><th>Variant</th><th>Speed</th><th>Angle</th><th>Spin</th><th>Ticks</th></tr>'+variants.map(([n,v])=>{const r=simulate(P(),v).out;const cur=v.torque===S.torque&&v.lin===S.lin&&v.extra===S.extra;return `<tr class="${cur?'cur':''}"><td>${n}</td><td class="m">${fmt(r.speed)}</td><td class="m">${r.speed<20?'–':fmt(r.angle)+'°'}</td><td class="m">${fmt(r.spin,2)}</td><td class="m">${r.ticks}</td></tr>`}).join('');
+  const Lc=RS.IC*RS.wMaxCar,Lb=Math.abs(RS.IB*o.spin);
+  $('Lnote').textContent=`Angular momentum: the car's flip carries I·ω = ${fmt(Lc/1000)}k (uu²·kg·rad/s) at the 5.5 rad/s cap. The ball leaves with ${fmt(Lb/1000)}k as spin, ${fmt(100*Lb/Lc)}% of that. The motor holds the car near 5.5 rad/s through the contact, so the car acts as a near-unlimited source and the limit is how long the two stay touching.`;
+}
+
+// ---------- velocity build-up diagram ----------
+function drawBudget(){
+  if(!RUN)return; const {x,w,h}=fitCanvas($('budget'));
+  const col={grid:cssv('--grid'),ink:cssv('--ink'),mute:cssv('--mute'),nrm:cssv('--nrm'),fric:cssv('--fric'),xtra:cssv('--xtra')};
+  x.clearRect(0,0,w,h);const a=RUN.acc,o=RUN.out;
+  const pts=[[0,0]];[a.N,a.F,a.E].forEach(v=>{const p=pts[pts.length-1];pts.push([p[0]+v[0],p[1]+v[1]])});
+  const pad=34;
+  const ox=(Math.min(...pts.map(p=>p[0]))+Math.max(...pts.map(p=>p[0])))/2, oz=(Math.min(...pts.map(p=>p[1]))+Math.max(...pts.map(p=>p[1])))/2;
+  const sc2=Math.min((w-2*pad)/Math.max(60,Math.max(...pts.map(p=>p[0]))-Math.min(...pts.map(p=>p[0]))),(h-2*pad)/Math.max(60,Math.max(...pts.map(p=>p[1]))-Math.min(...pts.map(p=>p[1]))));
+  const TT=p=>[w/2+(p[0]-ox)*sc2,h/2-(p[1]-oz)*sc2];
+  x.strokeStyle=col.grid;x.lineWidth=1;const og=TT([0,0]);x.beginPath();x.moveTo(0,og[1]);x.lineTo(w,og[1]);x.moveTo(og[0],0);x.lineTo(og[0],h);x.stroke();
+  x.fillStyle=col.mute;x.font='11px '+cssv('--f-mono');x.fillText('+X →',w-44,og[1]-6);x.fillText('↑ +Z',og[0]+6,14);
+  const cols=[col.nrm,col.fric,col.xtra];
+  for(let i=0;i<3;i++)arrow(x,TT(pts[i]),TT(pts[i+1]),cols[i],3);
+  x.fillStyle=col.ink;x.beginPath();x.arc(og[0],og[1],3.5,0,7);x.fill();
+  const e=TT(pts[3]);x.strokeStyle=col.ink;x.lineWidth=1.5;x.setLineDash([4,3]);x.beginPath();x.moveTo(og[0],og[1]);x.lineTo(e[0],e[1]);x.stroke();x.setLineDash([]);
+  x.fillStyle=col.ink;x.font='600 12px '+cssv('--f-mono');x.textAlign=e[0]>w-90?'right':'left';x.fillText(fmt(o.speed)+' uu/s',e[0]+(e[0]>w-90?-8:8),e[1]-8);x.textAlign='left';
+  x.fillStyle=col.mute;x.font='11px '+cssv('--f-mono');x.fillText('arrows chain head to tail: normal, friction, extra',10,h-10);
+}
+
+// ---------- sweeps ----------
+const SER=[['All mechanisms on',{torque:true,lin:true,extra:true},'--car',[]],['Spin torque off',{torque:false,lin:true,extra:true},'--mute',[5,4]],['No extra impulse',{torque:true,lin:true,extra:false},'--xtra',[2,3]]];
+function metricVal(r){const o=r.out;return S.metric==='speed'?o.speed:S.metric==='angle'?(o.speed<20?NaN:o.angle):o.spin}
+function drawChart(id,xs,key,cur,xlabel){
+  const {x,w,h}=fitCanvas($(id));const col={grid:cssv('--grid'),ink:cssv('--ink'),mute:cssv('--mute'),line:cssv('--line')};
+  x.clearRect(0,0,w,h);
+  const data=SER.map(([n,v])=>xs.map(xv=>metricVal(simulate(Object.assign(P(),{[key]:xv}),v))));
+  let lo=Infinity,hi=-Infinity;data.forEach(s=>s.forEach(v=>{if(!isNaN(v)){lo=Math.min(lo,v);hi=Math.max(hi,v)}}));
+  if(S.metric==='speed')lo=0; if(S.metric==='spin'){lo=Math.min(lo,-1);hi=Math.max(hi,1)} if(!isFinite(lo)){lo=0;hi=1}
+  const rg=hi-lo||1;const st=niceStep(rg/4);lo=Math.floor(lo/st)*st;hi=Math.ceil(hi/st)*st;
+  const L=48,R=12,Tp=12,Bt=34,X=v=>L+(v-xs[0])/(xs[xs.length-1]-xs[0])*(w-L-R),Y=v=>Tp+(1-(v-lo)/(hi-lo))*(h-Tp-Bt);
+  x.font='11px '+cssv('--f-mono');x.fillStyle=col.mute;x.strokeStyle=col.grid;x.lineWidth=1;
+  for(let v=lo;v<=hi+1e-9;v+=st){const y=Y(v);x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();x.textAlign='right';x.fillText(String(+v.toFixed(2)),L-6,y+4)}
+  const xt=niceStep((xs[xs.length-1]-xs[0])/6);x.textAlign='center';for(let v=Math.ceil(xs[0]/xt)*xt;v<=xs[xs.length-1]+1e-9;v+=xt){x.fillText(String(Math.round(v)),X(v),h-Bt+16)}
+  x.fillText(xlabel,(L+w-R)/2,h-6);
+  x.strokeStyle=col.mute;x.lineWidth=1.2;x.beginPath();x.moveTo(X(cur),Tp);x.lineTo(X(cur),h-Bt);x.stroke();
+  data.forEach((s,i)=>{x.strokeStyle=cssv(SER[i][2]);x.lineWidth=i===0?2.5:1.8;x.setLineDash(SER[i][3]);x.beginPath();let pen=false;s.forEach((v,j)=>{if(isNaN(v)){pen=false;return}const px=X(xs[j]),py=Y(v);pen?x.lineTo(px,py):x.moveTo(px,py);pen=true});x.stroke();x.setLineDash([])});
+  x.textAlign='left';
+}
+function niceStep(r){const p=Math.pow(10,Math.floor(Math.log10(r))),f=r/p;return (f<1.5?1:f<3.5?2:f<7.5?5:10)*p}
+function drawCharts(){
+  if(!RUN)return;
+  const A=[];for(let t=-90;t<=90;t+=5)A.push(t);
+  const F=FACES[S.face],Bd=[];const nS=30;for(let i=0;i<=nS;i++)Bd.push(Math.round(F.lo+(F.hi-F.lo)*i/nS));
+  drawChart('chA',A,'tilt',S.tilt,'ball direction from CM (degrees from straight up)');
+  drawChart('chB',Bd,'d',S.d,'contact offset (uu)');
+  const unit=S.metric==='speed'?'uu/s':S.metric==='angle'?'degrees':'rad/s';
+  $('chLegend').innerHTML=`<span>Y axis: ${S.metric==='speed'?'ball speed':S.metric==='angle'?'launch angle':'ball spin'} (${unit}). Vertical line marks the current setting. Gaps in the angle plot mean the ball barely moved.</span>`+SER.map(s=>`<span><i style="border-color:var(${s[2]});border-top-style:${s[3].length?'dashed':'solid'}"></i>${s[0]}</span>`).join('');
+}
+setup(); update(true);
+</script>
