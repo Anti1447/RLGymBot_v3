@@ -80,8 +80,13 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
   <section class="top">
     <div class="panel ctrl" aria-label="Controls">
       <div class="presets" id="presets"><span class="lab">Presets</span></div>
-      <div class="field"><span class="lab">Contact face</span>
+      <div class="field"><span class="lab">Place the ball by</span>
+        <div class="seg" id="place"><button type="button" data-v="face" aria-pressed="true">Car face</button><button type="button" data-v="ball" aria-pressed="false">Point on ball</button></div></div>
+      <div class="field" id="faceField"><span class="lab">Contact face</span>
         <select id="face"></select></div>
+      <div class="field" id="ballField" hidden><div class="row"><label for="ballPt">Point on the ball that is hit</label><span class="val" id="ballPtV"></span></div>
+        <input id="ballPt" type="range" min="-180" max="180" step="1" value="-45">
+        <small class="src">Degrees from the bottom of the ball: 0° bottom, +90° the side toward travel, ±180° top, −90° the rear. The part of the car that touches follows from the car's angle: a flat face only when the angles line up, otherwise a corner.</small></div>
       <div class="field"><div class="row"><label for="nose">Car nose angle at flip start</label><span class="val" id="noseV"></span></div>
         <input id="nose" type="range" min="-180" max="180" step="1" value="135">
         <small class="src">Full circle, counter-clockwise from the travel direction. 0° is level toward travel, 90° is nose straight up, ±180° is upside down facing back. The car rotates during the dodge, so its angle at contact is different (shown in the results). <span id="noseNote"></span></small></div>
@@ -157,6 +162,7 @@ ul.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;m
       <div><div class="lab" style="margin-bottom:6px">Versus nose angle at flip start</div><canvas id="chA" class="chart"></canvas></div>
       <div><div class="lab" style="margin-bottom:6px">Versus contact offset along face</div><canvas id="chB" class="chart"></canvas></div>
       <div><div class="lab" style="margin-bottom:6px">Versus gap when the flip starts</div><canvas id="chC" class="chart"></canvas></div>
+      <div><div class="lab" style="margin-bottom:6px">Versus point on the ball (0° = bottom)</div><canvas id="chD" class="chart"></canvas></div>
     </div>
     <div class="legend" style="margin-top:10px" id="chLegend"></div>
   </section>
@@ -227,7 +233,19 @@ function simulate(p, o) {
   if (p.nose != null) { psi = p.nose * Math.PI / 180; nW = rot(F.n, psi); }
   else { const a = p.tilt * Math.PI / 180; nW = [Math.sin(a), Math.cos(a)]; psi = Math.atan2(nW[1], nW[0]) - Math.atan2(F.n[1], F.n[0]); }
   const d = clamp(p.d, F.lo, F.hi);
-  const pl = F.n[1] !== 0 ? [d, F.n[1] < 0 ? RS.box.z0 : RS.box.z1] : [F.n[0] > 0 ? RS.box.x1 : RS.box.x0, d];
+  let pl = F.n[1] !== 0 ? [d, F.n[1] < 0 ? RS.box.z0 : RS.box.z1] : [F.n[0] > 0 ? RS.box.x1 : RS.box.x0, d];
+  let flat = true, part = p.face + ' face, ' + Math.round(d) + ' uu ' + (F.n[1] !== 0 ? 'along the car' : 'above CM');
+  if (p.ballPt != null) {
+    // Point on the ball that is struck, degrees from the bottom of the ball (+ toward the travel side).
+    // It fixes the contact normal; the car touches with the support point of its box in that direction:
+    // a flat face (slid to offset d) only when the normal matches a face, otherwise a corner.
+    const b = p.ballPt * Math.PI / 180;
+    nW = [-Math.sin(b), Math.cos(b)];
+    const nl = rot(nW, -psi), fx = Math.abs(nl[0]) < 1e-9, fz = Math.abs(nl[1]) < 1e-9;
+    pl = [fx ? clamp(p.d || 0, RS.box.x0, RS.box.x1) : (nl[0] > 0 ? RS.box.x1 : RS.box.x0), fz ? clamp(p.d || 0, RS.box.z0, RS.box.z1) : (nl[1] > 0 ? RS.box.z1 : RS.box.z0)];
+    flat = fx || fz;
+    part = fx ? (nl[1] > 0 ? 'roof' : 'underside') + ' face, ' + Math.round(pl[0]) + ' uu along the car' : fz ? (nl[0] > 0 ? 'nose' : 'tail') + ' face, ' + Math.round(pl[1]) + ' uu above CM' : (nl[0] > 0 ? 'nose' : 'tail') + ' ' + (nl[1] > 0 ? 'roof' : 'underside') + ' corner';
+  }
   const pw = rot(pl, psi);
   const car = { x: 0, z: 0, ang: psi, vx: nW[0] * (p.closing || 0), vz: nW[1] * (p.closing || 0), w: p.w0 || 0 };
   const gapD = RS.R + 0.05 + (p.gap || 0);
@@ -328,17 +346,18 @@ function simulate(p, o) {
   }
   const speed = len([ball.vx, ball.vz]);
   return {
-    frames, acc, psi, linDv, kick, noseAtContact: first < 0 ? NaN : frames[first].car.ang, nW, contactPoint: pw,
+    frames, acc, psi, linDv, kick, contactLocal: pl, flat, part, ballPt: Math.atan2(-nW[0], nW[1]) * 180 / Math.PI, noseAtContact: first < 0 ? NaN : frames[first].car.ang, nW, contactPoint: pw,
     out: { tc: first < 0 ? NaN : first * RS.dt * 1000, wc: first < 1 ? NaN : frames[first - 1].car.w, vx: ball.vx, vz: ball.vz, speed, angle: Math.atan2(ball.vz, ball.vx) * 180 / Math.PI, spin: ball.w, ticks: acc.contactTicks, firstTick: first, lastTick: last }
   };
 }
 const $=id=>document.getElementById(id);
-const S={face:'underside',nose:135,d:0,dir:-1,closing:0,gap:0,vh:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
+const S={place:'face',ballPt:-45,face:'underside',nose:135,d:0,dir:-1,closing:0,gap:0,vh:0,w0:0,mu:2,torque:true,lin:true,extra:true,metric:'speed'};
 let RUN=null, frame=0, playing=false, lastTs=0, acc=0;
 const wrapDeg=r=>Math.round(((r*180/Math.PI+540)%360)-180);
+const ballName=b=>['bottom','bottom-front','front','top-front','top','top-back','back','bottom-back'][((Math.round(b/45)%8)+8)%8]+' of the ball (front = travel side)';
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt=(x,n=0)=>(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n);
-const P=()=>({face:S.face,nose:S.nose,d:S.d,dir:S.dir,closing:S.closing,gap:S.gap,vh:S.vh,w0:S.w0,mu:S.mu});
+const P=()=>({ballPt:S.place==='ball'?S.ballPt:undefined,face:S.face,nose:S.nose,d:S.d,dir:S.dir,closing:S.closing,gap:S.gap,vh:S.vh,w0:S.w0,mu:S.mu});
 const O=()=>({torque:S.torque,lin:S.lin,extra:S.extra,T:0.9});
 
 function setup(){
@@ -349,12 +368,14 @@ function setup(){
     ['Musty orientation, contact near the nose',{face:'underside',nose:135,d:60,dir:-1}],
     ['Musty orientation, contact near the tail',{face:'underside',nose:135,d:-40,dir:-1}],
     ['Nose −135° front flip, held against the ball',{face:'underside',nose:-135,d:74,dir:1}],
-    ['Roof contact, back flip, ball ahead and below',{face:'roof',nose:-135,d:-40,dir:-1,vh:1000}]
+    ['Roof contact, back flip, ball ahead and below',{face:'roof',nose:-135,d:-40,dir:-1,vh:1000}],
+    ['Hit the ball bottom (0°) at nose 135°, back flip',{ballPt:0,face:'underside',nose:135,d:0,dir:-1}]
   ];
-  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.closing=v.closing||0;S.gap=v.gap||0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
-  ['nose','d','closing','gap','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
+  presets.forEach(([n,v])=>{const b=document.createElement('button');b.type='button';b.textContent=n;b.onclick=()=>{Object.assign(S,v);S.place=v.ballPt!=null?'ball':'face';S.closing=v.closing||0;S.gap=v.gap||0;S.vh=v.vh||0;S.w0=0;syncUI();update(true)};$('presets').appendChild(b)});
+  ['nose','ballPt','d','closing','gap','vh','w0','mu'].forEach(k=>$(k).addEventListener('input',()=>{S[k]=+$(k).value;update(true)}));
   $('face').addEventListener('change',()=>{S.face=$('face').value;S.d=Math.max(FACES[S.face].lo,Math.min(FACES[S.face].hi,0));syncUI();update(true)});
   [['tgT','torque'],['tgL','lin'],['tgE','extra']].forEach(([i,k])=>$(i).addEventListener('change',()=>{S[k]=$(i).checked;update(true)}));
+  $('place').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.place=b.dataset.v;syncUI();update(true)});
   $('dir').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.dir=+b.dataset.v;syncUI();update(true)});
   $('metric').querySelectorAll('button').forEach(b=>b.onclick=()=>{S.metric=b.dataset.v;syncUI();drawCharts()});
   $('play').onclick=()=>{playing=!playing; if(playing&&frame>=RUN.frames.length-1)frame=0; $('play').textContent=playing?'Pause':'Play'; lastTs=0; if(playing)requestAnimationFrame(tick)};
@@ -366,9 +387,10 @@ function setup(){
 }
 function syncUI(){
   const F=FACES[S.face];
+  $('place').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.place)));$('faceField').hidden=S.place==='ball';$('ballField').hidden=S.place!=='ball';$('ballPt').value=S.ballPt;$('ballPtV').textContent=S.ballPt+'°';
   $('face').value=S.face; $('nose').value=S.nose;$('noseV').textContent=S.nose+'°'; $('closing').value=S.closing;$('w0').value=S.w0;$('vh').value=S.vh;$('gap').value=S.gap;$('gapV').textContent=S.gap+' uu';$('gapNote').textContent=S.closing>0?(S.gap>0?'About '+Math.round(S.gap/S.closing*1000)+' ms of approach before the ball would be touched at this closing speed, so the flip starts that long before contact.':'Raise the gap to start the flip before the ball is touched.'):'Needs a closing speed above 0 so the car reaches the ball after the flip starts.';$('vhV').textContent=S.vh+' uu/s';$('w0V').textContent=(+S.w0).toFixed(1)+' rad/s'; $('mu').value=S.mu;
   const d=$('d'); d.min=Math.ceil(F.lo); d.max=Math.floor(F.hi); S.d=Math.max(+d.min,Math.min(+d.max,S.d)); d.value=S.d;
-  $('dLab').textContent=F.n[1]!==0?'Contact offset along face (x)':'Contact offset along face (z)';
+  $('dLab').textContent=S.place==='ball'?'Slide along a flat contact face':F.n[1]!==0?'Contact offset along face (x)':'Contact offset along face (z)';
   $('dNote').textContent=S.face==='underside'||S.face==='roof'?'0 puts the car\'s center of mass on the line through the ball\'s center. Positive is toward the nose.':'Height of the contact point above the center of mass. The nose and tail faces start 1.4 uu above it, so the line through the center of mass just misses the face.';
   $('dV').textContent=S.d+' uu'; $('closingV').textContent=S.closing+' uu/s'; $('muV').textContent=(+S.mu).toFixed(1);
   $('dir').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.v===S.dir)));
@@ -423,7 +445,7 @@ function drawScene(){
   x.save();x.translate(bp[0],bp[1]);x.rotate(-f.ball.w*0+ -ballAngle(frame));x.lineWidth=1.5;x.beginPath();x.moveTo(-br,0);x.lineTo(br,0);x.moveTo(0,-br);x.lineTo(0,br);x.stroke();x.fillStyle=col.ball;x.beginPath();x.arc(br*.72,0,3.5,0,7);x.fill();x.restore();
   // CM -> ball line and contact normal
   x.strokeStyle=col.mute;x.setLineDash([5,4]);x.lineWidth=1.2;x.beginPath();x.moveTo(cm[0],cm[1]);x.lineTo(bp[0],bp[1]);x.stroke();x.setLineDash([]);
-  if(f.contact||frame<=RUN.out.lastTick+1){const n=RUN.nW;const cpw=T(RUN.contactPoint);if(frame===0||f.contact){arrow(x,cpw,[cpw[0]+n[0]*70*sc*1.6,cpw[1]-n[1]*70*sc*1.6],col.nrm,2.5)}}
+  if(f.contact||frame<=RUN.out.lastTick+1){const n=RUN.nW;const cpw=T(RUN.contactPoint);if(frame===0||f.contact){arrow(x,cpw,[cpw[0]+n[0]*70*sc*1.6,cpw[1]-n[1]*70*sc*1.6],col.nrm,2.5);const bpt=[bp[0]-n[0]*br,bp[1]+n[1]*br];x.fillStyle=col.nrm;x.beginPath();x.arc(bpt[0],bpt[1],5,0,7);x.fill();x.strokeStyle=col.bg;x.lineWidth=1.5;x.stroke()}}
   // extra impulse arrow (hold last hit)
   let hit=null;for(let i=Math.min(frame,RUN.frames.length-1);i>=0;i--){if(RUN.frames[i].hit){hit=RUN.frames[i].hit;break}}
   if(hit){const L=Math.max(40,hit.mag*.3)*sc;arrow(x,bp,[bp[0]+hit.dir[0]*L,bp[1]-hit.dir[1]*L],col.xtra,3)}
@@ -454,6 +476,8 @@ function renderResults(){
     ['Contact',o.ticks+' ticks',`${fmt(o.ticks*1000/120)} ms of touching`],
     ['Dodge kick',(RUN.linDv>=0?'+':'')+fmt(RUN.linDv)+' uu/s',RUN.kick?(RUN.kick.back?'backward-dodge scaling':'forward-dodge scaling')+', along +X':'kick switched off'],
     ['Nose at flip start',wrapDeg(RUN.psi)+'°',Math.abs(wrapDeg(RUN.psi))>90?'past ±90°: back flip kicks forward':'within ±90°: back flip kicks backward'],
+    ['Point on ball hit',wrapDeg(RUN.ballPt*Math.PI/180)+'°',ballName(RUN.ballPt)],
+    ['Car part touching',RUN.flat?'flat face':'corner',RUN.part],
     ['Nose at contact',isNaN(RUN.noseAtContact)?'none':wrapDeg(RUN.noseAtContact)+'°',isNaN(RUN.noseAtContact)?'ball never touched':'turned '+fmt(wrapDeg(RUN.noseAtContact-RUN.psi))+'° since the flip started']
   ];
   $('tiles').innerHTML=items.map(([k,v,s])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
@@ -512,6 +536,8 @@ function drawCharts(){
   const F=FACES[S.face],Bd=[];const nS=30;for(let i=0;i<=nS;i++)Bd.push(Math.round(F.lo+(F.hi-F.lo)*i/nS));
   drawChart('chA',A,'nose',S.nose,'car nose angle at flip start (degrees)');
   drawChart('chB',Bd,'d',S.d,'contact offset (uu)');
+  const BP=[];for(let b=-180;b<=180;b+=5)BP.push(b);
+  drawChart('chD',BP,'ballPt',RUN.ballPt,'point on the ball (degrees from its bottom)');
   const G=[];for(let g=0;g<=300;g+=10)G.push(g);
   drawChart('chC',G,'gap',S.gap,'gap when the flip starts (uu); lead ≈ gap ÷ closing speed');
   const unit=S.metric==='speed'?'uu/s':S.metric==='angle'?'degrees':S.metric==='tc'?'ms after the flip starts':'rad/s';
